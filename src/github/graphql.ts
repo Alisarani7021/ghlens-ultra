@@ -45,12 +45,11 @@ export class GithubGraphQL {
 
   /** ── The deep scout query (12 specialist tabs in one request) ───────────── */
   deepScout(owner: string, name: string) {
-    return this.query<ScoutResult>(
-      SCOUT_QUERY,
-      { owner, name },
-      `scout:${owner}/${name}`,
-      600,
-    );
+    return this.query<ScoutResult>(SCOUT_QUERY, { owner, name }, `scout:${owner}/${name}`, 600)
+      .then((data) => {
+        schemaGuard(data);
+        return data;
+      });
   }
 
   /** Batch metadata for up to 100 repos in a single GraphQL call (cards/lists). */
@@ -74,7 +73,7 @@ export class GithubGraphQL {
 const CARD_FRAGMENT = `
 fragment Card on Repository {
   nameWithOwner description homepageUrl url
-  stargazerCount forkCount watcherCount
+  stargazerCount forkCount watchers { totalCount }
   isArchived isFork isTemplate
   diskUsage pushedAt createdAt updatedAt
   primaryLanguage { name color }
@@ -86,10 +85,28 @@ fragment Card on Repository {
   defaultBranchRef { name target { ... on Commit { committedDate history(first: 0) { totalCount } } } }
 }`;
 
+// Do NOT spread the Card fragment inside SCOUT_QUERY: GraphQL rejects two
+// selections of the same field with different arguments (repositoryTopics,
+// releases, issues, pullRequests…) unless they are aliased. Spreading it made
+// the whole query fail, which surfaced to users as "repository not found" for
+// every single repo. The meta fields the fragment provided are listed inline.
 const SCOUT_QUERY = `
 query Scout($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
-    ...Card
+    nameWithOwner
+    description
+    url
+    stargazerCount
+    forkCount
+    watchers { totalCount }
+    isArchived
+    isFork
+    isTemplate
+    diskUsage
+    pushedAt
+    createdAt
+    updatedAt
+    primaryLanguage { name color }
     shortDescriptionHTML(limit: 240)
     descriptionHTML
     homepageUrl
@@ -142,10 +159,8 @@ query Scout($owner: String!, $name: String!) {
     commitHistory: defaultBranchRef { target { ... on Commit { history(first: 25) { totalCount nodes { oid messageHeadline committedDate author { name user { login avatarUrl } } additions deletions url } } } } }
     contributors: mentionableUsers(first: 1) { totalCount }
     contributorList: defaultBranchRef { target { ... on Commit { history(first: 100) { nodes { author { name user { login avatarUrl } } } } } } }
-    communityProfile: communityProfile {
-      healthPercentage
-      hasReadme hasLicense hasContributing hasCodeOfConduct hasIssueTemplate hasPullRequestTemplate hasDescription
-      updatedAt
+    githubDotDir: object(expression: "HEAD:.github") {
+      ... on Tree { entries { name type } }
     }
     securityAdvisories: vulnerabilityAlerts(first: 10) {
       totalCount
@@ -161,7 +176,6 @@ query Scout($owner: String!, $name: String!) {
     watchers { totalCount }
   }
 }
-${CARD_FRAGMENT}
 `;
 
 export interface ScoutResult {
@@ -276,3 +290,45 @@ export function toRepoMeta(scout: any): RepoMeta {
 
 // local import to avoid circular deps at module top-level
 import { healthScore } from "./rest";
+
+
+/**
+ * GitHub removed `Repository.communityProfile` (and `watcherCount`) from the
+ * GraphQL schema, so the deep scout derives an equivalent community profile
+ * from data it already asks for: the file tree, the license, the code of
+ * conduct, the description and whether a .github folder exists.
+ *
+ * It also reports a `schemaNotes` array whenever a field we relied on was not
+ * served, so a future schema change is visible instead of silent.
+ */
+export function schemaGuard(data: any): void {
+  const r = data?.repository;
+  if (!r) return;
+  const notes: string[] = [];
+  const names: string[] = [
+    ...(r.rootFiles?.entries ?? []).map((e: any) => String(e?.name ?? "").toLowerCase()),
+    ...(r.githubDotDir?.entries ?? []).map((e: any) => `.github/${String(e?.name ?? "").toLowerCase()}`),
+  ];
+  const has = (re: RegExp) => names.some((n) => re.test(n));
+  if (!r.communityProfile) {
+    const hasReadme = has(/^readme/);
+    const hasLicense = !!r.licenseInfo?.spdxId || has(/^licen[cs]e/);
+    const hasContributing = has(/^contributing|^docs\/contributing/);
+    const hasCodeOfConduct = !!r.codeOfConduct || has(/^code_of_conduct/);
+    const hasTemplates = names.some((n) => n.startsWith(".github/"));
+    const hasDescription = !!r.description;
+    const parts = [hasReadme, hasLicense, hasContributing, hasCodeOfConduct, hasTemplates, hasDescription];
+    r.communityProfile = {
+      derived: true,
+      healthPercentage: Math.round((parts.filter(Boolean).length / parts.length) * 100),
+      hasReadme, hasLicense, hasContributing, hasCodeOfConduct,
+      hasIssueTemplate: hasTemplates, hasPullRequestTemplate: hasTemplates, hasDescription,
+      updatedAt: r.updatedAt ?? new Date().toISOString(),
+    };
+    notes.push("communityProfile: derived from the file tree (field removed from the GitHub schema)");
+  }
+  if (r.watchers?.totalCount != null && r.watcherCount == null) {
+    r.watcherCount = r.watchers.totalCount;   // keep the old readers working
+  }
+  if (notes.length) (data as any).schemaNotes = notes;
+}

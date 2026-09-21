@@ -20,6 +20,8 @@ export interface H {
   chatId: number;
   msgId?: number;
   cbId?: string;
+  /** the user's own GitHub token, when they linked an account */
+  userToken?: string;
   args: string[];
   text: string;
   msg?: Message;

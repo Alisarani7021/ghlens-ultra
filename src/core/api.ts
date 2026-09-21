@@ -28,6 +28,16 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
   try {
     switch (url.pathname) {
       case "/api/miniapp": return json(await miniapp(url, env, store), 200, cors);
+      case "/api/gems": return json(await gemsFor(env, store), 200, cors);
+      case "/api/me": {
+        // Telegram WebApp initData is trusted only when its HMAC validates
+        const uid = await userIdFromInitData(env, url, request);
+        if (!uid) return json({ linked: false, reason: "no telegram identity" }, 200, cors);
+        const row = await env.DB.prepare(
+          `SELECT github_login, github_token_at FROM users WHERE id=?`,
+        ).bind(uid).first<{ github_login: string | null; github_token_at: number | null }>().catch(() => null);
+        return json({ linked: !!row?.github_login, login: row?.github_login ?? null, linked_at: row?.github_token_at ?? null }, 200, cors);
+      }
       case "/api/repo": {
         const full = url.searchParams.get("full") ?? "";
         if (!/^[\w.-]+\/[\w.-]+$/.test(full)) return json({ error: "bad repo" }, 400, cors);
@@ -71,20 +81,30 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
   }
 }
 
+/**
+ * Mini-app data.
+ *
+ * Board periods are served with a graceful fallback: the 15-minute cron writes
+ * snapshots for the daily board only, so weekly/monthly growth is computed from
+ * whatever snapshots exist and, while the account is young, filled from the
+ * all-time board with an explicit note — the app never shows an empty feed for
+ * a period just because the cron has not matured yet.
+ */
 async function miniapp(url: URL, env: Env, store: Store) {
   const kind = url.searchParams.get("kind") ?? "trending";
+  const period = (url.searchParams.get("period") ?? "daily") as "daily" | "weekly" | "monthly" | "all";
   const q = url.searchParams.get("q") ?? "";
+
+  if (kind === "trending" || period !== "daily") {
+    const board = await boardFor(env, store, period);
+    return board;
+  }
   switch (kind) {
     case "search": {
       const res = await new GithubRest(env).searchRepos(q || "stars:>5000", "stars", "desc", 15).catch(() => null);
       return { items: (res?.items ?? []).map(fromGh) };
     }
-    case "weekly": {
-      const rows = await store.board("weekly", "all", 15);
-      if (rows.length) return { items: rows.map(fromBoard) };
-      const eng = new TrendingEngine(env);
-      return { items: (await eng.rank("weekly", "all", 15).catch(() => [])).map(fromBoard) };
-    }
+    case "weekly": return boardFor(env, store, "weekly");
     case "gems": {
       const res = await new GithubRest(env).searchRepos("stars:100..1200 pushed:>2026-06-01 archived:false", "updated", "desc", 15).catch(() => null);
       return { items: (res?.items ?? []).map((r: any) => ({ ...fromGh(r), health: healthScore({ stars: r.stargazers_count, forks: r.forks_count, open_issues: r.open_issues_count, pushed_at: r.pushed_at, created_at: r.created_at, license: r.license?.spdx_id, description: r.description, has_readme: true }) })) };
@@ -95,13 +115,69 @@ async function miniapp(url: URL, env: Env, store: Store) {
       const rows = await store.board("daily", "all", 10);
       return { items: rows.map(fromBoard), note: "sign in via the bot for your personal list" };
     }
-    default: {
-      const rows = await store.board("daily", "all", 15);
-      if (rows.length) return { items: rows.map(fromBoard) };
-      const eng = new TrendingEngine(env);
-      return { items: (await eng.rank("daily", "all", 15).catch(() => [])).map(fromBoard) };
+    default: return boardFor(env, store, "daily");
+  }
+}
+
+const PERIOD_LABEL: Record<string, string> = { daily: "۲۴ ساعت", weekly: "۷ روز", monthly: "۳۰ روز", all: "کل تاریخ" };
+const PERIOD_DAYS: Record<string, number> = { weekly: 7, monthly: 30 };
+
+/** Board for a period, with the documented fallback chain. */
+async function boardFor(env: Env, store: Store, period: "daily" | "weekly" | "monthly" | "all") {
+  const rows = await store.board(period, "all", 15).catch(() => [] as any[]);
+  if (rows.length) return { items: rows.map(fromBoard), period, source: "board" };
+
+  const eng = new TrendingEngine(env);
+
+  // weekly / monthly: compute real growth from the snapshots we have
+  if (period === "weekly" || period === "monthly") {
+    const days = PERIOD_DAYS[period];
+    const leaders = await store.growthLeaders(days, 15).catch(() => [] as any[]);
+    if (leaders.length) {
+      return {
+        items: leaders.map((l: any) => ({
+          full_name: l.full_name, description: l.description ?? "", stars: l.now ?? l.stars ?? 0,
+          forks: l.forks ?? 0, language: l.language ?? null, topics: [],
+          gained: l.gained, url: `https://github.com/${l.full_name}`,
+        })),
+        period, source: "snapshots", note: `رشد واقعی ${PERIOD_LABEL[period]} از اسنپ‌شات‌های ذخیره‌شده`,
+      };
     }
   }
+
+  // last resort for any period: rank live and label it honestly
+  const live = await eng.rank(period === "all" ? "monthly" : period, "all", 15).catch(() => [] as any[]);
+  if (live.length) {
+    const matured = period === "daily";
+    return {
+      items: live.map(fromBoard), period, source: "live",
+      note: matured ? undefined : `داده‌ی ${PERIOD_LABEL[period]} هنوز کامل نشده — این فهرست بر پایه‌ی محبوبیت کل و تازگی مرتب شده و با پر شدن اسنپ‌شات‌ها به رشد واقعی تغییر می‌کند`,
+    };
+  }
+  return { items: [], period, source: "none" };
+}
+
+/** Hidden-gem ranking: quality per star, tuned for "before it explodes". */
+async function gemsFor(env: Env, store: Store) {
+  const cached = await env.CACHE.get<{ at: number; items: any[] }>("api:gems", "json").catch(() => null);
+  if (cached && Date.now() - cached.at < 3600_000) return { items: cached.items, cached: true };
+  const gh = new GithubRest(env);
+  const res = await gh
+    .searchRepos("stars:80..1500 pushed:>2026-05-01 archived:false is:public", "updated", "desc", 30)
+    .catch(() => null);
+  const items = (res?.items ?? []).map((r: any) => {
+    const ageDays = Math.max(30, (Date.now() - Date.parse(r.created_at)) / 86400000);
+    const perDay = r.stargazers_count / ageDays;
+    const health = healthScore({
+      stars: r.stargazers_count, forks: r.forks_count, open_issues: r.open_issues_count,
+      pushed_at: r.pushed_at, created_at: r.created_at, license: r.license?.spdx_id,
+      description: r.description, has_readme: true,
+    });
+    return { ...fromGh(r), health, score: Math.round(health * 0.6 + Math.min(40, perDay * 30)) };
+  }).sort((a: any, b: any) => b.score - a.score).slice(0, 15);
+  await env.CACHE.put("api:gems", JSON.stringify({ at: Date.now(), items }), { expirationTtl: 3600 })
+    .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+  return { items, cached: false };
 }
 
 function fromGh(r: any) {
@@ -209,4 +285,36 @@ function compareCardHtml(a: any, b: any) {
 function esc(s: string) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", ...headers } });
+}
+
+
+/**
+ * Validate Telegram WebApp initData (HMAC-SHA256 of the data-check-string with
+ * a key derived from the bot token) and return the user id it belongs to.
+ */
+export async function userIdFromInitData(env: Env, url: URL, request: Request): Promise<number | null> {
+  const raw = url.searchParams.get("initData") || request.headers.get("x-telegram-init-data") || "";
+  if (!raw) return null;
+  try {
+    const params = new URLSearchParams(raw);
+    const hash = params.get("hash") ?? "";
+    if (!hash) return null;
+    params.delete("hash");
+    const dataCheck = [...params.entries()]
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join("\n");
+    const secretKey = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+    );
+    const derived = await crypto.subtle.sign("HMAC", secretKey, new TextEncoder().encode(env.BOT_TOKEN));
+    const key = await crypto.subtle.importKey("raw", derived, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(dataCheck));
+    const hex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (hex !== hash) return null;
+    const auth = JSON.parse(params.get("user") ?? "{}");
+    return Number(auth?.id) || null;
+  } catch {
+    return null;
+  }
 }

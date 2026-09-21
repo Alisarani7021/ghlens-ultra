@@ -177,6 +177,57 @@ export class BrowseFeature {
     );
   }
 
+  /**
+   * Developers board — the people behind the ecosystem.
+   * Ranks by followers inside the user's own interests when they set any, so
+   * "developers" is personal instead of a generic leaderboard.
+   */
+  async users(h: H, page = 0) {
+    const fa = h.loc === "fa";
+    await h.loading?.(fa ? "👤 در حال جمع‌آوری توسعه‌دهنده‌ها…" : "👤 collecting developers…");
+    const interests: string[] = (() => {
+      try { return JSON.parse((h.user?.interests as string) ?? "[]"); } catch { return []; }
+    })();
+    const langs = interests.filter((i) => /^(js|ts|python|go|rust|java|c|cpp|ruby|php|kotlin|swift|csharp)$/i.test(i));
+    const q = langs.length
+      ? langs.slice(0, 2).map((l) => `language:${l}`).join(" ") + " followers:>2000"
+      : "followers:>80000 type:user";
+    const res = await h.gh().searchUsers(q, page).catch(() => null);
+    const items = (res?.items ?? []) as any[];
+    if (!items.length) {
+      return h.reply(fa ? "چیزی پیدا نشد — بعداً دوباره بزن." : "nothing found.", kb([{ text: "◀️", cb: "b:menu" }]), !!h.cbId);
+    }
+    const rows = await Promise.all(items.slice(0, 8).map(async (u) => {
+      const full = await h.gh().get<any>(`/users/${u.login}`, 3600).catch(() => null);
+      return { u, full };
+    }));
+    const lines = rows.map((r, i) => {
+      const f = r.full ?? {};
+      const bits = [
+        `👥 ${fmt(f.followers ?? 0)}`,
+        f.public_repos != null ? `📦 ${fmt(f.public_repos)}` : "",
+        f.location ? `📍 ${tgEscape(String(f.location).slice(0, 24))}` : "",
+      ].filter(Boolean).join(" · ");
+      return `${i + 1}. <a href="https://github.com/${r.u.login}">${tgEscape(r.u.login)}</a>` +
+        (f.name ? ` — ${tgEscape(String(f.name).slice(0, 40))}` : "") + `\n   ${bits}` +
+        (f.bio ? `\n   <i>${tgEscape(String(f.bio).slice(0, 110))}</i>` : "");
+    });
+    return h.reply(
+      `👤 <b>${fa ? "توسعه‌دهنده‌ها" : "Developers"}</b>` +
+        (langs.length ? ` · ${fa ? "بر پایه علاقه‌مندی‌ها" : "by your interests"}: ${langs.join(", ")}` : "") +
+        `\n\n${lines.join("\n\n")}`,
+      kb(
+        [...items.slice(0, 5).map((u) => [{ text: `👤 ${u.login}`, url: `https://github.com/${u.login}` }])],
+        [
+          { text: "🎯 " + (fa ? "علاقه‌مندی‌هایم" : "My interests"), cb: "me:interests" },
+          { text: "🔁 " + (fa ? "صفحه بعد" : "Next"), cb: `b:users:${page + 1}` },
+        ],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }, { text: "🏠", cb: "m:home" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
   async orgs(h: H) {
     const fa = h.loc === "fa";
     const orgs: [string, string][] = [

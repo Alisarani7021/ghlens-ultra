@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
   first_name     TEXT,
   locale         TEXT NOT NULL DEFAULT 'fa',
   github_login   TEXT,                          -- linked GitHub account
+  github_token_enc TEXT,                        -- AES-GCM ciphertext of the user's PAT (never plaintext)
+  github_token_at  INTEGER,                     -- when it was linked
   plan           TEXT NOT NULL DEFAULT 'free',  -- free | pro | sponsor | admin
   xp             INTEGER NOT NULL DEFAULT 0,
   level          INTEGER NOT NULL DEFAULT 1,

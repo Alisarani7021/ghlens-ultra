@@ -5,6 +5,8 @@ import type { CallbackQuery, InlineQuery, Message, Update, User } from "./tg/typ
 import { tgEscape } from "./tg/types";
 import { kb } from "./tg/keyboards";
 import { Store } from "./core/db";
+import { BlobStore } from "./core/blobstore";
+import { Podcast as Podcast_ } from "./ai/podcast";
 import { AiBrain } from "./ai/brain";
 import { RepoCard } from "./features/cards";
 import type { H } from "./core/handler";
@@ -31,6 +33,7 @@ import { consumeQueue } from "./core/queue";
 import { handleApi } from "./core/api";
 import { audioBytes, describe } from "./ai/brain";
 import { podcastRoutes, podcastText } from "./features/podcast";
+import { MINI_APP_HTML } from "./web/miniapp";
 
 export { UserSession } from "./core/session";
 
@@ -83,36 +86,113 @@ export default {
         return new Response("ok");
       }
 
-      // ── self-test: runs the real update pipeline inline and reports errors ──
+      // ── self-test: runs the real update pipeline inline and reports what the
+      //    bot would send. Never touches Telegram: outgoing API calls are
+      //    captured, so this doubles as an end-to-end assertion harness. ──────
       if (url.pathname === "/selfcheck") {
         const secret = url.searchParams.get("deep");
         if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
-        const text = url.searchParams.get("text") ?? "/start";
         const uid = Number(url.searchParams.get("uid") ?? 999999);
-        const update: any = {
-          update_id: 990001,
-          message: {
-            message_id: 990001,
-            from: { id: uid, is_bot: false, first_name: "Self", language_code: "fa" },
-            chat: { id: uid, type: "private", first_name: "Self" },
-            date: Math.floor(Date.now() / 1000),
-            text,
-            entities: [{ offset: 0, length: text.length, type: "bot_command" }],
-          },
+        const text = url.searchParams.get("text") ?? "";
+        const cb = url.searchParams.get("cb");            // simulate a button press
+        const capture = url.searchParams.get("capture") !== "0";
+        const from = { id: uid, is_bot: false, first_name: "Self", language_code: "fa" } as any;
+        const chat = { id: uid, type: "private", first_name: "Self" } as any;
+        const message = {
+          message_id: 990001, from, chat, date: Math.floor(Date.now() / 1000),
+          text: text || (cb ? "" : "/start"),
+          entities: text ? [{ offset: 0, length: text.length, type: "bot_command" }] : undefined,
         };
+        const update: any = cb
+          ? { update_id: 990002, callback_query: { id: "990002", from, message: { ...message, text: undefined }, chat_instance: "1", data: cb } }
+          : { update_id: 990001, message };
+
+        const sent: any[] = [];
+        const logs: string[] = [];
+        const origFetch = globalThis.fetch;
+        const origLog = console.log, origErr = console.error;
+        if (capture) {
+          globalThis.fetch = (async (input: any, init?: any) => {
+            const u = typeof input === "string" ? input : input?.url ?? String(input);
+            if (u.includes("api.telegram.org")) {
+              const method = u.split("/").pop()!;
+              let body: any = init?.body;
+              if (typeof body === "string") { try { body = JSON.parse(body); } catch { /* keep raw */ } }
+              else if (body instanceof FormData) {
+                const o: any = {};
+                for (const [k, v] of body.entries()) o[k] = typeof v === "string" ? v.slice(0, 200) : `[file ${(v as any)?.size ?? "?"}B]`;
+                body = o;
+              }
+              sent.push({ method, body });
+              return new Response(JSON.stringify({ ok: true, result: { message_id: 1, file_id: "f" } }), { headers: { "content-type": "application/json" } });
+            }
+            return origFetch(input, init);
+          }) as any;
+          console.log = (...a: any[]) => { logs.push("log " + a.map(String).join(" ").slice(0, 300)); };
+          console.error = (...a: any[]) => { logs.push("err " + a.map(String).join(" ").slice(0, 300)); };
+        }
         const t0 = Date.now();
         try {
           await handleUpdate(update, env, ctx);
           const u = await new Store(env).user(uid);
-          return json({ ok: true, ms: Date.now() - t0, user_row: u ?? null, admin: isAdmin(env, uid), text });
+          const replies = sent.map((s) => ({
+            m: s.method,
+            text: (s.body?.text ?? s.body?.caption ?? "") as string,
+            cb_text: s.body?.text && s.method === "answerCallbackQuery" ? s.body.text : undefined,
+            kb: s.body?.reply_markup?.inline_keyboard?.length ?? 0,
+            doc: s.body?.document ?? s.body?.photo ?? undefined,
+          }));
+          return json({
+            ok: true, ms: Date.now() - t0, text, cb, admin: isAdmin(env, uid),
+            user_row: u ? { id: u.id, locale: u.locale, xp: u.xp, level: u.level } : null,
+            replies: capture ? replies : undefined,
+            logs: capture ? logs.slice(0, 40) : undefined,
+          });
         } catch (e: any) {
-          return json({ ok: false, ms: Date.now() - t0, error: String(e?.message ?? e), stack: String(e?.stack ?? "").split("\n").slice(0, 6) }, 500);
+          return json({
+            ok: false, ms: Date.now() - t0, error: String(e?.message ?? e),
+            stack: String(e?.stack ?? "").split("\n").slice(0, 5),
+            replies: capture ? sent.map((s2) => ({ m: s2.method, text: (s2.body?.text ?? "").slice(0, 120) })) : undefined,
+            logs: capture ? logs.slice(0, 15) : undefined,
+          }, 500);
+        } finally {
+          globalThis.fetch = origFetch;
+          console.log = origLog;
+          console.error = origErr;
         }
       }
 
       // ── GitHub webhook (releases, security, pushes) ────────────────────
       if (url.pathname === "/gh-webhook" && request.method === "POST") {
         return handleWebhook(request, env, ctx);
+      }
+
+      // ── GitHub OAuth callback (only reachable when the app is configured) ─
+      if (url.pathname === "/oauth/gh/callback") {
+        const code = url.searchParams.get("code") ?? "";
+        const state = url.searchParams.get("state") ?? "";
+        const uid = await verifyState(env, state);
+        if (!uid) return new Response("invalid state", { status: 400 });
+        const id = (env as any).GITHUB_OAUTH_CLIENT_ID, secret = (env as any).GITHUB_OAUTH_CLIENT_SECRET;
+        if (!id || !secret) return new Response("oauth not configured", { status: 400 });
+        const tok = await fetch("https://github.com/login/oauth/access_token", {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({ client_id: id, client_secret: secret, code }),
+        }).then((r) => r.json() as any);
+        if (!tok?.access_token) return new Response("token exchange failed", { status: 400 });
+        const me = await whoamiWithToken(tok.access_token);
+        const enc = await encryptToken(env, tok.access_token);
+        await new Store(env).upsertUser({ id: uid, is_bot: false, first_name: "" } as any);
+        await env.DB.prepare(`UPDATE users SET github_login=?, github_token_enc=?, github_token_at=? WHERE id=?`)
+          .bind(me?.login ?? null, enc, Date.now(), uid).run();
+        const tg = new Telegram(env);
+        await tg.sendMessage(uid, `✅ GitHub linked${me?.login ? ` as @${me.login}` : ""}. /profile`, { parse_mode: "HTML" });
+        return new Response(
+          `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;background:#0b1020;color:#e6edf3;text-align:center;padding:60px">` +
+            `<h2>✅ اتصال انجام شد</h2><p>به تلگرام برگرد — پیام تأیید را فرستادم.</p></body>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
       }
 
       // ── public API used by the mini-app + share cards + magic links ────
@@ -200,6 +280,64 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
   if (update.message) return routeMessage(update.message, env, ctx, tg, store, ai, card);
 }
 
+/**
+ * GitHub account linking.
+ *
+ * Two paths, so this can never dead-end in a 404 page again:
+ *  • OAuth — used when GITHUB_OAUTH_CLIENT_ID/SECRET are configured. We sign a
+ *    state value, send the user to GitHub, and finish at /oauth/gh/callback.
+ *  • Personal access token — always available. The user pastes a token (a
+ *    fine-grained one with public read access is enough), we verify it against
+ *    /user, encrypt it with AES-GCM and store only the ciphertext.
+ */
+async function githubLink(h: H) {
+  const fa = h.loc === "fa";
+  const oauthReady = !!(h.env as any).GITHUB_OAUTH_CLIENT_ID && !!(h.env as any).GITHUB_OAUTH_CLIENT_SECRET;
+  const rows: any[][] = [];
+  if (oauthReady) {
+    const state = await signState(h.env, h.u.id);
+    const url = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent((h.env as any).GITHUB_OAUTH_CLIENT_ID)}` +
+      `&redirect_uri=${encodeURIComponent(`${h.env.WORKER_URL}/oauth/gh/callback`)}` +
+      `&scope=${encodeURIComponent("read:user public_repo")}&state=${encodeURIComponent(state)}`;
+    rows.push([{ text: "🐙 " + (fa ? "اتصال با GitHub (OAuth)" : "Connect with GitHub (OAuth)"), url }]);
+  }
+  rows.push([{ text: "🔑 " + (fa ? "اتصال با توکن شخصی (همیشه کار می‌کند)" : "Connect with a personal token (always works)"), cb: "me:token" }]);
+  rows.push([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]);
+  return h.reply(
+    `🐙 <b>${fa ? "اتصال حساب گیت‌هاب" : "Connect your GitHub account"}</b>\n\n` +
+      (fa
+        ? "با اتصال حساب، مخزن‌های خصوصی‌ات را هم می‌بینی، سقف درخواست از ۶۰ به ۵٬۰۰۰ در ساعت می‌رسد و پروفایل/اشتراک‌ها به حساب خودت گره می‌خورد.\n\n" +
+          (oauthReady
+            ? "روش سریع: دکمه‌ی OAuth. روش مطمئن (بدون تنظیمات): توکن شخصی."
+            : "روش OAuth تنظیم نشده، پس از توکن شخصی استفاده کن: در گیت‌هاب برو به Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token، فقط دسترسی «Public repositories (read-only)» را بده، بساز و توکن را همین‌جا بفرست.\n\nصبر کن تا اتصال تمام شود — توکن فقط رمزنگاری‌شده ذخیره می‌شود و هر وقت خواستی با «جدا کردن» پاک می‌شود.")
+        : "Linking raises your API limit from 60 to 5000 requests/hour and unlocks private repos.\n\nSend a fine-grained token with public read access, or use the OAuth button when configured."),
+    kb(...rows),
+    !!h.cbId,
+  );
+}
+
+/** Where the user pastes the token: we just arm the wizard. */
+async function githubTokenPrompt(h: H) {
+  const fa = h.loc === "fa";
+  await h.session.set("me:token", true);
+  return h.reply(
+    `🔑 <b>${fa ? "توکن شخصی گیت‌هاب" : "GitHub personal token"}</b>\n\n` +
+      (fa
+        ? "توکن را در همین چت بفرست. نکته‌های امنیتی:\n• فقط دسترسی خواندنِ عمومی کافی است\n• توکن رمزنگاری‌شده (AES-GCM) ذخیره می‌شود\n• بعد از مصرف، پیام توکن را در تلگرام پاک کن\n• هر زمان «جدا کردن» را بزنی، از دیتابیس حذف می‌شود"
+        : "Send the token in this chat. It is stored encrypted (AES-GCM) and can be removed any time."),
+    kb([[{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "me:home" }]]),
+    !!h.cbId,
+  );
+}
+
+async function githubUnlink(h: H) {
+  const fa = h.loc === "fa";
+  await h.env.DB.prepare(`UPDATE users SET github_login=NULL, github_token_enc=NULL, github_token_at=NULL WHERE id=?`)
+    .bind(h.u.id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+  return h.reply(fa ? "🔓 حساب گیت‌هاب جدا شد و توکن پاک شد." : "🔓 GitHub unlinked, token deleted.",
+    kb([[{ text: "🐙 " + (fa ? "اتصال دوباره" : "Link again"), cb: "me:link" }], [{ text: "🏠", cb: "m:home" }]]), !!h.cbId);
+}
+
 async function buildH(
   m: { from?: User; chat: { id: number }; message_id?: number },
   env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard,
@@ -214,10 +352,14 @@ async function buildH(
 
   const session = env.SESSION.get(env.SESSION.idFromName(`user:${u.id}`)) as any;
 
-  const gh = new GithubRest(env);
+  // a linked account uses its own token: private repos work and the rate limit
+  // (5000/h) belongs to the user instead of the deployment
+  const userToken = user?.github_token_enc ? await decryptToken(env, user.github_token_enc) : null;
+  const gh = new GithubRest(env, userToken ?? undefined);
   const h: H = {
     env, store, tg, ai, card, u, user, loc, chatId, msgId,
     cbId: opts.cbId, args: opts.args ?? [], text: opts.text ?? "", msg: opts.msg,
+    userToken: userToken ?? undefined,
     session,
     gh: () => gh,
     async reply(body, keyboard, edit = false) {
@@ -272,6 +414,15 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     const arg = rest.join(" ").trim();
     const h = await buildH(msg, env, ctx, tg, store, ai, card, { args: rest, text: arg, msg });
     return routeCommand(cmd, arg, h, env, ctx);
+  }
+
+  // GitHub token paste (armed by /login or the "personal token" button)
+  if (/^(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(text) || /^[A-Za-z0-9_]{36,}$/.test(text)) {
+    const h0 = await buildH(msg, env, ctx, tg, store, ai, card, { text, msg });
+    const armed = await h0.session?.get("me:token").catch(() => null);
+    if (armed) {
+      if (/^(gh[pousr]_|github_pat_)/.test(text) || text.length >= 36) return completeLink(h0, text.trim());
+    }
   }
 
   // session-driven inputs (wizard steps) take priority over heuristics
@@ -384,11 +535,22 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
 
 // ── commands ───────────────────────────────────────────────────────────────
 async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) {
+  if (cmd === "/login") return githubTokenPrompt(h);
+  if (cmd === "/logout") return githubUnlink(h);
   const fa = h.loc === "fa";
   await h.store.event(h.u.id, "command", cmd);
 
   switch (cmd) {
     case "/start": {
+      // mini-app deep links: s_/d_/t_/c_ + owner/repo open the right screen
+      const deep = arg.match(/^([sdtc])_(.+)$/);
+      if (deep) {
+        const full = normRepo(deep[2]);
+        if (deep[1] === "s") return scout.open(h, full, 0);
+        if (deep[1] === "d") return downloader(h).choose(h, full);
+        if (deep[1] === "t") return assistant.translateReadme(h, full);
+        if (deep[1] === "c") return assistant.dossier(h, full);
+      }
       // referral?
       if (arg.startsWith("ref_")) {
         await h.env.DB.prepare(`UPDATE users SET referral_by=(SELECT id FROM users WHERE referral_code=?) WHERE id=? AND referral_by IS NULL`)
@@ -549,7 +711,7 @@ async function fetchScoutRaw(h: H, full: string) {
   const [o, n] = full.split("/");
   if (!o || !n) return null;
   const { GithubGraphQL, toRepoMeta } = await import("./github/graphql");
-  const data = await new GithubGraphQL(h.env).deepScout(o, n).catch(() => null);
+  const data = await new GithubGraphQL(h.env, h.userToken ?? h.env.GITHUB_TOKEN).deepScout(o, n).catch(() => null);
   if (!data?.repository) return null;
   return { meta: toRepoMeta(data), r: data.repository };
 }
@@ -614,6 +776,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "s") return browse.list(h, args[0] ?? "");
         if (action === "l") return browse.list(h, args[1] ?? "", Number(args[0] ?? 0), (args[2] as any) ?? "stars");
         if (action === "orgs") return browse.orgs(h);
+        if (action === "users") return browse.users(h, Number(args[0] ?? 0));
         if (action === "org") return browse.org(h, args[0] ?? "");
         if (action === "time") return browse.time(h);
         if (action === "year") return browse.year(h, Number(args[0] ?? 2026));
@@ -713,7 +876,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "regex") { if (arg) return devutils.runRegex(h, arg); await h.session.set("dvu:regex", true); return devutils.regex(h); }
         if (action === "cidr") { if (arg) return devutils.cidr(h, arg); await h.session.set("dvu:cidr", true); return devutils.cidr(h); }
         if (action === "jwt") { if (arg) return devutils.jwt(h, arg); await h.session.set("dvu:jwt", true); return devutils.jwt(h); }
-        if (action === "b64") { if (arg) return devutils.b64(h, arg); await h.session.set("dvu:b64", true); return devutils.b64(h); }
+        if (action === "b64" || action === "b64d") {
+          if (arg) return devutils.b64(h, arg);
+          await h.session.set("dvu:b64", true);
+          return devutils.b64(h);
+        }
         if (action === "hash") { if (arg) return devutils.hash(h, arg); await h.session.set("dvu:hash", true); return devutils.hash(h, ""); }
         if (action === "id") return devutils.id(h);
         if (action === "time") { if (arg) return devutils.time(h, arg); await h.session.set("dvu:time", true); return devutils.time(h); }
@@ -766,7 +933,9 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "interests") return profile.interests(h);
         if (action === "t") return profile.toggleInterest(h, args[0] ?? "");
         if (action === "plan" || action === "pro") return profile.plans(h);
-        if (action === "link") return h.reply(`🐙 ${fa ? "برای اتصال، پیام <code>/start</code> را از دکمه زیر باز کن (OAuth در نسخه هاست‌شده)." : "Connect via OAuth in the hosted build."}`, kb([[{ text: "🐙 GitHub", url: "https://github.com/login/oauth/authorize" }], [{ text: "◀️", cb: "me:home" }]]));
+        if (action === "link") return githubLink(h);
+        if (action === "token") return githubTokenPrompt(h);
+        if (action === "unlink") return githubUnlink(h);
         if (action === "export") return exportMyData(h);
         break;
 
@@ -808,6 +977,26 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "flag") return admin.setFlag(h, args[0] ?? "", args[1] ?? "on");
         if (action === "broadcast") return admin.broadcast(h);
         if (action === "aitest") return admin.aitest(h);
+        if (action === "podcast") {
+          if (!isAdmin(env, h.u.id)) return h.toast(fa ? "فقط ادمین" : "admins only", true);
+          await h.reply(fa ? "🎙 در حال ساخت پادکست…" : "🎙 building the podcast…", undefined, !!h.cbId);
+          const rows = await h.store.board("daily", "all", 10);
+          const pod = new Podcast_(env);
+          const out = await pod.publish(rows, "daily").catch((e: any) => {
+            console.error("podcast-build", String(e?.message ?? e));
+            return null;
+          });
+          if (!out) return h.reply("❌", undefined, true);
+          const key = (out as any).key as string | null;
+          if (!key) return h.reply(fa ? "🎙 متن پادکست آماده شد (صدا در دسترس نبود) — /podcast" : "🎙 script ready (no audio available)", undefined, true);
+          const blobs = new BlobStore(env);
+          const audio = await blobs.get(key);
+          if (audio) {
+            const bytes = audio instanceof Uint8Array ? audio : new Uint8Array(await new Response(audio as any).arrayBuffer());
+            await h.tg.sendAudio(h.chatId, bytes.buffer as ArrayBuffer, fa ? "🎙 پادکست روزانه" : "🎙 daily podcast", {});
+          }
+          return;
+        }
         if (action === "snapshot") {
           const eng = new TrendingEngine(h.env);
           const n = await eng.snapshot((await eng.rank("daily", "all", 30)).map((r: any) => r.full_name));
@@ -1248,85 +1437,91 @@ code{background:#0b1220;padding:2px 6px;border-radius:6px;color:var(--acc2);font
 }
 
 /** Mini-app: Telegram WebApp dashboard (charts, search, favourites). */
-const MINI_APP_HTML = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>GitHub Lens Ultra</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-:root{--bg:#0b0f19;--card:#111827;--fg:#e6edf3;--mut:#9ca3af;--acc:#22d3ee;--acc2:#a3e635}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding:16px 14px 40px}
-h1{font-size:20px;margin:0 0 4px;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
-.sub{color:var(--mut);font-size:13px;margin-bottom:16px}
-input,select{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #1f2937;background:#0b1220;color:var(--fg);font-size:15px;margin-bottom:10px}
-button{padding:12px;border:none;border-radius:12px;background:linear-gradient(90deg,var(--acc),var(--acc2));color:#04141a;font-weight:700;width:100%;font-size:15px}
-.tabs{display:flex;gap:8px;margin:14px 0;overflow:auto}
-.tab{padding:8px 14px;border-radius:999px;background:#111827;border:1px solid #1f2937;color:var(--mut);font-size:13px;white-space:nowrap}
-.tab.on{background:var(--acc);color:#04141a;font-weight:700}
-.card{background:var(--card);border:1px solid #1f2937;border-radius:16px;padding:14px;margin-bottom:10px}
-.row{display:flex;justify-content:space-between;gap:8px;align-items:center}
-.name{font-weight:700;font-size:15px;word-break:break-word}
-.desc{color:var(--mut);font-size:13px;margin:6px 0;line-height:1.7}
-.stats{color:var(--mut);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
-.pill{background:#0b1220;padding:3px 8px;border-radius:999px;font-size:11px;color:var(--acc2)}
-.bar{height:6px;border-radius:3px;background:#1f2937;overflow:hidden;margin-top:8px}
-.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2))}
-.empty{color:var(--mut);font-size:14px;text-align:center;padding:24px}
-a{color:var(--acc);text-decoration:none}
-</style></head><body>
-<h1>GitHub Lens Ultra</h1>
-<div class="sub" id="who">…</div>
-<input id="q" placeholder="جست‌وجو: react state / کاوش مخزن owner/repo" />
-<button onclick="doSearch()">🔍 جست‌وجو</button>
-<div class="tabs" id="tabs"></div>
-<div id="out" class="empty">برای شروع جست‌وجو کن یا یک تب بگیر.</div>
-<script>
-const tg = window.Telegram?.WebApp;
-tg?.ready(); tg?.expand();
-const user = tg?.initDataUnsafe?.user;
-document.getElementById('who').textContent = user ? ('👋 ' + (user.first_name||'') + ' — داشبورد زنده') : 'داشبورد زنده';
-const tabs = [['trending','🔥 داغ‌ترین'],['weekly','📅 هفته'],['gems','✨ گنج پنهان'],['favorites','⭐ علاقه‌مندی'],['subs','🔔 اشتراک']];
-let cur='trending';
-document.getElementById('tabs').innerHTML = tabs.map(([k,l])=>'<div class="tab'+(k==='trending'?' on':'')+'" data-k="'+k+'">'+l+'</div>').join('');
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
-  t.classList.add('on'); cur=t.dataset.k; load(cur);
-});
-async function api(path){ const r = await fetch(path, {headers:{'X-Telegram-Init-Data': tg?.initData||''}}); return r.json(); }
-function render(items){
-  const out=document.getElementById('out');
-  if(!items||!items.length){ out.className='empty'; out.textContent='چیزی پیدا نشد.'; return; }
-  out.className='';
-  out.innerHTML = items.map(it=>\`
-   <div class="card">
-     <div class="row"><div class="name">\${it.full_name}</div><div class="pill">⭐ \${fmt(it.stars||0)}</div></div>
-     \${it.description?'<div class="desc">'+esc(it.description).slice(0,180)+'</div>':''}
-     <div class="stats">
-       \${it.language?'<span>🧩 '+esc(it.language)+'</span>':''}
-       \${it.forks?'<span>🍴 '+fmt(it.forks)+'</span>':''}
-       \${it.gained?'<span>🚀 +'+fmt(it.gained)+'</span>':''}
-       \${it.health?'<span>❤️ '+it.health+'</span>':''}
-     </div>
-     \${it.health?'<div class="bar"><i style="width:'+Math.min(100,it.health)+'%"></i></div>':''}
-     <div class="stats" style="margin-top:8px">
-       <a href="https://github.com/\${it.full_name}" target="_blank">GitHub</a>
-       <a href="https://t.me/__BOT_USERNAME__?startapp=\${encodeURIComponent(it.full_name)}" target="_blank">در ربات باز کن</a>
-     </div>
-   </div>\`).join('');
+
+
+
+// ─── GitHub token storage (AES-GCM, never plaintext in D1) ─────────────────
+
+/** Derive a 256-bit key from the deployment secret (HKDF-SHA256). */
+async function tokenKey(env: Env): Promise<CryptoKey> {
+  const secret = (env as any).TOKEN_ENCRYPTION_KEY || env.DOWNLOAD_SIGNING_KEY || env.TELEGRAM_WEBHOOK_SECRET;
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("ghlens-token-v1"), info: new TextEncoder().encode("github-token") },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"],
+  );
 }
-function fmt(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n); }
-function esc(s){ return String(s).replace(/[<>&]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
-async function load(kind){
-  const out=document.getElementById('out'); out.className='empty'; out.textContent='⏳ …';
-  try{ const d = await api('/api/miniapp?kind='+kind); render(d.items||[]); }
-  catch(e){ out.textContent='خطا در دریافت داده'; }
+
+export async function encryptToken(env: Env, plain: string): Promise<string> {
+  const key = await tokenKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plain));
+  const packed = new Uint8Array(iv.length + ct.byteLength);
+  packed.set(iv, 0);
+  packed.set(new Uint8Array(ct), iv.length);
+  return btoa(String.fromCharCode(...packed));
 }
-async function doSearch(){
-  const q=document.getElementById('q').value.trim(); if(!q) return;
-  const out=document.getElementById('out'); out.className='empty'; out.textContent='🔍 …';
-  const d = await api('/api/miniapp?kind=search&q='+encodeURIComponent(q));
-  render(d.items||[]);
+
+export async function decryptToken(env: Env, packedB64: string): Promise<string | null> {
+  try {
+    const packed = Uint8Array.from(atob(packedB64), (c) => c.charCodeAt(0));
+    const key = await tokenKey(env);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: packed.slice(0, 12) }, key, packed.slice(12));
+    return new TextDecoder().decode(plain);
+  } catch (e: any) {
+    console.error("token-decrypt-failed", String(e?.message ?? e));
+    return null;
+  }
 }
-document.getElementById('q').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
-load('trending');
-</script></body></html>`;
+
+/** HMAC-signed OAuth state so a callback can only belong to its own chat. */
+export async function signState(env: Env, userId: number): Promise<string> {
+  const payload = `${userId}.${Date.now()}`;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.TELEGRAM_WEBHOOK_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/[+/=]/g, "").slice(0, 32);
+  return `${payload}.${b64}`;
+}
+
+export async function verifyState(env: Env, state: string): Promise<number | null> {
+  const [uid, ts, sig] = state.split(".");
+  if (!uid || !ts || !sig) return null;
+  if (Date.now() - Number(ts) > 15 * 60 * 1000) return null;      // 15 minute window
+  const expect = await signState(env, Number(uid));
+  return expect.split(".")[2] === sig ? Number(uid) : null;
+}
+
+/** GET /user with a token → login name, or null when the token is rejected. */
+export async function whoamiWithToken(token: string): Promise<{ login: string; scopes: string | null; remaining?: number } | null> {
+  const res = await fetch("https://api.github.com/user", {
+    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "GitHubLensUltra/1.0" },
+  });
+  if (!res.ok) return null;
+  const u: any = await res.json();
+  return { login: u.login, scopes: res.headers.get("x-oauth-scopes"), remaining: Number(res.headers.get("x-ratelimit-remaining") ?? 0) };
+}
+
+/** Save a verified token for the user (encrypted) and reply with the result. */
+export async function completeLink(h: H, token: string): Promise<void> {
+  const fa = h.loc === "fa";
+  const me = await whoamiWithToken(token);
+  if (!me) {
+    return void (await h.reply(
+      fa ? "❌ توکن نامعتبر است یا منقضی شده. دوباره بساز و بفرست (/login)." : "❌ Invalid or expired token.",
+      kb([[{ text: "🔁 " + (fa ? "تلاش دوباره" : "Retry"), cb: "me:token" }], [{ text: "◀️", cb: "me:home" }]]),
+    ));
+  }
+  const enc = await encryptToken(h.env, token);
+  await h.env.DB.prepare(
+    `UPDATE users SET github_login=?, github_token_enc=?, github_token_at=? WHERE id=?`,
+  ).bind(me.login, enc, Date.now(), h.u.id).run();
+  // forget the wizard state and the user's message is theirs to delete
+  await h.session?.set("me:token", false);
+  await h.reply(
+    `✅ <b>${fa ? "اتصال برقرار شد" : "Linked"}</b> — <a href="https://github.com/${tgEscape(me.login)}">@${tgEscape(me.login)}</a>\n\n` +
+      (fa
+        ? `سقف درخواست تو الان <b>${me.remaining ?? 5000}</b> در ساعت است. برای امنیت، پیام حاوی توکن را در تلگرام پاک کن (نگه‌دار → Delete).\n\nهر وقت خواستی: /logout`
+        : `Your limit is now ${me.remaining ?? 5000}/hour. Delete the message that contained the token.`),
+    kb([[{ text: "👤 " + (fa ? "پروفایل من" : "My profile"), cb: "me:home" }, { text: "🏠", cb: "m:home" }]]),
+  );
+}

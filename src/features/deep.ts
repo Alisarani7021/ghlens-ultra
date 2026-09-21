@@ -23,7 +23,7 @@ export class DeepScout {
 
   private async scout(h: H, full: string) {
     const [owner, name] = full.split("/");
-    const gql = new GithubGraphQL(h.env);
+    const gql = new GithubGraphQL(h.env, h.userToken ?? h.env.GITHUB_TOKEN);
     const data = await gql.deepScout(owner, name).catch(() => null);
     if (!data?.repository) return null;
     const meta = toRepoMeta(data);
@@ -415,7 +415,7 @@ export class DeepScout {
       );
     }
     await h.loading(fa ? "⚖️ در حال مقایسه…" : "⚖️ comparing…");
-    const gql = new GithubGraphQL(h.env);
+    const gql = new GithubGraphQL(h.env, h.userToken ?? h.env.GITHUB_TOKEN);
     const [oa, na] = a.split("/"); const [ob, nb] = b.split("/");
     const [da, db] = await Promise.all([
       gql.deepScout(oa, na).catch(() => null),
