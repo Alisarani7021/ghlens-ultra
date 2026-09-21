@@ -41,7 +41,7 @@
 | Durable Object | `ghlens-ultra_UserSession` — `e7e57fad37ce48379e80af4275256b9b` |
 | زیردامنه‌ی workers.dev | `gitguts` (ساخته شد) |
 | کرون‌ها | `*/15 * * * *` · `0 * * * *` · `0 6 * * *` (۲ اسلات آزاد ماند) |
-| سکرت‌ها | `BOT_TOKEN` · `BOT_USERNAME` · `TELEGRAM_WEBHOOK_SECRET` · `GITHUB_WEBHOOK_SECRET` · `DOWNLOAD_SIGNING_KEY` · `CF_API_TOKEN` · `CF_ACCOUNT_ID` · `GITHUB_TOKEN` (۵٬۰۰۰ درخواست/ساعت) · `ADMIN_IDS` = `5982315292` (به‌صورت سکرت، تا در ریپوی عمومی نیفتد) |
+| سکرت‌ها | `BOT_TOKEN` · `BOT_USERNAME` · `TELEGRAM_WEBHOOK_SECRET` · `GITHUB_WEBHOOK_SECRET` · `DOWNLOAD_SIGNING_KEY` · `CF_API_TOKEN` · `CF_ACCOUNT_ID` · `GITHUB_TOKEN` (۵٬۰۰۰ درخواست/ساعت) · `ADMIN_IDS` = آیدی عددی تو، به‌صورت **سکرت** (تا در ریپوی عمومی نیفتد) |
 | سکرت‌های ریپو (Actions) | `CLOUDFLARE_API_TOKEN` · `CLOUDFLARE_ACCOUNT_ID` · `TELEGRAM_WEBHOOK_SECRET` |
 
 ## ۳. تست‌های زنده روی اکانت جدید
@@ -90,7 +90,7 @@ bash scripts/finish-migration.sh --old-token cfut_xxxxxxxxxxxx
 ## ۵. سه کار ۳۰ ثانیه‌ای خودت
 
 1. **`/start`** را در ربات بزن (وبهوک روی آدرس جدید فعال است).
-2. ~~`/id` را بزن~~ — انجام شد: `ADMIN_IDS=5982315292` ست شده و `/selfcheck` تأیید می‌کند `admin: true` (برای uid دیگر `false` است).
+2. ~~`/id` را بزن~~ — انجام شد: `ADMIN_IDS` ست شده و `/selfcheck` تأیید می‌کند `admin: true` (برای uid دیگر `false` است).
 3. **BotFather → `/setinline`** روی `@Gitguts_bot` تا جست‌وجوی درون‌چت (`@Gitguts_bot react`) فعال شود (الان `supports_inline_queries: false`).
 
 🔐 **و یک نکته‌ی امنیتی:** توکن ربات و توکن کلادفلر در چت فرستاده شدند؛ بعد از پایان کار **هر دو را عوض کن** (BotFather → `/revoke`، و توکن جدید کلادفلر). توکن ربات را من از لاگ‌های محلی بازیابی کردم چون فایل موقت پاک شده بود — این یعنی همان توکن جای دیگری هم نوشته شده است، پس تعویضش را جدی بگیر. سکرت‌های داخلی (وبهوک تلگرام، وبهوک گیت‌هاب، امضای دانلود) را همین حالا از نو تولید کردم و روی استقرار جدید ست کردم، پس آن‌ها لو نرفته‌اند.
