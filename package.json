@@ -1,0 +1,27 @@
+{
+  "name": "ghlens-ultra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Lens Ultra — a Cloudflare-native GitHub discovery, analysis and AI platform for Telegram. 100x the original bot.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --remote",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init": "wrangler d1 execute ghlens --remote --file=./schema/d1.sql",
+    "db:init:local": "wrangler d1 execute ghlens --local --file=./schema/d1.sql",
+    "vector:create": "wrangler vectorize create ghlens-index --dimensions=1024 --metric=cosine",
+    "queue:create": "wrangler queues create ghlens-jobs && wrangler queues create ghlens-jobs-dlq",
+    "r2:create": "wrangler r2 bucket create ghlens-files",
+    "secrets": "bash scripts/set-secrets.sh",
+    "webhook:set": "bash scripts/set-webhook.sh",
+    "logs": "wrangler tail --format pretty",
+    "test": "node scripts/sqlcheck.mjs && node scripts/selftest.mjs",
+    "sqlcheck": "node scripts/sqlcheck.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.2",
+    "wrangler": "^3.78.0"
+  }
+}

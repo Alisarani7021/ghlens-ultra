@@ -1,0 +1,91 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ghlens-ultra",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "minify": true,
+
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // ─────────────────────────── bindings ───────────────────────────
+  // KV: cache (ETag/AI/blob) + state (wizards, translated READMEs, podcast scripts)
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "29f61e2084944e9eb8cd56ca73625945", "preview_id": "29f61e2084944e9eb8cd56ca73625945" },
+    { "binding": "STATE", "id": "3ddfd79b9f58484892ce6d6c4b5b0d6b", "preview_id": "3ddfd79b9f58484892ce6d6c4b5b0d6b" }
+  ],
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ghlens", "database_id": "7d5661de-ab32-4b03-87fa-ed8d0a964ea4" }
+  ],
+
+  // NOTE: R2 is not enabled on this account, so no FILES binding is declared.
+  // The code auto-detects this and uses KV-backed blob storage + streaming
+  // splits instead (see src/core/blobstore.ts). Enable R2 in the dashboard and
+  // add the binding below to upgrade in place — no code changes needed:
+  //
+  // "r2_buckets": [{ "binding": "FILES", "bucket_name": "ghlens-files" }],
+
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "ghlens-jobs" }],
+    "consumers": [
+      {
+        "queue": "ghlens-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "ghlens-jobs-dlq"
+      }
+    ]
+  },
+
+  // SQLite-backed Durable Objects: works on every plan, no storage class issues.
+  "durable_objects": { "bindings": [{ "name": "SESSION", "class_name": "UserSession" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserSession"] }],
+
+  "ai": { "binding": "AI" },
+
+  // NOTE: Vectorize is not available to this token, so semantic search runs in
+  // lexical-only mode (the code guards env.INDEX). Create the index later with
+  //   npx wrangler vectorize create ghlens-index --dimensions=1024 --metric=cosine
+  // then uncomment the binding to switch hybrid search on:
+  //
+  // "vectorize": [{ "binding": "INDEX", "index_name": "ghlens-index" }],
+
+  // NOTE: Analytics Engine must be switched on in the dashboard first
+  // (https://dash.cloudflare.com/<account>/workers/analytics-engine), then
+  // uncomment to get per-command time-series in the CF UI:
+  //
+  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "ghlens_events" }],
+
+  // ─────────────────────────── cron ───────────────────────────
+  // This account is on the Free plan, which caps cron triggers per ACCOUNT at
+  // five. Three are declared here, so two stay free for other workers:
+  //
+  //   */15 * * * *  snapshots + trending board + digest drain + broadcasts
+  //   0 * * * *     fresh-repo indexing + security sweep
+  //   0 6 * * *     daily podcast + personalised digests, and (inside the same
+  //                 run) the weekly growth report on Sundays / monthly
+  //                 retention on the 1st — so no extra triggers are needed
+  //
+  // classifyCron() also understands `0 6 * * SUN` and `0 4 1 * *`, so a paid
+  // plan can split those out later without touching any code.
+  "triggers": {
+    "crons": ["*/15 * * * *", "0 * * * *", "0 6 * * *"]
+  },
+
+  "vars": {
+    "DEFAULT_LOCALE": "fa",
+    "WORKER_URL": "https://ghlens-ultra.gitguts.workers.dev",
+    "ADMIN_IDS": "",
+    "HELPER_REPO": "",
+    "MAX_TG_UPLOAD_MB": "49",
+    "FREE_TIER_DAILY_QUERIES": "200"
+  }
+
+  // ───────────────── secrets (wrangler secret put …) ─────────────────
+  // BOT_TOKEN, BOT_USERNAME, GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET,
+  // TELEGRAM_WEBHOOK_SECRET, CF_API_TOKEN, CF_ACCOUNT_ID,
+  // DOWNLOAD_SIGNING_KEY, HELPER_REPO_TOKEN (optional)
+}

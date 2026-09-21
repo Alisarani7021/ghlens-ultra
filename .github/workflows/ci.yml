@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Typecheck (strict TS, 0 errors required)
+        run: npx tsc --noEmit
+
+      - name: SQL guard (placeholder/bind arity in every prepared statement)
+        run: node scripts/sqlcheck.mjs
+
+      - name: Algorithmic self-test (25 assertions)
+        run: node scripts/selftest.mjs
+
+      - name: Bundle size report
+        run: npx wrangler deploy --dry-run --outdir=/tmp/dry
