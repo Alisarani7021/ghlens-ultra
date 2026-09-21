@@ -9,7 +9,9 @@
 | 🤖 ربات | [`@Gitguts_bot`](https://t.me/Gitguts_bot) |
 | 🌐 Worker | `https://ghlens-ultra.gitguts.workers.dev` |
 | 🏦 اکانت کلادفلر | `88a4e920dc6f9606c9987b872ac9ed69` (the account that owns the worker) |
-| 🕓 آخرین دیپلوی | ۲۰۲۶-۰۹-۲۱ · نسخه `00f628e0-c2ed-41e1-aca4-4079048db441` |
+| 📦 مخزن گیت‌هاب | [github.com/Alisarani7021/ghlens-ultra](https://github.com/Alisarani7021/ghlens-ultra) (عمومی، ۵۹ فایل) |
+| 🚀 CI/CD | هر پوش به `main` → تایپ‌چک + گارد SQL + ۲۵ تست → انتشار روی Cloudflare → تست سلامت زنده ✅ |
+| 🕓 آخرین دیپلوی | ۲۰۲۶-۰۹-۲۱، ۲۲:۵۸ UTC — **توسط GitHub Actions** |
 
 > **مهاجرت انجام شد.** استقرار از اکانت قبلی (`4beda91649bed6f5d1271b89056d0565`) به این اکانت منتقل شد، چون روی آن اکانت زیردامنه‌ی `*.workers.dev` از سمت کلادفلر خراب بود (هر اسکریپت، حتی «hello world»، خطای ۱۱۰۱ می‌گرفت). روی این اکانت `workers.dev` سالم است — همان «hello world» اول تست شد و `probe-ok` برگرداند.
 
@@ -39,7 +41,8 @@
 | Durable Object | `ghlens-ultra_UserSession` — `e7e57fad37ce48379e80af4275256b9b` |
 | زیردامنه‌ی workers.dev | `gitguts` (ساخته شد) |
 | کرون‌ها | `*/15 * * * *` · `0 * * * *` · `0 6 * * *` (۲ اسلات آزاد ماند) |
-| سکرت‌ها | `BOT_TOKEN` · `BOT_USERNAME` · `TELEGRAM_WEBHOOK_SECRET` · `GITHUB_WEBHOOK_SECRET` · `DOWNLOAD_SIGNING_KEY` · `CF_API_TOKEN` · `CF_ACCOUNT_ID` — و `GITHUB_TOKEN` که منتظر توکن توست |
+| سکرت‌ها | `BOT_TOKEN` · `BOT_USERNAME` · `TELEGRAM_WEBHOOK_SECRET` · `GITHUB_WEBHOOK_SECRET` · `DOWNLOAD_SIGNING_KEY` · `CF_API_TOKEN` · `CF_ACCOUNT_ID` · `GITHUB_TOKEN` (۵٬۰۰۰ درخواست/ساعت) · `ADMIN_IDS` = `5982315292` (به‌صورت سکرت، تا در ریپوی عمومی نیفتد) |
+| سکرت‌های ریپو (Actions) | `CLOUDFLARE_API_TOKEN` · `CLOUDFLARE_ACCOUNT_ID` · `TELEGRAM_WEBHOOK_SECRET` |
 
 ## ۳. تست‌های زنده روی اکانت جدید
 
@@ -47,8 +50,8 @@
 /health?deep=…       d1 ✅ (۲۲ جدول) · kv ✅ (راند‌تریپ باینری) · telegram ✅ @Gitguts_bot
                      ai_text ✅ · embeddings ✅ (۱۰۲۴ بعد) · queue ✅ · durable_object ✅
                      tts ✅ (۱۰٬۳۴۴ بایت)
-                     github ⚠️ ok ولی authenticated:false و core_remaining:0
-                            (سهمیه‌ی بدون‌توکنِ IPهای Workers تمام است — با PAT درست می‌شود)
+                     github ✅ authenticated:true · core ۴٬۹۳۱ · search ۳۰ · graphql ۵٬۰۰۰
+                            (توکن گیت‌هاب ست شد؛ سقف از ۶۰ به ۵٬۰۰۰ درخواست در ساعت رسید)
 /selfcheck (۱۱ مسیر) ✅ /start /id /help /profile /trending /tools ip /language /security
                      ✅ vuejs/core /scout facebook/react /ask
 وبهوک امن            ✅ با سکرت ۲۰۰ در ۵۵ms · بدون سکرت ۴۰۳
@@ -60,9 +63,11 @@
 
 > مسیرهای GitHub حتی بدون توکن هم کار می‌کنند (repo/scout/search تست شدند)، ولی سهمیه‌ی بدون‌احراز هویت فقط **۶۰ درخواست در ساعت** است. با توکن رایگان GitHub این عدد **۵٬۰۰۰ در ساعت** می‌شود — وبه همین دلیل `GITHUB_TOKEN` را حتماً ست کن (دستور پایین).
 
-## ۴. دو کاری که مانده (هر دو با یک دستور)
+## ۴. کارهای باقی‌مانده
 
-فایل موقت `/tmp` بین نشست‌ها پاک می‌شود، پس توکن‌های حساس در ورک‌اسپیس ذخیره نشدند. نتیجه: دو مقدار را فقط تو داری:
+✅ توکن گیت‌هاب ست شد (هم برای ریپو، هم به‌عنوان سکرت ورکر). ✅ آیدی ادمین ست شد. فقط پاک‌سازی اکانت قبلی کلادفلر مانده است:
+
+> فایل موقت `/tmp` بین نشست‌ها پاک می‌شود و توکن قدیمی کلادفلر آنجا بود؛ اگر دیگر نداری‌اش، از داشبورد اکانت قبلی دستی حذف کن (بخش ۵).
 
 ```bash
 cd ghlens
@@ -85,7 +90,7 @@ bash scripts/finish-migration.sh --old-token cfut_xxxxxxxxxxxx
 ## ۵. سه کار ۳۰ ثانیه‌ای خودت
 
 1. **`/start`** را در ربات بزن (وبهوک روی آدرس جدید فعال است).
-2. **`/id`** را بزن و عددش را بفرست تا `ADMIN_IDS` را ست کنم (پنل مدیریت، تست AI، آمار و پخش همگانی).
+2. ~~`/id` را بزن~~ — انجام شد: `ADMIN_IDS=5982315292` ست شده و `/selfcheck` تأیید می‌کند `admin: true` (برای uid دیگر `false` است).
 3. **BotFather → `/setinline`** روی `@Gitguts_bot` تا جست‌وجوی درون‌چت (`@Gitguts_bot react`) فعال شود (الان `supports_inline_queries: false`).
 
 🔐 **و یک نکته‌ی امنیتی:** توکن ربات و توکن کلادفلر در چت فرستاده شدند؛ بعد از پایان کار **هر دو را عوض کن** (BotFather → `/revoke`، و توکن جدید کلادفلر). توکن ربات را من از لاگ‌های محلی بازیابی کردم چون فایل موقت پاک شده بود — این یعنی همان توکن جای دیگری هم نوشته شده است، پس تعویضش را جدی بگیر. سکرت‌های داخلی (وبهوک تلگرام، وبهوک گیت‌هاب، امضای دانلود) را همین حالا از نو تولید کردم و روی استقرار جدید ست کردم، پس آن‌ها لو نرفته‌اند.

@@ -4,7 +4,14 @@
 
 # 🔭 GitHub Lens Ultra
 
-> ### 🟢 زنده و در حال اجرا
+[![CI](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)](https://www.typescriptlang.org/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-f38020)](https://workers.cloudflare.com/)
+[![License](https://img.shields.io/badge/license-MIT-green)](#مجوز)
+
+> ### 🟢 زنده و در حال اجرا — و روی گیت‌هاب
+> 📦 مخزن: **[github.com/Alisarani7021/ghlens-ultra](https://github.com/Alisarani7021/ghlens-ultra)** — با CI/CD: هر پوش به `main` تست می‌شود، منتشر می‌شود و سلامت زنده چک می‌شود.
 > ربات: [@Gitguts_bot](https://t.me/Gitguts_bot) · Worker: `https://ghlens-ultra.gitguts.workers.dev` · سلامت: `/health` · مینی‌اپ: `/app`
 > گزارش کامل استقرار، تست‌ها، محدودیت‌ها و کارهای باقی‌مانده: **[docs/LIVE.md](docs/LIVE.md)**
 >
