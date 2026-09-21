@@ -60,11 +60,11 @@ function materialise(cb) {
   const RULES = [
     [/^s:t::?/, "s:t:0,vuejs/core"],
     [/^(s:(go|card|cmp)):$/, "$1:vuejs/core"],
-    [/^d:(go|split):\|?/, "d:$1:vuejs/core|zip|main"],
+    [/^d:(go|split):.*$/, "d:$1:vuejs/core|zip|main"],
     [/^d:(a7z|repo|link):$/, "d:$1:vuejs/core"],
     [/^ai:(tr|trpdf|repo):$/, "ai:$1:vuejs/core"],
-    [/^ai:tre:$/, "ai:tre:vuejs/core:en"],
-    [/^ai:trmore:$/, "ai:trmore:vuejs/core:1"],
+    [/^ai:tre:/, "ai:tre:vuejs/core:en"],
+    [/^ai:trmore:.*$/, "ai:trmore:vuejs/core:1"],
     [/^ai:cmp:\|?$/, "ai:cmp:vuejs/core|facebook/react"],
     [/^r:(card|chart|files|share):$/, "r:$1:vuejs/core"],
     [/^r:cmpcard:\|?$/, "r:cmpcard:vuejs/core|facebook/react"],
@@ -89,6 +89,10 @@ function materialise(cb) {
   ];
   for (const [re, to] of RULES) if (re.test(out)) { out = out.replace(re, to); break; }
 
+  // multi-line template literals leak half-expressions into the capture; they
+  // are not real callbacks, so drop them instead of mislabelling them dead
+  if (out.includes("${") || /[([?]\s*$/.test(out)) return null;
+
   out = out
     .replace(/::+/g, ":")            // never two colons in a row
     .replace(/,\s*$/, "")
@@ -103,7 +107,8 @@ for (const f of files) {
   for (const m of src.matchAll(/cb:\s*[`"']([^`"']+)[`"']/g)) {
     const raw = m[1];
     if (raw.includes("${") && !/^[a-z]+:[a-z]+:\$\{/.test(raw)) continue; // template-built
-    found.add(materialise(raw));
+    const mt = materialise(raw);
+    if (mt) found.add(mt);
   }
 }
 // dynamic-but-important targets that never appear as literals
@@ -122,8 +127,15 @@ const extra = [
 for (const e of extra) found.add(e);
 
 const only = arg("--only");
+// Admin screens are audited only on request: pressing them writes to D1
+// (flags, snapshots, cleanup) and an earlier run seeded a junk flag that way.
+const withAdmin = !!arg("--admin");
 let targets = [...found].sort();
 if (only) targets = targets.filter((t) => only.split(",").some((p) => t.startsWith(p)));
+if (!withAdmin) {
+  const MUTATING = ["adm:flag:", "adm:cleanup", "adm:snapshot", "adm:broadcast", "adm:podcast", "adm:aitest"];
+  targets = targets.filter((t) => !MUTATING.some((p) => t.startsWith(p)));
+}
 
 // ── run them ──────────────────────────────────────────────────────────────
 const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /Error:/, /\bNaN\b/, /undefined/];
@@ -137,19 +149,21 @@ for (const cb of targets) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
     const d = await res.json();
-    const replies = (d.replies ?? []).map((r) => ({ m: r.m, text: (r.text ?? "").slice(0, 400) }));
+    const replies = (d.replies ?? []).map((r) => ({ m: r.m, text: (r.text ?? r.cb_text ?? "").slice(0, 400) }));
     const body = replies.map((r) => r.text).join("\n");
     const bad = FAIL_PATTERNS.filter((p) => p.test(body)).map(String);
     const content = replies.filter((r) => r.m === "sendMessage" || r.m === "editMessageText" || r.m === "sendDocument")
       .filter((r) => (r.text ?? "").trim() || (r.kb ?? 0) > 0 || (r.doc ?? 0) > 0);
-    const status = !d.ok ? "error" : bad.length ? "bad-text" : content.length ? "ok" : "silent";
+    const toast = (d.replies ?? []).some((r) => (r.cb_text ?? "").trim());
+    const status = !d.ok ? "error" : bad.length ? "bad-text" : content.length ? "ok" : toast ? "toast" : "silent";
     row = { cb, ms: d.ms, status, error: d.error, bad, logs: d.logs, replies: replies.map((r) => r.text.slice(0, 160)) };
   } catch (e) {
     row = { cb, status: "threw", error: String(e.message) };
   }
   report.push(row);
-  const icon = row.status === "ok" ? "✅" : row.status === "silent" ? "⚪" : "❌";
+  const icon = row.status === "ok" ? "✅" : row.status === "toast" ? "🔔" : row.status === "silent" ? "⚪" : "❌";
   const detail = row.status === "ok" ? (row.replies[0] ?? "").replace(/\s+/g, " ").slice(0, 70)
+    : row.status === "toast" ? "(toast only)"
     : row.status === "silent" ? "(no visible reply)"
     : (row.error ?? row.bad?.join(",") ?? "").slice(0, 90);
   console.log(`${icon} ${cb.padEnd(34)} ${String(row.ms ?? "").padStart(6)}ms  ${detail}`);

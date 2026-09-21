@@ -43,7 +43,7 @@ export class Settings {
           `🔍 جست‌وجوی معنایی چندزبانه   🛰 کاوش عمیق ۱۲ تبی   🧠 چت با مخزن\n` +
           `📥 دانلود سورس با تقسیم خودکار   🛡 اسکن امنیت OSV   🎙 پادکست روزانه`
         : `✅ <b>Welcome aboard</b>\n\n<b>GitHub Lens Ultra</b> — the next generation of open-source discovery.`,
-      { parse_mode: "HTML", reply_markup: mainMenuKb(lang, u?.plan === "admin") });
+      { parse_mode: "HTML", reply_markup: mainMenuKb(lang, u?.plan === "admin", `${h.env.WORKER_URL}/app`) });
     await h.tg.sendMessage(h.chatId, lang === "fa" ? "منوی اصلی:" : "Main menu:", {
       parse_mode: "HTML",
       reply_markup: { remove_keyboard: false, ...({} as any) },
@@ -177,8 +177,13 @@ All numbers come from GitHub's and OSV's real APIs; AI only summarises.`) +
   }
 }
 
-function mainMenuKb(loc: Loc, isAdmin: boolean) {
+function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
   return kb(
+    // the glass mini-app: glassmorphism UI, a help key on every section and a
+    // back button everywhere — everything the bot shows, but native and fast
+    miniAppUrl
+      ? [{ text: loc === "fa" ? "🪟 اپلیکیشن شیشه‌ای (Mini App)" : "🪟 Glass Mini App", web: miniAppUrl }]
+      : [],
     [
       { text: L(loc, "search"), cb: "n:search" },
       { text: L(loc, "trending"), cb: "t:menu" },

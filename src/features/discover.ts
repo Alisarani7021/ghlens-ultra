@@ -71,8 +71,23 @@ export class Discover {
     }
     const stars = [50, 200, 1000, 5000, 20000][Math.floor(Math.random() * 5)];
     pool.push(`stars:>${stars}`);
-    const res = await h.gh().searchRepos(pool.join(" "), "stars", "desc", 30, Math.floor(Math.random() * 5) + 1).catch(() => null);
-    const items = res?.items ?? [];
+
+    /* GitHub search is flaky at random offsets (it caps at 1000 results and
+     * 422s on odd window/page combinations). Degrade instead of apologising:
+     * page 1 with the user's pool → page 1, plain window → star-window only →
+     * a guaranteed-populated "pushed this year" query. */
+    const attempts: Array<() => Promise<any>> = [
+      () => h.gh().searchRepos(pool.join(" "), "stars", "desc", 30, Math.floor(Math.random() * 5) + 1),
+      () => h.gh().searchRepos(pool.join(" "), "stars", "desc", 30, 1),
+      () => h.gh().searchRepos(`stars:>${stars}`, "stars", "desc", 30, 1),
+      () => h.gh().searchRepos("stars:>1000 pushed:>2026-01-01", "stars", "desc", 30, 1),
+    ];
+    let items: any[] = [];
+    for (const attempt of attempts) {
+      const res = await attempt().catch(() => null);
+      items = res?.items ?? [];
+      if (items.length) break;
+    }
     if (!items.length) return h.reply(fa ? "🎲 چیزی پیدا نشد، دوباره بزن." : "Nothing found.", kb([[{ text: "🎲 " + (fa ? "دوباره" : "Again"), cb: "x:random" }]]), !!h.cbId);
     const r = items[Math.floor(Math.random() * items.length)];
     const meta = normalise({ ...r, full_name: r.full_name, stars: r.stargazers_count, forks: r.forks_count, issues: r.open_issues_count, topics: r.topics ?? [], languages: [], health: 0, redFlags: [], raw: r });

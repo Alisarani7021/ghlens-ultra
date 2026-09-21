@@ -139,6 +139,11 @@ export default {
             m: s.method,
             text: (s.body?.text ?? s.body?.caption ?? "") as string,
             cb_text: s.body?.text && s.method === "answerCallbackQuery" ? s.body.text : undefined,
+            // every keyboard this reply carries, so the audit can assert things
+            // like "every screen has a way back"
+            buttons: (s.body?.reply_markup?.inline_keyboard ?? []).flat()
+              .map((b: any) => b.text ?? b.web_app?.url ?? b.url ?? "").slice(0, 24),
+            home: !!(s.body?.reply_markup?.keyboard),
             kb: s.body?.reply_markup?.inline_keyboard?.length ?? 0,
             doc: s.body?.document ?? s.body?.photo ?? undefined,
           }));
@@ -916,10 +921,12 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "list") return profile.subs(h);
         if (action === "muteall") {
           await h.env.DB.prepare(`UPDATE subscriptions SET muted_until=? WHERE user_id=?`).bind(Date.now() + 7 * 86400000, h.u.id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
-          return h.toast(fa ? "🔇 تا ۷ روز بی‌صدا شد" : "muted 7d");
+          await h.toast(fa ? "🔇 تا ۷ روز بی‌صدا شد" : "muted 7d");
+          return profile.subs(h);
         }
         if (action === "clear") {
           await h.env.DB.prepare(`DELETE FROM subscriptions WHERE user_id=?`).bind(h.u.id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+          await h.toast(fa ? "🗑 همه لغو شد" : "all cleared");
           return profile.subs(h);
         }
         break;
