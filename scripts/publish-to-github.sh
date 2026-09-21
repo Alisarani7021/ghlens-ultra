@@ -44,18 +44,18 @@ print(json.dumps({'name': sys.argv[1], 'description': sys.argv[2], 'private': sy
     | python3 -c "import json,sys; d=json.load(sys.stdin); print('   created:', (d.get('full_name') or d.get('errors')))"
 fi
 
-echo "▸ scanning the tree for anything that looks like a credential"
-if grep -rInE "(ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|cfut_[A-Za-z0-9]{30,}|[0-9]{8,12}:AA[A-Za-z0-9_-]{30,}|BEGIN (RSA|OPENSSH) PRIVATE KEY)" \
-     --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.wrangler --exclude-dir=dist . ; then
-  echo "   ✘ secret-looking string found above — aborting so nothing leaks"
-  exit 1
-fi
-echo "   clean"
-
 if [ ! -d .git ]; then
   echo "▸ initialising the repository"
   git init -q -b main
 fi
+git add -A
+
+echo "▸ scanning every file that is about to be committed (ignored files stay local)"
+if git grep --cached -InE "(ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|cfut_[A-Za-z0-9]{30,}|[0-9]{8,12}:AA[A-Za-z0-9_-]{30,}|BEGIN (RSA|OPENSSH) PRIVATE KEY|[A-Za-z0-9._%+-]+@(gmail|hotmail|yahoo)\.[a-z]{2,})" -- . ; then
+  echo "   ✘ the strings above would leak — aborting. Move them into .secrets.local.sh (git-ignored) and retry."
+  exit 1
+fi
+echo "   clean: $(git diff --cached --name-only | wc -l) files staged, no credentials and no personal e-mail addresses"
 git config user.name  >/dev/null 2>&1 || git config user.name  "$LOGIN"
 git config user.email >/dev/null 2>&1 || git config user.email "$LOGIN@users.noreply.github.com"
 git add -A

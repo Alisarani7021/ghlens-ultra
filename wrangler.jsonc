@@ -78,13 +78,14 @@
   "vars": {
     "DEFAULT_LOCALE": "fa",
     "WORKER_URL": "https://ghlens-ultra.gitguts.workers.dev",
-    "ADMIN_IDS": "",
     "HELPER_REPO": "",
     "MAX_TG_UPLOAD_MB": "49",
     "FREE_TIER_DAILY_QUERIES": "200"
   }
 
   // ───────────────── secrets (wrangler secret put …) ─────────────────
+  // ADMIN_IDS lives here as a secret, not as a var, so your personal Telegram
+  // id never appears in the repository.
   // BOT_TOKEN, BOT_USERNAME, GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET,
   // TELEGRAM_WEBHOOK_SECRET, CF_API_TOKEN, CF_ACCOUNT_ID,
   // DOWNLOAD_SIGNING_KEY, HELPER_REPO_TOKEN (optional)

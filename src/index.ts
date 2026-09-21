@@ -104,7 +104,7 @@ export default {
         try {
           await handleUpdate(update, env, ctx);
           const u = await new Store(env).user(uid);
-          return json({ ok: true, ms: Date.now() - t0, user_row: u ?? null, text });
+          return json({ ok: true, ms: Date.now() - t0, user_row: u ?? null, admin: isAdmin(env, uid), text });
         } catch (e: any) {
           return json({ ok: false, ms: Date.now() - t0, error: String(e?.message ?? e), stack: String(e?.stack ?? "").split("\n").slice(0, 6) }, 500);
         }

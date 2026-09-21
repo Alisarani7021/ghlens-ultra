@@ -35,7 +35,20 @@ jobs:
           npx tsc --noEmit
           npm test
 
+      - name: Check for Cloudflare credentials
+        id: creds
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "${TOKEN:-}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set — skipping the deploy steps. Add it under Settings → Secrets and variables → Actions to enable automatic deployment."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish
+        if: steps.creds.outputs.ready == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -43,6 +56,7 @@ jobs:
           command: deploy
 
       - name: Smoke test (/health)
+        if: steps.creds.outputs.ready == 'true'
         run: |
           set -euo pipefail
           URL=$(grep -oE '"WORKER_URL"[[:space:]]*:[[:space:]]*"[^"]+"' wrangler.jsonc | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')
@@ -57,6 +71,7 @@ jobs:
           python3 -c "import json; d=json.load(open('/tmp/health.json')); assert d['ok'], d; print('health ok, storage backend:', d['bindings']['storage_backend'])"
 
       - name: Deep health (D1, KV, Telegram, AI, queue, DO, TTS)
+        if: steps.creds.outputs.ready == 'true'
         env:
           TG_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
@@ -70,6 +85,7 @@ jobs:
           python3 -c "import json; d=json.load(open('/tmp/deep.json')); print('pass:', d['pass']); [print(' ', k, v.get('ok')) for k, v in d['checks'].items()]"
 
       - name: Cron heartbeat (proves the scheduler is wired)
+        if: steps.creds.outputs.ready == 'true'
         run: |
           set -euo pipefail
           URL=$(grep -oE '"WORKER_URL"[[:space:]]*:[[:space:]]*"[^"]+"' wrangler.jsonc | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')

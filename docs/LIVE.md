@@ -8,7 +8,7 @@
 |---|---|
 | 🤖 ربات | [`@Gitguts_bot`](https://t.me/Gitguts_bot) |
 | 🌐 Worker | `https://ghlens-ultra.gitguts.workers.dev` |
-| 🏦 اکانت کلادفلر | `88a4e920dc6f9606c9987b872ac9ed69` (Fallonalim2@gmail.com) |
+| 🏦 اکانت کلادفلر | `88a4e920dc6f9606c9987b872ac9ed69` (the account that owns the worker) |
 | 🕓 آخرین دیپلوی | ۲۰۲۶-۰۹-۲۱ · نسخه `00f628e0-c2ed-41e1-aca4-4079048db441` |
 
 > **مهاجرت انجام شد.** استقرار از اکانت قبلی (`4beda91649bed6f5d1271b89056d0565`) به این اکانت منتقل شد، چون روی آن اکانت زیردامنه‌ی `*.workers.dev` از سمت کلادفلر خراب بود (هر اسکریپت، حتی «hello world»، خطای ۱۱۰۱ می‌گرفت). روی این اکانت `workers.dev` سالم است — همان «hello world» اول تست شد و `probe-ok` برگرداند.
