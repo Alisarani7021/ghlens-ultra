@@ -32,7 +32,7 @@ export const keys = {
       [{ text: "➕ " + (fa ? "اهدای کلید" : "Donate a key"), cb: "keys:add" }],
       [{ text: "🧪 " + (fa ? "تست کل استخر" : "Test the pool"), cb: "keys:test" }, { text: "📊 " + (fa ? "کلیدهای من" : "My keys"), cb: "keys:mine" }],
       [{ text: "♻️ " + (fa ? "پاک‌سازی کلیدهای خراب" : "Clean broken keys"), cb: "keys:clean" }],
-      [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      
     ), !!h.cbId);
   },
 

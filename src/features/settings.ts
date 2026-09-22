@@ -19,7 +19,7 @@ export class Settings {
       `🌐 <b>${fa ? "انتخاب زبان" : "Choose your language"}</b>\n\n${fa ? "زبان رابط ربات و زبان ترجمه‌های README را تعیین می‌کند." : "Sets UI + README translation language."}`,
       kb(
         ...options.map(([loc, label, native]) => [{ text: `${label}${loc === h.loc ? " ✅" : ""}`, cb: `lang:set:${loc}` }]),
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -41,7 +41,7 @@ export class Settings {
    * are a compact list, not a wall of emoji, and the onboarding card shows the
    * real state (linked or not).
    */
-  async home(h: H, loc?: Loc) {
+  async home(h: H, loc?: Loc, opts?: { force?: boolean }) {
     const lang = loc ?? h.loc;
     const fa = lang === "fa";
     const u = await h.store.user(h.u.id);
@@ -70,7 +70,7 @@ export class Settings {
     // the owner does not want two keyboards on screen
     await stripReplyKeyboard(h);
 
-    if (!linked) {
+    if (!linked && !opts?.force) {
       // step one, and only step one: link GitHub. Nothing else competes for
       // attention, and the card ends by telling them to press /start again
       await h.tg.sendMessage(h.chatId, githubSetupCard(fa, aiState), {
@@ -196,7 +196,7 @@ export class Settings {
         { text: "📥 " + (fa ? "دانلود" : "Download"), cb: "d:home" },
         { text: "🧰 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" },
       ],
-      [{ text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      [{ text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" }],
     ), !!h.cbId);
   }
 
@@ -226,7 +226,7 @@ All numbers come from GitHub's and OSV's real APIs; AI only summarises.`) +
           { text: "📚 " + (fa ? "راهنما" : "Help"), cb: "h:main" },
           { text: "🎙 " + (fa ? "پادکست" : "Podcast"), cb: "p:today" },
         ],
-        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -240,7 +240,7 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
     // every AI feature on, and the owner asked for it on the main page.
     [
       { text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
-      { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "me:home" },
+      { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
     ],
     [
       { text: L(loc, "search"), cb: "n:search" },
@@ -335,8 +335,10 @@ export function githubSetupKb(fa: boolean) {
   return kb(
     [{ text: "🔑 " + (fa ? "ساخت توکن در گیت‌هاب" : "Create the token"), url: createUrl }],
     [{ text: "📥 " + (fa ? "توکن را گرفتم، بفرستم" : "I have the token — paste it"), cb: "me:token" }],
+    // dup-ok: on the onboarding card there is no menu yet, and donating a key is
+    // how a user without an AI quota unlocks the assistant on the spot
     [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }],
-    [{ text: "⏭ " + (fa ? "فعلاً نه، منو را نشانم بده" : "Skip — show me the menu"), cb: "m:home" }],
+    [{ text: "⏭ " + (fa ? "فعلاً نه، منو را نشانم بده" : "Skip — show me the menu"), cb: "m:menu" }],
   );
 }
 

@@ -42,7 +42,7 @@ export const account = {
           `اتصال با توکن شخصی همیشه کار می‌کند و فقط خواندنِ عمومی کافی است.`
         : `🔗 Connect GitHub first — then the bot shows your repositories (public and private), languages, stars and organizations.`,
       kb(
-        [{ text: "🐙 " + (fa ? "اتصال حساب" : "Connect account"), cb: "me:link" }],
+        [{ text: "🐙 " + (fa ? "اتصال حساب گیت‌هاب" : "Link my GitHub"), cb: "me:link" }],
         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
       ),
       !!h.cbId,
@@ -114,9 +114,9 @@ export const account = {
 
     await h.reply(text, kb(
       [{ text: "📦 " + (fa ? "مخزن‌های من" : "My repos"), cb: "gh:repos:0" }, { text: "🔒 " + (fa ? "خصوصی‌ها" : "Private"), cb: "gh:private" }],
-      [{ text: "🏢 " + (fa ? "سازمان‌ها" : "Orgs"), cb: "gh:orgs" }, { text: "⭐ " + (fa ? "ستاره‌های من" : "My stars"), cb: "gh:starred:0" }],
-      [{ text: "📊 " + (fa ? "آمار دقیق" : "Details"), cb: "gh:stats" }, { text: "🔁 " + (fa ? "تازه‌سازی" : "Refresh"), cb: "gh:home" }],
-      [{ text: "🔓 " + (fa ? "جدا کردن حساب" : "Unlink"), cb: "me:unlink" }, { text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      [{ text: "🏢 " + (fa ? "سازمان‌های من" : "My orgs"), cb: "gh:orgs" }, { text: "⭐ " + (fa ? "ستاره‌های من" : "My stars"), cb: "gh:starred:0" }],
+      [{ text: "📊 " + (fa ? "آمار دقیق" : "Details"), cb: "gh:stats" }, { text: "🔄 " + (fa ? "بروزرسانی" : "Refresh"), cb: "gh:home" }],
+      [{ text: "🔓 " + (fa ? "جدا کردن حساب" : "Unlink"), cb: "me:unlink" }],
     ), !!h.cbId);
     await h.store.event(h.u.id, "gh_account", me.login);
   },
@@ -219,7 +219,7 @@ export const account = {
         `• ${fa ? "بدون توضیح" : "No description"}: <b>${empty}</b>\n` +
         `• ${fa ? "آرشیوشده" : "Archived"}: <b>${repos.filter((r) => r.archived).length}</b>\n` +
         `• ${fa ? "فورک" : "Forks"}: <b>${repos.filter((r) => r.fork).length}</b>`,
-      kb([[{ text: "📦 " + (fa ? "مخزن‌ها" : "Repos"), cb: "gh:repos:0" }, { text: "🔁 " + (fa ? "تازه‌سازی" : "Refresh"), cb: "gh:stats" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "gh:home" }]]),
+      kb([[{ text: "📦 " + (fa ? "مخزن‌ها" : "Repos"), cb: "gh:repos:0" }, { text: "🔄 " + (fa ? "بروزرسانی آمار" : "Refresh stats"), cb: "gh:stats" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "gh:home" }]]),
       true,
     );
   },

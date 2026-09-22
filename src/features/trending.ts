@@ -28,7 +28,7 @@ export class TrendingFeature {
       }
     }
     if (!rows.length) {
-      return h.reply(`😕 ${fa ? "داده‌ای برای این بازه نیست." : "No data for this window."}`, kb([{ text: "◀️", cb: "m:home" }]));
+      return h.reply(`😕 ${fa ? "داده‌ای برای این بازه نیست." : "No data for this window."}`, kb([]));
     }
 
     const slice = rows.slice(page * 10, page * 10 + 10);
@@ -64,10 +64,8 @@ export class TrendingFeature {
         { text: "🚀 " + (fa ? "بیشترین رشد" : "Growth leaders"), cb: "t:growth:7" },
       ],
       [
-        { text: "🌐 " + (fa ? "فیلتر زبان" : "Language"), cb: "t:lang:" + period },
-        { text: "🎙 " + (fa ? "پادکست امروز" : "Today's podcast"), cb: "p:today" },
+        { text: "🌐 " + (fa ? "فیلتر زبانِ تابلو" : "Board language"), cb: "t:lang:" + period },
       ],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" }],
     );
 
     await h.reply(head + body, keyboard, !!h.cbId);
@@ -111,14 +109,14 @@ export class TrendingFeature {
           { text: "🚀 " + (fa ? "بیشترین رشد" : "Growth"), cb: "t:growth:7" },
         ],
         [
-          { text: "🌐 " + (fa ? "فیلتر زبان" : "By language"), cb: "t:lang:daily" },
-          { text: "🎙 " + (fa ? "پادکست" : "Podcast"), cb: "p:today" },
+          { text: "🌐 " + (fa ? "زبانِ تابلوی روزانه" : "Daily board language"), cb: "t:lang:daily" },
+          { text: "🎙 " + (fa ? "پادکست امروز" : "Today's podcast"), cb: "p:today" },
         ],
         [
           { text: "🆕 " + (fa ? "تازه‌واردها" : "Newcomers"), cb: "t:new" },
           { text: "📈 " + (fa ? "نمودار هفتگی" : "Weekly chart"), cb: "t:chart" },
         ],
-        [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );

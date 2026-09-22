@@ -46,15 +46,13 @@ export class ProfileFeature {
           { text: "🎁 " + (fa ? "دعوت دوستان" : "Refer friends"), cb: "me:ref" },
         ],
         github
-          ? [{ text: "🐙 " + (fa ? "وضعیت حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
-             { text: "🔓 " + (fa ? "جدا کردن" : "Unlink"), cb: "me:unlink" }]
+          ? [{ text: "🐙 " + (fa ? "وضعیت حساب" : "Account status"), cb: "gh:home" }]
           : [{ text: "🐙 " + (fa ? "اتصال گیت‌هاب" : "Link GitHub"), cb: "me:link" },
              { text: "🤝 " + (fa ? "اهدای کلید AI" : "Donate AI key"), cb: "keys:home" }],
         [
-          { text: "⚡ " + (fa ? "پلن‌ها" : "Plans"), cb: "me:plan" },
+          { text: "⚡ " + (fa ? "ارتقای حساب" : "Upgrade account"), cb: "me:plan" },
           { text: "📤 " + (fa ? "خروجی داده‌های من" : "Export my data"), cb: "me:export" },
         ],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
       ),
       !!h.cbId,
     );
@@ -155,7 +153,7 @@ export class ProfileFeature {
     if (!rows.length) {
       return h.reply(
         `⭐ <b>${fa ? "علاقه‌مندی‌ها" : "Favourites"}</b>\n\n${fa ? "خالی است. روی هر مخزنی ⭐ را بزن تا اینجا جمع شود." : "Empty — star repos to collect them here."}`,
-        kb([[{ text: "🔥 " + (fa ? "کشف پروژه" : "Discover"), cb: "t:menu" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]]),
+        kb([[{ text: "🔥 " + (fa ? "کشف پروژه" : "Discover"), cb: "x:gems" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]]),
         !!h.cbId,
       );
     }
@@ -327,7 +325,7 @@ export class ProfileFeature {
     if (!interests.length && !langs.size) {
       return h.reply(
         `✨ <b>${fa ? "فید شخصی" : "Personal feed"}</b>\n\n${fa ? "برای شخصی‌سازی، علاقه‌مندی‌هایت را تنظیم کن." : "Set interests to personalise."}`,
-        kb([[{ text: "🧠 " + (fa ? "تنظیم علاقه‌مندی" : "Set interests"), cb: "me:interests" }], [{ text: "◀️", cb: "m:home" }]]),
+        kb([[{ text: "🧠 " + (fa ? "تنظیم علاقه‌مندی" : "Set interests"), cb: "me:interests" }], []]),
         !!h.cbId,
       );
     }

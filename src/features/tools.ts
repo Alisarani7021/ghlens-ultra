@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { setMode } from "../core/mode";
 import { bar } from "../github/rest";
 import { fmt } from "./cards";
 import { code, i, pre, tgEscape } from "../tg/types";
@@ -48,7 +49,7 @@ export class ToolsFeature {
           { text: "🕐 " + (fa ? "کرون‌ساز" : "Cron builder"), cb: "u:cron" },
           { text: "🧪 " + (fa ? "تست رجکس" : "Regex lab"), cb: "u:regex" },
         ],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -146,7 +147,7 @@ export class ToolsFeature {
   /** Wizard prompts used by the /ip and /asn commands. */
   async ipIntelPrompt(h: H) {
     const fa = h.loc === "fa";
-    await h.session.set("u:ip", true);
+    await setMode(h.session, "u:ip");
     return h.reply(
       `📡 <b>${fa ? "استعلام IP / دامنه" : "IP / domain intel"}</b>\n\n` +
         (fa ? "یک IP یا دامنه یا URL بفرست:\nمثال: <code>1.1.1.1</code> · <code>cloudflare.com</code>" : "Send an IP, domain or URL."),
@@ -160,7 +161,7 @@ export class ToolsFeature {
 
   async asnPrompt(h: H) {
     const fa = h.loc === "fa";
-    await h.session.set("u:asn", true);
+    await setMode(h.session, "u:asn");
     return h.reply(
       `🛰 <b>${fa ? "استعلام ASN" : "ASN lookup"}</b>\n\n` + (fa ? "شماره ASN را بفرست (مثال: <code>13335</code> برای Cloudflare)." : "Send an ASN number."),
       kb(

@@ -36,9 +36,9 @@ export class Contribute {
         ],
         [
           { text: "⚖️ " + (fa ? "قوانین مجوز" : "Licenses"), cb: "c:licenses" },
-          { text: "🧠 " + (fa ? "علاقه‌مندی‌ها" : "Interests"), cb: "me:interests" },
+          { text: "🎯 " + (fa ? "علاقه‌مندی‌های من" : "My interests"), cb: "me:interests" },
         ],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );

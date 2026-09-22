@@ -35,6 +35,7 @@ import { audioBytes, describe } from "./ai/brain";
 import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
 import { aiDownNotice, aiHalted } from "./ai/brain";
+import { readMode, touchMode, clearMode, modeKeeps, setMode } from "./core/mode";
 import { decryptSecret, encryptSecret } from "./core/crypto";
 import { keys as keysFeature } from "./features/keys";
 import { account as accountFeature } from "./features/account";
@@ -400,7 +401,8 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
         ? "⚠️ این بخش به هوش مصنوعی نیاز دارد و سهمیه‌اش امروز تمام شده.\n" +
           "تا برگشتنش می‌توانی از کارت مخزن، داغ‌ترین‌ها، کاوش عمیق، ابزارها و جست‌وجوی واژگانی استفاده کنی."
         : "⚠️ این بخش پاسخ نداد. یک بار دیگر بزن؛ اگر تکرار شد از منوی اصلی ادامه بده.";
-      const keyboard = { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }, { text: "🔎 جست‌وجو", callback_data: "n:search" }]] };
+      // a stuck flow gets two exits: home, or the deep-scout section
+      const keyboard = { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }, { text: "🛰 کاوش عمیق", callback_data: "s:home" }]] };
       try {
         if (guard.msgId) await tg.editMessageText(guard.chatId, guard.msgId, text, { parse_mode: "HTML", reply_markup: keyboard as any });
         else await tg.sendMessage(guard.chatId, text, { parse_mode: "HTML", reply_markup: keyboard as any });
@@ -481,7 +483,7 @@ async function githubTokenPrompt(h: H) {
         : `Tap “Create the token” (scopes pre-ticked), press Generate, paste it here. Stored encrypted; removable any time.`),
     kb(
       [{ text: "🔑 " + (fa ? "ساخت توکن در گیت‌هاب" : "Create the token"), url: createUrl }],
-      [{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "me:home" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      [{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "me:home" }],
     ),
     !!h.cbId,
   );
@@ -492,7 +494,7 @@ async function githubUnlink(h: H) {
   await h.env.DB.prepare(`UPDATE users SET github_login=NULL, github_token_enc=NULL, github_token_at=NULL WHERE id=?`)
     .bind(h.u.id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
   return h.reply(fa ? "🔓 حساب گیت‌هاب جدا شد و توکن پاک شد." : "🔓 GitHub unlinked, token deleted.",
-    kb([[{ text: "🐙 " + (fa ? "اتصال دوباره" : "Link again"), cb: "me:link" }], [{ text: "🏠", cb: "m:home" }]]), !!h.cbId);
+    kb([[{ text: "🐙 " + (fa ? "اتصال حساب" : "Connect account"), cb: "me:link" }]]), !!h.cbId);
 }
 
 async function buildH(
@@ -611,9 +613,10 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   if (text.length < 60 && /^(find|search|جست|پیدا|دنبال|چی|چه|recommend|پیشنهاد)/i.test(text)) {
     return search.run(h, text);
   }
-  if (text.endsWith("?") || text.endsWith("؟") || text.length > 60 || /\b(how|why|what|چطور|چگونه|چرا|آیا)\b/i.test(text)) {
-    return assistant.ask(h, text);
-  }
+  /* Everything typed outside a section searches for projects. The AI chat lives
+     in its own section (the 🤖 button) — a question typed here gets real search
+     results plus a one-tap «ask the AI» button, instead of the whole bot behaving
+     like a chat window. */
   return search.run(h, text);
 }
 
@@ -660,7 +663,7 @@ export function replyKeyAction(text: string, loc: string):
   if (!hit) return null;
   switch (hit.action) {
     case "home": return (h) => settings.home(h);
-    case "search": return (h) => h.reply((loc === "fa" ? "🔎 چه چیزی را پیدا کنم؟ بنویس:" : "🔎 What should I find? Type it:") + "", kb([[{ text: "🎯 " + (loc === "fa" ? "جست‌وجوی پیشرفته" : "Advanced search"), cb: "n:search" }], [{ text: "🏠", cb: "m:home" }]]), !!h.cbId);
+    case "search": return (h) => h.reply((loc === "fa" ? "🔎 چه چیزی را پیدا کنم؟ بنویس:" : "🔎 What should I find? Type it:") + "", kb([[{ text: "🎯 " + (loc === "fa" ? "جست‌وجوی پیشرفته" : "Advanced search"), cb: "n:search" }], []]), !!h.cbId);
     case "trending": return (h) => trendingMenuOrBoard(h, "");
     case "browse": return (h) => browse.menu(h);
     case "profile": return (h) => profile.home(h);
@@ -699,9 +702,9 @@ async function greetBack(h: H) {
       engine +
       (fa ? "\n\n<b>مثال:</b> «یک کتابخانه سبک برای صف در Go» یا <code>vuejs/core</code>" : "\n\n<b>Try:</b> “a lightweight queue library in Go” or <code>vuejs/core</code>"),
     kb(
-      [{ text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }, { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }],
-      [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }, { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" }],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      [{ text: "🛰 " + (fa ? "کاوش عمیق" : "Deep scout"), cb: "s:home" }],
+      [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+      
     ),
     !!h.cbId,
   );
@@ -818,88 +821,53 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       await keysFeature.accept(h, state, text);
     };
   }
-  if (await s.get("repochat")) {
-    const full = await s.get("repochat");
-    await s.clear(["repochat"]);
-    return (t) => assistant.repoChat(h, full, t);
+  /* ------------------------------------------------------------------ *
+   * The section the user is standing in decides what their text means.
+   * One mode, one handler — never a leftover flag from another screen.  *
+   * ------------------------------------------------------------------ */
+  const mode = await readMode(s);
+  if (mode) {
+    await touchMode(s, mode);   // being used keeps a section alive
+    const sec = mode.data?.section ? String(mode.data.section) : "";
+    switch (mode.kind) {
+      case "repochat": {
+        const full = String(mode.data?.full ?? "");
+        if (!full) break;
+        return (t) => assistant.repoChat(h, full, t);
+      }
+      case "ask": return (t) => assistant.ask(h, t);
+      case "wf": return (t) => assistant.workflow(h, t);
+      case "code": return (t) => assistant.code(h, t);
+      case "review": return (t) => assistant.review(h, t);
+      case "sec:scan": return (t) => security.scan(h, t.trim());
+      case "sec:secrets": return (t) => security.secrets(h, t.trim());
+      case "adm:broadcast": return (t) => admin.broadcast(h, t);
+      case "cmp": return (t) => scout.compare(h, String(mode.data?.a ?? ""), t.trim());
+      case "dvu:cron": return (t) => devutils.cron(h, t.trim());
+      case "dvu:regex": return (t) => devutils.runRegex(h, t.trim());
+      case "dvu:cidr": return (t) => devutils.cidr(h, t.trim());
+      case "dvu:jwt": return (t) => devutils.jwt(h, t.trim());
+      case "dvu:b64": return (t) => devutils.b64(h, t);
+      case "dvu:hash": return (t) => devutils.hash(h, t);
+      case "dvu:time": return (t) => devutils.time(h, t.trim());
+      case "dvu:json": return (t) => devutils.json(h, t);
+      case "dvu:semver": return (t) => devutils.semver(h, t.trim());
+      case "dvu:color": return (t) => devutils.color(h, t.trim());
+      case "u:ip": return (t) => tools.intel(h, t.trim());
+      case "u:asn": return (t) => tools.asn(h, t.trim());
+      default: void sec; break;
+    }
   }
-  if (await s.get("wf")) {
-    await s.clear(["wf"]);
-    return (t) => assistant.workflow(h, t);
+
+  /* Waiting for a pasted GitHub token: hand the text to the link flow, never
+     to search. (Armed by /login or the «توکن را گرفتم» button.) */
+  if (await s.get("me:token").catch(() => null)) {
+    return (t) => completeLink(h, t.trim());
   }
-  if (await s.get("code")) {
-    await s.clear(["code"]);
-    return (t) => assistant.code(h, t);
-  }
-  if (await s.get("review")) {
-    await s.clear(["review"]);
-    return (t) => assistant.review(h, t);
-  }
-  if (await s.get("sec:scan")) {
-    await s.clear(["sec:scan"]);
-    return (t) => security.scan(h, t.trim());
-  }
-  if (await s.get("sec:secrets")) {
-    await s.clear(["sec:secrets"]);
-    return (t) => security.secrets(h, t.trim());
-  }
-  if (await s.get("adm:broadcast")) {
-    await s.clear(["adm:broadcast"]);
-    return (t) => admin.broadcast(h, t);
-  }
-  if (await s.get("cmp")) {
-    const state: any = await s.get("cmp");
-    await s.clear(["cmp"]);
-    return (t) => scout.compare(h, state?.a ?? "", t.trim());
-  }
-  if (await s.get("dvu:cron")) {
-    await s.clear(["dvu:cron"]);
-    return (t) => devutils.cron(h, t.trim());
-  }
-  if (await s.get("dvu:regex")) {
-    await s.clear(["dvu:regex"]);
-    return (t) => devutils.runRegex(h, t.trim());
-  }
-  if (await s.get("dvu:cidr")) {
-    await s.clear(["dvu:cidr"]);
-    return (t) => devutils.cidr(h, t.trim());
-  }
-  if (await s.get("dvu:jwt")) {
-    await s.clear(["dvu:jwt"]);
-    return (t) => devutils.jwt(h, t.trim());
-  }
-  if (await s.get("dvu:b64")) {
-    await s.clear(["dvu:b64"]);
-    return (t) => devutils.b64(h, t);
-  }
-  if (await s.get("dvu:hash")) {
-    await s.clear(["dvu:hash"]);
-    return (t) => devutils.hash(h, t);
-  }
-  if (await s.get("dvu:time")) {
-    await s.clear(["dvu:time"]);
-    return (t) => devutils.time(h, t.trim());
-  }
-  if (await s.get("dvu:json")) {
-    await s.clear(["dvu:json"]);
-    return (t) => devutils.json(h, t);
-  }
-  if (await s.get("dvu:semver")) {
-    await s.clear(["dvu:semver"]);
-    return (t) => devutils.semver(h, t.trim());
-  }
-  if (await s.get("dvu:color")) {
-    await s.clear(["dvu:color"]);
-    return (t) => devutils.color(h, t.trim());
-  }
-  if (await s.get("u:ip")) {
-    await s.clear(["u:ip"]);
-    return (t) => tools.intel(h, t.trim());
-  }
-  if (await s.get("u:asn")) {
-    await s.clear(["u:asn"]);
-    return (t) => tools.asn(h, t.trim());
-  }
+
+  /* Old sessions carry one-shot flags ("wf", "code", …) written by the
+     previous build. They are not read any more — that is exactly the bug
+     the owner hit: a flag from yesterday answered today's question. */
   return null;
 }
 
@@ -944,7 +912,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         fa
           ? "🧹 <b>حالت پاک شد</b>\nهر پرسش نیمه‌تمام (جست‌وجو، اهدای کلید، بازبینی، ورک‌فلو…) کنار گذاشته شد. از صفر شروع کن."
           : "🧹 <b>Reset</b> — any half-finished step was dropped. Start fresh.",
-        kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }]),
+        kb([{ text: "🔎 " + (fa ? "جست‌وجوی پروژه" : "Project search"), cb: "n:search" }]),
         !!h.cbId,
       );
     }
@@ -987,7 +955,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         : h.reply(
             "📂 <b>فایل‌های مخزن</b>\nفرمت: <code>/files owner/repo</code> · مثلاً <code>/files facebook/react</code>\n" +
               "<i>درخت فایل‌ها را با پوشه‌بندی نشان می‌دهم؛ روی پوشه بزن تا داخلش را ببینی.</i>",
-            kb([{ text: "🛰 کاوش مخزن", cb: "dis:home" }, { text: "🏠 منو", cb: "m:home" }]),
+            kb([{ text: "🛰 کاوش مخزن", cb: "dis:home" }, ]),
           );
     case "/card": case "/share":
       return arg.trim()
@@ -995,7 +963,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         : h.reply(
             "🖼 <b>کارت اشتراک‌گذاری مخزن</b>\nفرمت: <code>/card owner/repo</code> · مثلاً <code>/card vuejs/core</code>\n" +
               "<i>یک کارت تصویری آمادهٔ فرستادن در چت می‌سازم.</i>",
-            kb([{ text: "🔎 جست‌وجو", cb: "s:home" }, { text: "🏠 منو", cb: "m:home" }]),
+            kb([{ text: "🔎 جست‌وجو", cb: "s:home" }, ]),
           );
     case "/similar": return discover.similar(h, normRepo(arg));
 
@@ -1055,13 +1023,13 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       return admin.home(h);
     case "/flag": {
       if (!isAdmin(h.env, h.u.id))
-        return h.reply("⛔ این دستور فقط برای مدیر ربات است.", kb([{ text: "🏠 منو", cb: "m:home" }]));
+        return h.reply("⛔ این دستور فقط برای مدیر ربات است.", kb([]));
       const [k, v] = arg.split(/\s+/);
       if (!k)
         return h.reply(
           "🚩 <b>پرچم‌های ربات</b> (فقط مدیر)\n<code>/flag &lt;نام&gt; on</code> · <code>/flag &lt;نام&gt; off</code>\n" +
             "<i>برای دیدن فهرست پرچم‌ها: <code>/flags</code></i>",
-          kb([{ text: "🚩 پرچم‌ها", cb: "adm:flags" }, { text: "🏠 منو", cb: "m:home" }]),
+          kb([{ text: "🚩 پرچم‌ها", cb: "adm:flags" }, ]),
         );
       return admin.setFlag(h, k, v ?? "on");
     }
@@ -1074,14 +1042,14 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
           ? `🔎 <b>حالت inline</b>\n\nدر هر چتی بنویس:\n<code>@${tgEscape(username)} react state</code>\n\n` +
             `اگر کار نکرد، از @BotFather → <code>/setinline</code> حالت inline را برای @${tgEscape(username)} فعال کن.`
           : `Inline mode: type <code>@${tgEscape(username)} react state</code> in any chat. Enable it via @BotFather → /setinline if needed.`,
-        kb([[{ text: "🐙 " + (fa ? "کارت مخزن" : "Repo card"), cb: "n:search" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
+        kb([[{ text: "🐙 " + (fa ? "کارت مخزن" : "Repo card"), cb: "n:search" }]]),
       );
     }
 
     default:
       return h.reply(
         `🤔 ${fa ? "دستور ناشناخته" : "Unknown command"}: <code>${cmd}</code>\n${fa ? "برای فهرست کامل" : "see"} /help`,
-        kb([[{ text: "📚 /help", cb: "h:main" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
+        kb([[{ text: "📚 /help", cb: "h:main" }]]),
       );
   }
 }
@@ -1101,7 +1069,7 @@ async function quotaBlocked(h: H) {
     `🚦 <b>${fa ? "سهمیه امروز تمام شد" : "Daily quota reached"}</b>\n\n${fa
       ? "سهمیه رایگان روزانه به پایان رسید. فردا صفر می‌شود، یا پلن Pro بگیر."
       : "Free daily quota used up."}`,
-    kb([[{ text: "⚡ " + (fa ? "پلن‌ها" : "Plans"), cb: "me:plan" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
+    kb([[{ text: "⚡ " + (fa ? "پلن‌ها" : "Plans"), cb: "me:plan" }]]),
   );
 }
 function downloader(h: H) {
@@ -1136,6 +1104,19 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
   const fa = h.loc === "fa";
   await store.event(q.from.id, "callback", `${ns}:${action}`);
 
+  /* Pressing a button means the user chose something else, so the section they
+     were typing into is over — unless the button belongs to that very section
+     (the key-donation wizard, for instance). This is what stops a leftover
+     "workflow" section from answering a question typed inside repo chat. */
+  const mode = await readMode(h.session);
+  if (mode) {
+    if (modeKeeps(mode.kind, data)) await touchMode(h.session, mode);
+    else await clearMode(h.session);
+  }
+  // walking away from the token prompt disarms it, so a later search query is
+  // never mistaken for a pasted token
+  if (!data.startsWith("me:")) await h.session.set("me:token", false).catch(() => null);
+
   const trending = new TrendingFeature(new TrendingEngine(env));
   const dl = downloader(h);
 
@@ -1146,6 +1127,9 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── global navigation ──
       case "m":
         if (action === "home" || action === "start") return settings.home(h);
+        // «فعلاً نه» on the onboarding card: the menu, even without GitHub —
+        // otherwise the skip button would bounce straight back to the card
+        if (action === "menu") return settings.home(h, undefined, { force: true });
         break;
       case "h":
         if (action === "main") return settings.help(h);
@@ -1226,11 +1210,24 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── assistant ──
       case "a":
         if (action === "home") return assistant.home(h);
-        if (action === "new") return assistant.home(h);
-        if (action === "cont") return h.reply(fa ? "✍️ سؤالت را بنویس…" : "Type your follow-up…", kb([[{ text: "◀️", cb: "a:home" }]]));
+        if (action === "new") {
+          // standing in the chat section: the next message is a question, not a
+          // search — and it stays that way until the user presses a button
+          await setMode(h.session, "ask");
+          return assistant.home(h);
+        }
+        if (action === "cont") {
+          await setMode(h.session, "ask");
+          return h.reply(fa ? "✍️ سؤالت را بنویس…" : "Type your follow-up…", kb([[{ text: "◀️", cb: "a:home" }]]));
+        }
+        if (action === "q") {
+          // «این را از هوش مصنوعی بپرس» — one tap from a search result
+          await setMode(h.session, "ask");
+          return assistant.ask(h, decode(arg));
+        }
         if (action === "clear") {
           await h.store.addMessage(`u${h.u.id}`, "system", "[conversation cleared]");
-          return h.reply(fa ? "🧹 حافظه پاک شد." : "🧹 memory cleared", kb([[{ text: "🏠", cb: "m:home" }]]));
+          return h.reply(fa ? "🧹 حافظه پاک شد." : "🧹 memory cleared", kb([[]]));
         }
         if (action === "repochat") return assistant.repoChat(h, args[0] ?? "");
         if (action === "workflow") return assistant.workflow(h);
@@ -1265,11 +1262,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "pkg") return tools.pkg(h);
         if (action === "conv") return tools.convert(h, args[0] ?? "deb", args[1] ?? "rpm");
         if (action === "inspect" || action === "convactions") return tools.pkg(h);
-        if (action === "ip") { await h.session.set("u:ip", true); return h.reply(fa ? "📡 IP یا دامنه را بفرست." : "Send IP or domain.", kb([[{ text: "◀️", cb: "u:home" }]])); }
+        if (action === "ip") { await setMode(h.session, "u:ip"); return h.reply(fa ? "📡 IP یا دامنه را بفرست." : "Send IP or domain.", kb([[{ text: "◀️", cb: "u:home" }]])); }
         if (action === "geo") return tools.intel(h, "8.8.8.8");
-        if (action === "dns") { await h.session.set("u:ip", true); return h.reply(fa ? "🧭 دامنه را بفرست." : "Send domain."); }
-        if (action === "tls") { if (args[0]) return tools.tls(h, args[0]); await h.session.set("u:ip", true); return h.reply(fa ? "🔐 دامنه را بفرست." : "Send domain."); }
-        if (action === "asn") { if (args[0]) return tools.asn(h, args[0]); await h.session.set("u:asn", true); return h.reply(fa ? "🛰 شماره ASN را بفرست (مثل 13335)." : "Send ASN number."); }
+        if (action === "dns") { await setMode(h.session, "u:ip"); return h.reply(fa ? "🧭 دامنه را بفرست." : "Send domain."); }
+        if (action === "tls") { if (args[0]) return tools.tls(h, args[0]); await setMode(h.session, "u:ip"); return h.reply(fa ? "🔐 دامنه را بفرست." : "Send domain."); }
+        if (action === "asn") { if (args[0]) return tools.asn(h, args[0]); await setMode(h.session, "u:asn"); return h.reply(fa ? "🛰 شماره ASN را بفرست (مثل 13335)." : "Send ASN number."); }
         if (action === "dev") return devutils.home(h);
         if (action === "cidr") return devutils.cidr(h);
         if (action === "cron") return devutils.cron(h);
@@ -1279,24 +1276,24 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── dev utils ──
       case "dvu":
         if (action === "home") return devutils.home(h);
-        if (action === "cron") { if (arg) return devutils.cron(h, arg); await h.session.set("dvu:cron", true); return devutils.cron(h); }
-        if (action === "regex") { if (arg) return devutils.runRegex(h, arg); await h.session.set("dvu:regex", true); return devutils.regex(h); }
-        if (action === "cidr") { if (arg) return devutils.cidr(h, arg); await h.session.set("dvu:cidr", true); return devutils.cidr(h); }
-        if (action === "jwt") { if (arg) return devutils.jwt(h, arg); await h.session.set("dvu:jwt", true); return devutils.jwt(h); }
+        if (action === "cron") { if (arg) return devutils.cron(h, arg); await setMode(h.session, "dvu:cron"); return devutils.cron(h); }
+        if (action === "regex") { if (arg) return devutils.runRegex(h, arg); await setMode(h.session, "dvu:regex"); return devutils.regex(h); }
+        if (action === "cidr") { if (arg) return devutils.cidr(h, arg); await setMode(h.session, "dvu:cidr"); return devutils.cidr(h); }
+        if (action === "jwt") { if (arg) return devutils.jwt(h, arg); await setMode(h.session, "dvu:jwt"); return devutils.jwt(h); }
         if (action === "b64" || action === "b64d") {
           if (arg) return devutils.b64(h, arg);
-          await h.session.set("dvu:b64", true);
+          await setMode(h.session, "dvu:b64");
           return devutils.b64(h);
         }
-        if (action === "hash") { if (arg) return devutils.hash(h, arg); await h.session.set("dvu:hash", true); return devutils.hash(h, ""); }
+        if (action === "hash") { if (arg) return devutils.hash(h, arg); await setMode(h.session, "dvu:hash"); return devutils.hash(h, ""); }
         if (action === "id") return devutils.id(h);
-        if (action === "time") { if (arg) return devutils.time(h, arg); await h.session.set("dvu:time", true); return devutils.time(h); }
-        if (action === "json") { if (arg) return devutils.json(h, decode(arg)); await h.session.set("dvu:json", true); return devutils.json(h); }
+        if (action === "time") { if (arg) return devutils.time(h, arg); await setMode(h.session, "dvu:time"); return devutils.time(h); }
+        if (action === "json") { if (arg) return devutils.json(h, decode(arg)); await setMode(h.session, "dvu:json"); return devutils.json(h); }
         if (action === "gitignore") return devutils.gitignore(h);
         if (action === "gi") return devutils.gitignoreFor(h, arg);
-        if (action === "semver") { if (arg) return devutils.semver(h, arg); await h.session.set("dvu:semver", true); return devutils.semver(h); }
+        if (action === "semver") { if (arg) return devutils.semver(h, arg); await setMode(h.session, "dvu:semver"); return devutils.semver(h); }
         if (action === "sv") return devutils.semver(h, arg);
-        if (action === "color") { if (arg) return devutils.color(h, arg); await h.session.set("dvu:color", true); return devutils.color(h); }
+        if (action === "color") { if (arg) return devutils.color(h, arg); await setMode(h.session, "dvu:color"); return devutils.color(h); }
         break;
 
       // ── security ──
@@ -1678,8 +1675,8 @@ async function showIds(h: H) {
         ? "برای دسترسی ادمین، عدد «آیدی کاربری» را در متغیر ADMIN_IDS فایل wrangler.jsonc بگذار و دوباره دیپلوی کن."
         : "Put the user id into ADMIN_IDS in wrangler.jsonc and redeploy for admin access."}</i>`,
     kb(
-      [{ text: "👤 " + (fa ? "پروفایل" : "Profile"), cb: "me:home" }, { text: "🛠 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" }],
-      [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      [{ text: "👤 " + (fa ? "پروفایل" : "Profile"), cb: "me:home" }, { text: "🛠 " + (fa ? "جعبه‌ابزار" : "Toolbox"), cb: "u:home" }],
+      
     ),
     !!h.cbId,
   );
@@ -1950,7 +1947,7 @@ export async function completeLink(h: H, token: string): Promise<void> {
           `<i>Delete the message with your token. /logout to disconnect.</i>`),
     kb(
       [{ text: "🚀 " + (fa ? "دوباره /start" : "Press /start again"), cb: "m:start" }],
-      [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+      
     ),
     true,
   );

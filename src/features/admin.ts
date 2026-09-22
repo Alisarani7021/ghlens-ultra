@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { setMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
 import { fmt, meterBar } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
@@ -65,7 +66,7 @@ export class Admin {
           { text: "🎙 " + (fa ? "ساخت پادکست" : "Build podcast"), cb: "adm:podcast" },
           { text: "🧪 " + (fa ? "تست AI" : "AI self-test"), cb: "adm:aitest" },
         ],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -98,7 +99,7 @@ export class Admin {
     const fa = h.loc === "fa";
     if (!isAdmin(h.env, h.u.id)) return;
     if (!text) {
-      await h.session.set("adm:broadcast", true);
+      await setMode(h.session, "adm:broadcast");
       return h.reply(`📣 ${fa ? "متن پیام همگانی را بفرست (HTML مجاز است)." : "Send broadcast text."}`,
         kb([[{ text: "◀️ " + (fa ? "لغو" : "Cancel"), cb: "adm:home" }]]));
     }

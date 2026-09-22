@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { setMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
 import { SecurityEngine } from "../github/osv";
 import { fmt, truncate } from "./cards";
@@ -37,7 +38,7 @@ export class SecurityFeature {
         recent.results?.length
           ? [[{ text: "🗂 " + (fa ? "هشدارهای اخیر" : "Recent advisories"), cb: "sec:recent" }]]
           : [],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -45,7 +46,7 @@ export class SecurityFeature {
 
   async askRepo(h: H, action: string) {
     const fa = h.loc === "fa";
-    await h.session.set(`sec:${action}`, true);
+    await setMode(h.session, `sec:${action === "secrets" ? "secrets" : "scan"}`);
     await h.reply(
       `🛡 <b>${action === "secrets" ? (fa ? "جست‌وجوی کلید لو رفته" : "Secret hunt") : (fa ? "اسکن آسیب‌پذیری" : "Vulnerability scan")}</b>\n\n` +
         (fa ? "اسم مخزن را بفرست (فرمت <code>owner/repo</code>)." : "Send the repo (owner/repo).") +
@@ -155,7 +156,7 @@ export class SecurityFeature {
           "\n\nبرای فعال‌سازی هشدار لحظه‌ای، روی هر مخزن 🔔 را بزن و گزینه امنیت را انتخاب کن."
         : "Monitored repos and recorded advisories."),
       kb(
-        [{ text: "🔔 " + (fa ? "اشتراک‌های من" : "My subs"), cb: "sub:list" }, { text: "🧰 " + (fa ? "ابزار شبکه" : "Network"), cb: "u:ip" }],
+        [{ text: "🧰 " + (fa ? "ابزار شبکه" : "Network"), cb: "u:ip" }],
         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "sec:home" }],
       ),
       !!h.cbId,

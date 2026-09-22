@@ -11,4 +11,5 @@ echo "▸ typecheck ($(node_modules/.bin/tsc --version))"
 node_modules/.bin/tsc --noEmit
 echo "▸ tests"
 node scripts/sqlcheck.mjs | tail -1
+node scripts/check-dup-keys.mjs | tail -1
 node scripts/selftest.mjs | tail -1

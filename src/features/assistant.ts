@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { setMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
 import { RepoRag } from "../ai/vector";
 import { aiDownNotice } from "../ai/brain";
@@ -30,7 +31,6 @@ export class Assistant {
         [
           { text: "💬 " + (fa ? "گفت‌وگوی جدید" : "New chat"), cb: "a:new" },
           { text: "🧠 " + (fa ? "چت با مخزن" : "Chat with repo"), cb: "a:repochat" },
-          { text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
         ],
         [
           { text: "📝 " + (fa ? "ترجمه README" : "Translate README"), cb: "ai:tr:ask" },
@@ -47,7 +47,7 @@ export class Assistant {
         chat.results?.length
           ? [[{ text: "🕘 " + (fa ? "ادامه گفت‌وگو" : "Continue chat"), cb: "a:cont" }]]
           : [],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -108,7 +108,7 @@ export class Assistant {
         ],
         [
           { text: "🔎 " + (fa ? "جست‌وجوی این جمله" : "Search this"), cb: `n:q:${encodeURIComponent(question).replace(/%/g, "_").slice(0, 36)}` },
-          { text: "🧹 " + (fa ? "گفت‌وگوی جدید" : "New chat"), cb: "a:clear" },
+          { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" },
         ],
       ),
       !!h.cbId,
@@ -119,7 +119,7 @@ export class Assistant {
   async repoChat(h: H, full: string, question?: string) {
     const fa = h.loc === "fa";
     if (!question) {
-      await h.session.set("repochat", full);
+      await setMode(h.session, "repochat", { full });   // stays until they leave the chat
       return h.reply(
         `🧠 <b>${fa ? "چت با مخزن" : "Chat with repo"}</b>\n\n` + (fa
           ? `مخزن هدف: <code>${tgEscape(full)}</code>\n\nهر سؤالی بپرس — از داخل README و مستندات جواب می‌دهم و منبع می‌دهم.\nمثال:\n• «چطور نصبش کنم؟»\n• «از کدام دیتابیس پشتیبانی می‌کند؟»\n• «آیا احراز هویت دارد؟»`
@@ -318,7 +318,7 @@ export class Assistant {
   async workflow(h: H, description?: string) {
     const fa = h.loc === "fa";
     if (!description) {
-      await h.session.set("wf", true);
+      await setMode(h.session, "wf");
       return h.reply(
         `⚙️ <b>GitHub Actions</b>\n\n${fa ? "توضیح بده چه ورک‌فلویی می‌خواهی:\nمثال: «CI برای نود با تست و کش روی هر PR»" : "Describe the workflow you need."}`,
         kb([
@@ -350,7 +350,6 @@ export class Assistant {
       kb(
         [
           { text: "🔁 " + (fa ? "بازسازی" : "Regenerate"), cb: `a:wf:${description.slice(0, 120)}` },
-          { text: "🧪 " + (fa ? "تست رجکس" : "Regex lab"), cb: "u:regex" },
         ],
         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:workflow" }],
       ),
@@ -362,7 +361,7 @@ export class Assistant {
   async code(h: H, snippet?: string) {
     const fa = h.loc === "fa";
     if (!snippet) {
-      await h.session.set("code", true);
+      await setMode(h.session, "code");
       return h.reply(
         `🧑‍💻 <b>${fa ? "توضیح کد" : "Code explainer"}</b>\n\n${fa ? "کد را بفرست (در یک پیام یا به‌صورت بلوک کد) تا توضیح بدهم: هدف، جریان، نکات ظریف، پیچیدگی و دو پیشنهاد بهبود." : "Send code and I'll explain it."}`,
         kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
@@ -372,7 +371,7 @@ export class Assistant {
     const out = await h.ai.explainCode(snippet, h.loc);
     await h.reply(
       (out || (await aiDownNotice(h.env, h.loc))).slice(0, 3800),
-      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }], [{ text: "🧪 " + (fa ? "دوباره" : "Again"), cb: "a:code" }]]),
+      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }], [{ text: "🧪 " + (fa ? "کد دیگر بده" : "Explain another"), cb: "a:code" }]]),
       !!h.cbId,
     );
   }
@@ -380,7 +379,7 @@ export class Assistant {
   async review(h: H, target?: string) {
     const fa = h.loc === "fa";
     if (!target) {
-      await h.session.set("review", true);
+      await setMode(h.session, "review");
       return h.reply(
         `🔍 <b>${fa ? "بازبینی PR" : "PR review"}</b>\n\n${fa ? "فرمت: <code>/review owner/repo#123</code>\nمن دیف را می‌گیرم و مثل یک مهندس ارشد بازبینی می‌کنم." : "Format: <code>/review owner/repo#123</code>"}`,
         kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),

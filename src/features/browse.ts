@@ -116,14 +116,14 @@ export class BrowseFeature {
       kb(
         ...chunk(entries, 2).map((row) => row.map(([key, v]) => ({ text: `${v.icon} ${fa ? v.fa : v.en}`, cb: `b:c:${key}` }))),
         [
-          { text: "🏢 " + (fa ? "سازمان‌ها" : "Organizations"), cb: "b:orgs" },
+          { text: "🏢 " + (fa ? "مرور سازمان‌ها" : "Browse orgs"), cb: "b:orgs" },
           { text: "👤 " + (fa ? "توسعه‌دهنده‌ها" : "Developers"), cb: "b:users" },
         ],
         [
           { text: "🕰 " + (fa ? "سفر در زمان" : "Time travel"), cb: "b:time" },
           { text: "🏅 " + (fa ? "لیست‌های Awesome" : "Awesome lists"), cb: "b:awesome" },
         ],
-        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -219,10 +219,9 @@ export class BrowseFeature {
       kb(
         [...items.slice(0, 5).map((u) => [{ text: `👤 ${u.login}`, url: `https://github.com/${u.login}` }])],
         [
-          { text: "🎯 " + (fa ? "علاقه‌مندی‌هایم" : "My interests"), cb: "me:interests" },
-          { text: "🔁 " + (fa ? "صفحه بعد" : "Next"), cb: `b:users:${page + 1}` },
+                    { text: "🔁 " + (fa ? "صفحه بعد" : "Next"), cb: `b:users:${page + 1}` },
         ],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }, { text: "🏠", cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }, ],
       ),
       !!h.cbId,
     );
@@ -313,7 +312,7 @@ export class BrowseFeature {
         (fa ? "<i>روی هرکدام بزن تا کارت کامل باز شود.</i>" : ""),
       kb(
         ...links.slice(0, 20).map((l) => [{ text: truncate(l.title, 40), cb: `s:go:${l.url.replace("https://github.com/", "")}` }]),
-        [{ text: "🎲 " + (fa ? "یکی تصادفی" : "Random"), cb: "x:random" }],
+        
       ),
       !!h.cbId,
     );

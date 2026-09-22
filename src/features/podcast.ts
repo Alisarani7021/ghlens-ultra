@@ -27,7 +27,7 @@ export async function podcastRoutes(h: H, scope: "daily" | "weekly" = "daily") {
       await h.tg.sendAudio(h.chatId, buf, `🎙 ${fa ? "پادکست" : "podcast"} ${scope} — ${day}`, {
         reply_markup: kb(
           [{ text: "📜 " + (fa ? "متن پادکست" : "Transcript"), cb: `p:text:${scope}` }],
-          [{ text: "🔥 " + (fa ? "منابع امروز" : "Today's sources"), cb: "t:b:0,daily,all" }, { text: "🗓 " + (fa ? "هفتگی" : "Weekly"), cb: "p:weekly" }],
+          [{ text: "🔥 " + (fa ? "منابع امروز" : "Today's sources"), cb: "t:b:0,daily,all" }, { text: "🗓 " + (fa ? "نسخهٔ هفتگی" : "Weekly edition"), cb: "p:weekly" }],
         ),
       });
       return;
@@ -37,13 +37,13 @@ export async function podcastRoutes(h: H, scope: "daily" | "weekly" = "daily") {
   // otherwise build it now (this is the first-listener-pays model)
   const built = await pod.publish(rows, scope);
   if (!built) {
-    return h.reply(`😕 ${fa ? "تولید پادکست ممکن نشد (سهمیه AI)." : "podcast generation unavailable."}`, kb([[{ text: "◀️", cb: "m:home" }]]), !!h.cbId);
+    return h.reply(`😕 ${fa ? "تولید پادکست ممکن نشد (سهمیه AI)." : "podcast generation unavailable."}`, kb([[]]), !!h.cbId);
   }
   if (!built.key) {
     return h.reply(
       `📜 <b>${fa ? "متن پادکست" : "Podcast script"}</b>\n<i>${fa ? "(سرویس صوتی در دسترس نبود — متن آماده است)" : "(TTS unavailable — script only)"}</i>\n\n` +
         tgEscape(built.script).slice(0, 3400),
-      kb([[{ text: "🔁 " + (fa ? "دوباره" : "Retry"), cb: "p:today" }, { text: "◀️", cb: "m:home" }]]),
+      kb([[{ text: "🔁 " + (fa ? "دوباره" : "Retry"), cb: "p:today" }, ]]),
       !!h.cbId,
     );
   }
@@ -53,7 +53,7 @@ export async function podcastRoutes(h: H, scope: "daily" | "weekly" = "daily") {
     await h.tg.sendAudio(h.chatId, buf, `🎙 ${fa ? "پادکست تازه" : "fresh podcast"} — ${day}`, {
       reply_markup: kb(
         [{ text: "📜 " + (fa ? "متن" : "Transcript"), cb: `p:text:${scope}` }],
-        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:b:0,daily,all" }],
+        [{ text: "🔥 " + (fa ? "تابلوی امروز" : "Today's board"), cb: "t:b:0,daily,all" }],
       ),
     });
   }
@@ -63,7 +63,7 @@ export async function podcastRoutes(h: H, scope: "daily" | "weekly" = "daily") {
     kb(
       [{ text: "🗓 " + (fa ? "پادکست هفتگی" : "Weekly edition"), cb: "p:weekly" }],
       [{ text: "📊 " + (fa ? "نمودار رشد" : "Growth chart"), cb: "t:chart" }],
-      [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      
     ),
   );
 }
@@ -83,7 +83,7 @@ export async function podcastText(h: H, scope: "daily" | "weekly" = "daily") {
   }
   return h.reply(
     `📜 <b>${fa ? "متن پادکست" : "Script"}</b>\n\n${tgEscape(script).slice(0, 3600)}`,
-    kb([[{ text: "🎙 " + (fa ? "شنیدن" : "Listen"), cb: "p:today" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }]]),
+    kb([[{ text: "🎙 " + (fa ? "شنیدن" : "Listen"), cb: "p:today" }]]),
     !!h.cbId,
   );
 }

@@ -68,6 +68,25 @@ export class KeyPool {
   static readonly COOLDOWN_MS = 10 * 60_000;
 
   /** Pool ordered for use: healthiest first, least-recently-used first. */
+  /**
+   * Keys that answered recently but are sitting in the cooldown right now.
+   * Used as a last resort: if every other engine failed and the only thing
+   * standing between the user and an answer is a 10-minute timer, waiting is
+   * worse than trying again.
+   */
+  async cooling(limit = 2): Promise<LiveKey[]> {
+    const rows = await this.rows();
+    const out: LiveKey[] = [];
+    for (const r of rows
+      .filter((r) => r.status === "warn" && Number(r.ok_count ?? 0) > 0 &&
+        Date.now() - Number(r.last_fail_at ?? 0) <= KeyPool.COOLDOWN_MS)
+      .slice(0, limit)) {
+      const key = await decryptSecret(this.env, r.enc_key, "ai-key");
+      if (key !== null) out.push({ id: r.id, provider: r.provider, baseUrl: r.base_url, model: r.model, key });
+    }
+    return out;
+  }
+
   async candidates(limit = 8): Promise<LiveKey[]> {
     const cached = await this.env.CACHE.get<PoolKey[]>(KeyPool.CACHE_KEY, "json").catch(() => null);
     const rows = cached ?? (await this.rows()).slice(0, 40);
@@ -152,9 +171,11 @@ export class KeyPool {
    * that name and put the key back in service. Without this, one retirement
    * would silently remove a working key from the pool.
    */
-  async repairModel(id: number, baseUrl: string, key: string): Promise<string | null> {
+  async repairModel(id: number, baseUrl: string, key: string, avoid?: string): Promise<string | null> {
     const { models } = await KeyPool.listModels(baseUrl, key).catch(() => ({ models: [] as string[] }));
-    for (const candidate of models.filter((m) => !KeyPool.NOT_CHAT.test(m)).slice(0, 5)) {
+    for (const candidate of models
+      .filter((m) => !KeyPool.NOT_CHAT.test(m) && m !== avoid)
+      .slice(0, 5)) {
       try {
         const r = await KeyPool.ping(KeyPool.normalizeBase(baseUrl), key, candidate);
         if (!r.ok) continue;
@@ -195,6 +216,14 @@ export class KeyPool {
   private static readonly NOT_CHAT = /(embed|embedding|whisper|tts|audio|image|dall|moderation|rerank|clip|stable|flux|guard|vision-encoder)/i;
 
   /**
+   * Reasoning models spend their budget thinking and can return an *empty*
+   * message when max_tokens is small — which looks exactly like a broken key.
+   * They still work (we set reasoning_effort low), but plain chat models are
+   * tried first.
+   */
+  static readonly REASONING = /(gpt-oss|deepseek-r1|\bqwq|\bo1\b|\bo3\b|\bo4\b|thinking|reasoner|magistral)/i;
+
+  /**
    * Ask the provider which models it has, best-first for chat.
    * Free/cheap chat models first, embedding and image models last.
    */
@@ -211,6 +240,7 @@ export class KeyPool {
       const rank = (id: string) => {
         let s = 0;
         if (KeyPool.NOT_CHAT.test(id)) s += 100;                        // never a chat model
+        if (KeyPool.REASONING.test(id)) s += 12;                        // usable, but last
         if (/free/i.test(id)) s -= 3;                                   // free tiers first
         if (/70b|72b|large|pro|sonnet|gpt-4|gpt-5|o[13]|command-r|mixtral/i.test(id)) s -= 2;
         if (/8b|7b|mini|flash|lite|small|instant|haiku/i.test(id)) s -= 1;

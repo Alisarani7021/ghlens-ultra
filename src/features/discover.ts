@@ -23,7 +23,7 @@ export class Discover {
     const since = new Date(Date.now() - 240 * 86400000).toISOString().slice(0, 10);
     const res = await h.gh().searchRepos(`stars:50..800 pushed:>${iso(-30)} created:>${since} archived:false`, "updated", "desc", 30, 1).catch(() => null);
     let items = res?.items ?? [];
-    if (!items.length) return h.reply(fa ? "چیزی پیدا نشد." : "Nothing found.", kb([{ text: "◀️", cb: "m:home" }]), !!h.cbId);
+    if (!items.length) return h.reply(fa ? "چیزی پیدا نشد." : "Nothing found.", kb([]), !!h.cbId);
 
     // re-rank locally by a quality/obscurity blend
     const scored = items.map((r: any) => {
@@ -51,9 +51,9 @@ export class Discover {
         ...slice.slice(0, 6).map((r: any, i2: number) => [{ text: `${page * 8 + i2 + 1}. ${r.full_name}`, cb: `s:go:${r.full_name}` }]),
         [
           { text: "➡️ " + (fa ? "بعدی" : "More"), cb: `x:gems:${page + 1}` },
-          { text: "🎲 " + (fa ? "تصادفی" : "Random"), cb: "x:random" },
+
         ],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -101,7 +101,7 @@ export class Discover {
           { text: "✨ " + (fa ? "گنج‌های پنهان" : "Hidden gems"), cb: "x:gems" },
         ],
         ...card.keyboard.inline_keyboard.slice(2, 6),
-        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -272,7 +272,7 @@ export class Discover {
   async shareCard(h: H, full: string) {
     const fa = h.loc === "fa";
     const meta: any = await h.store.repoFresh(full, 900);
-    if (!meta) return h.reply(fa ? "❌ پیدا نشد." : "❌ not found", kb([{ text: "◀️", cb: "m:home" }]), !!h.cbId);
+    if (!meta) return h.reply(fa ? "❌ پیدا نشد." : "❌ not found", kb([]), !!h.cbId);
 
     const url = `${h.env.WORKER_URL}/api/card?repo=${encodeURIComponent(full)}&v=2`;
     if (h.env.BROWSER) {
@@ -327,7 +327,6 @@ export class Discover {
         `</pre>`,
       kb(
         ...top.slice(0, 6).map(([t]) => [{ text: `#${t}`, cb: `b:s:${encodeURIComponent(`topic:${t} stars:>300`).replace(/%/g, "_")}` }]),
-        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
       ),
       !!h.cbId,
     );

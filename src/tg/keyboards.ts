@@ -74,17 +74,30 @@ function normaliseRows(args: BtnArg[]): Btn[][] {
   return out;
 }
 
-export const kb = (...rows: BtnArg[]): InlineKeyboardMarkup => ({
-  inline_keyboard: normaliseRows(rows).map((row) =>
-    row.map((b) => ({
-      text: b.text,
-      ...(b.cb ? { callback_data: b.cb } : {}),
-      ...(b.url ? { url: b.url } : {}),
-      ...(b.web ? { web_app: { url: b.web } } : {}),
-      ...(b.copy ? { copy_text: { text: b.copy } } : {}),
-    })),
-  ),
-});
+export const kb = (...rows: BtnArg[]): InlineKeyboardMarkup => {
+  const grid = normaliseRows(rows)
+    .map((row) => row.filter((b) => b && (b.cb || b.url || b.web || b.copy)))
+    .filter((row) => row.length > 0);
+
+  /* Safety net: Telegram rejects an empty keyboard, and a screen with no way
+     out is worse than a generic one. If a section ends up with no keys at all
+     (every button was a duplicate we removed), give it a way home. */
+  if (!grid.length) {
+    return { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }]] };
+  }
+
+  return {
+    inline_keyboard: grid.map((row) =>
+      row.map((b) => ({
+        text: b.text,
+        ...(b.cb ? { callback_data: b.cb } : {}),
+        ...(b.url ? { url: b.url } : {}),
+        ...(b.web ? { web_app: { url: b.web } } : {}),
+        ...(b.copy ? { copy_text: { text: b.copy } } : {}),
+      })),
+    ),
+  };
+};
 
 export const L = (loc: Loc | string, key: string) => (LBL[(loc as Loc)] ?? LBL.en)[key] ?? LBL.en[key] ?? key;
 

@@ -48,13 +48,12 @@ export class Downloader {
         : "Grab any repo's source straight into Telegram — ZIP/TAR, any ref, auto-split for big repos.")
         + `\n\n<code>/dl owner/repo [@tag] [zip|tar]</code>`,
       kb(
-        [{ text: "🔥 " + (fa ? "از داغ‌ترین‌ها" : "From trending"), cb: "d:trending" }],
+        [{ text: "🔥 " + (fa ? "پیشنهاد داغ" : "Hot pick"), cb: "d:trending" }],
         [
           { text: "⭐ " + (fa ? "از علاقه‌مندی‌ها" : "From favourites"), cb: "d:favs" },
-          { text: "🎲 " + (fa ? "تصادفی" : "Random"), cb: "x:random" },
         ],
         recent.results?.length ? [[{ text: "🕘 " + (fa ? "دانلودهای اخیر" : "Recent downloads"), cb: "d:recent" }]] : [],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -235,7 +234,7 @@ export class Downloader {
     if (sent === 0) return this.fetchFailed(h, full, 0);
     if (sent === 1) {
       // it turned out to fit in one part anyway
-      await h.reply(`✅ <b>${tgEscape(base)}</b> — ${(total / 1048576).toFixed(2)} MB`, kb([{ text: "📥 " + (fa ? "دانلود دیگر" : "Another ref"), cb: `d:repo:${full}` }], [{ text: "◀️", cb: "m:home" }]));
+      await h.reply(`✅ <b>${tgEscape(base)}</b> — ${(total / 1048576).toFixed(2)} MB`, kb([{ text: "📥 " + (fa ? "دانلود دیگر" : "Another ref"), cb: `d:repo:${full}` }], []));
     } else {
       await h.tg.sendMessage(h.chatId,
         `✅ <b>${fa ? "همه پارت‌ها ارسال شد" : "All parts sent"}</b> — ${sent} × ${(this.partSize / 1048576).toFixed(0)} MB\n` +

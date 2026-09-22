@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { setMode } from "../core/mode";
 import { GithubGraphQL, toRepoMeta, type RepoMeta } from "../github/graphql";
 import { GithubRest, bar, healthScore, sparkline } from "../github/rest";
 import { TrendingEngine } from "../github/trending";
@@ -45,7 +46,7 @@ export class DeepScout {
           { text: "🧠 " + (fa ? "تحلیل هوشمند یک مخزن" : "AI dossier"), cb: "ai:repo:cloudflare/workers-sdk" },
           { text: "⚖️ " + (fa ? "مقایسه دو مخزن" : "Compare two"), cb: "s:cmp:" },
         ],
-        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -58,7 +59,7 @@ export class DeepScout {
     try {
       await h.loading(h.loc === "fa" ? "🛰 در حال کاوش عمیق (۱۲ تب)…" : "🛰 deep scouting (12 tabs)…");
       const data = await this.scout(h, full);
-      if (!data) return h.reply(`❌ ${h.loc === "fa" ? "مخزن پیدا نشد یا دسترسی ندارم." : "Repo not found."}`, kb([{ text: "◀️", cb: "m:home" }]), !!h.cbId);
+      if (!data) return h.reply(`❌ ${h.loc === "fa" ? "مخزن پیدا نشد یا دسترسی ندارم." : "Repo not found."}`, kb([]), !!h.cbId);
       await h.store.saveRepo(data.meta);
       const text = await this.tab(h, data, tab);
       await h.reply(text, this.tabsKeyboard(h, full, tab), !!h.cbId);
@@ -123,7 +124,7 @@ export class DeepScout {
         { text: "🔔 " + (fa ? "اشتراک" : "Subscribe"), cb: `sub:add:${full}` },
         { text: "📥 " + (fa ? "دانلود" : "Download"), cb: `d:repo:${full}` },
       ],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "◀️ " + (fa ? "کارت مخزن" : "Repo card"), cb: `s:card:${full}` }],
+      [{ text: "◀️ " + (fa ? "کارت مخزن" : "Repo card"), cb: `s:card:${full}` }],
     );
   }
 
@@ -405,12 +406,12 @@ export class DeepScout {
   async compare(h: H, a: string, b?: string) {
     const fa = h.loc === "fa";
     if (!b) {
-      await h.session?.set("cmp", { a });
+      await setMode(h.session, "cmp", { a });
       return h.reply(
         `⚖️ <b>${fa ? "مقایسه" : "Compare"}</b>\n\n` + (fa
           ? `مخزن اول: <code>${tgEscape(a || "—")}</code>\nحالا مخزن دوم را بفرست (قالب <code>owner/repo</code>).`
           : `First: <code>${tgEscape(a || "—")}</code>. Now send the second one.`),
-        kb([{ text: "◀️ " + (fa ? "لغو" : "Cancel"), cb: "m:home" }]),
+        kb(),
         !!h.cbId,
       );
     }

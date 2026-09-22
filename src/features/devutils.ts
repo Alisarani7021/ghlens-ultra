@@ -41,7 +41,7 @@ export class DevUtils {
           { text: "🔢 " + (fa ? "نسخه‌گذاری" : "SemVer"), cb: "dvu:semver" },
           { text: "🎨 " + (fa ? "رنگ" : "Color"), cb: "dvu:color" },
         ],
-        [{ text: "◀️ " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        
       ),
       !!h.cbId,
     );
@@ -232,7 +232,7 @@ export class DevUtils {
     await h.reply(
       `#️⃣ <b>${fa ? "هش" : "Hash"}</b> <code>${tgEscape(input.slice(0, 60))}</code>\n\n${out.join("\n\n")}\n\n` +
         `<i>${fa ? "برای md5/bcrypt از ابزار محلی استفاده کن — WebCrypto پشتیبانی نمی‌کند." : "MD5 isn't in WebCrypto."}</i>`,
-      kb([[{ text: "🔁 " + (fa ? "ورودی دیگر" : "Another"), cb: "dvu:hash" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
+      kb([[{ text: "🔁 " + (fa ? "ورودی دیگر" : "Another"), cb: "dvu:hash" }]]),
       !!h.cbId,
     );
   }
@@ -443,7 +443,7 @@ export function nextRuns(expr: string, count: number): Date[] {
         const step = stepMatch[2] ? Number(stepMatch[2]) : 1;
         if ((value - min) % step === 0) return true;
       } else if (seg.includes("-")) {
-        const [, a, b, , st] = stepMatch as any;
+        const [, a, b, st] = stepMatch as any;
         const step = st ? Number(st) : 1;
         if (value >= Number(a) && value <= Number(b) && (value - Number(a)) % step === 0) return true;
       } else if (Number(seg) === value) return true;

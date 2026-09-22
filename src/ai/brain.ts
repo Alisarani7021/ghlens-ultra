@@ -147,6 +147,21 @@ export class AiBrain {
         continue; // capacity/limits → try the next model
       }
     }
+    /* One last door before giving up: a donated key that is only waiting out
+       its cooldown. A working key should never sit idle while the user stares
+       at "AI is down" — the worst case is one more request, the best case is a
+       real answer. */
+    if (!text && this.poolAttempted) {
+      text = await this.tryCooling(messages, opts).catch(() => "");
+      if (text) {
+        this.failure = null;
+        await this.env.CACHE.delete("ai:halt").catch(() => null);
+        console.error("ai-answered-from-cooling-key");
+        if (cacheKey) await this.env.CACHE.put(cacheKey, text, { expirationTtl: opts.cacheTtl ?? 604800 }).catch(() => null);
+        return text;
+      }
+    }
+
     if (!text) {
       console.error("ai-chain-exhausted", failures.join(" | "));
       // If donated keys were tried and did not answer, that is the cause the
@@ -286,6 +301,35 @@ export class AiBrain {
   /** Set when the pool was consulted this request (used for honest notices). */
   private poolAttempted = false;
 
+  /**
+   * Last resort: the keys that are merely cooling down.
+   * Called only when every other engine (Workers AI and the healthy pool) gave
+   * up, so a working key is never left unused just because of its timer.
+   */
+  private async tryCooling(messages: any[], opts: ChatOpts): Promise<string> {
+    const pool = new KeyPool(this.env);
+    const keys = await pool.cooling(2).catch(() => []);
+    for (const k of keys) {
+      const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
+        body: JSON.stringify({
+          model: k.model,
+          messages,
+          max_tokens: opts.max_tokens ?? 1024,
+          ...(KeyPool.REASONING.test(k.model) ? { reasoning_effort: "low" } : {}),
+          temperature: opts.temperature ?? 0.35,
+        }),
+        signal: AbortSignal.timeout(60000),
+      }).catch(() => null);
+      if (!res?.ok) continue;
+      const j: any = await res.json().catch(() => ({}));
+      const out = String(j?.choices?.[0]?.message?.content ?? "").trim();
+      if (out) { await pool.markOk(k.id, k.model); return out; }
+    }
+    return "";
+  }
+
   private async tryPool(messages: any[], opts: ChatOpts): Promise<string> {
     let keys: { id: number; provider: string; baseUrl: string; model: string; key: string }[] = [];
     try {
@@ -345,6 +389,28 @@ export class AiBrain {
         if (out) {
           await pool.markOk(k.id, k.model);
           return out;
+        }
+        /* Still empty: this model is wrong for this key, not the key itself.
+           Ask the provider for another one, store it, answer with it. */
+        const better = await pool.repairModel(k.id, k.baseUrl, k.key, k.model).catch(() => null);
+        if (better) {
+          const third = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+            method: "POST",
+            headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
+            body: JSON.stringify({
+              model: better,
+              messages,
+              max_tokens: Math.max(3072, (opts.max_tokens ?? 1024) * 3),
+              ...(KeyPool.REASONING.test(better) ? { reasoning_effort: "low" } : {}),
+              temperature: opts.temperature ?? 0.35,
+            }),
+            signal: AbortSignal.timeout(90000),
+          }).catch(() => null);
+          if (third?.ok) {
+            const j3: any = await third.json().catch(() => ({}));
+            const out3 = String(j3?.choices?.[0]?.message?.content ?? "").trim();
+            if (out3) { await pool.markOk(k.id, better); console.error("ai-key-model-switched", k.id, better); return out3; }
+          }
         }
         await pool.markFail(k.id, "empty response");
       } catch (e: any) {

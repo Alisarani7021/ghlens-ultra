@@ -140,19 +140,26 @@ export class SearchFeature {
 
     const rows = top.slice(0, 8).map((r, idx) => [{ text: `${idx + 1}. ${r.full_name}`, cb: `s:go:${r.full_name}` }]);
     const nav = pager("n", "page", page, Math.max(1, Math.ceil((lexical.length || 10) / 10)), [encodeURIComponent(rawQuery).slice(0, 30)]);
+    const isQuestion = /\?|؟|\b(how|why|what|which|چطور|چگونه|چرا|آیا|کدام)\b/i.test(rawQuery);
     const keyboard = kb(
       ...rows,
       nav,
+      /* A question typed outside the AI section still deserves an answer — but
+         the AI lives in its own section, so we hand over a one-tap door instead
+         of turning every search into a chat. */
+      ...(isQuestion
+        ? [[{ text: "🧠 " + (fa ? "این را از هوش مصنوعی بپرس" : "Ask the AI this"), cb: `a:q:${enc(rawQuery)}` }]]
+        : []),
       // honest escape hatch: when we could only offer "close" results, the fix
       // is one key away — put it right there instead of hiding it in a menu
       ...(precise ? [] : [aiOn
-        ? [{ text: "✏️ " + (fa ? "دقیق‌تر بگو" : "Refine query"), cb: `n:search` }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]
-        : [{ text: "🤝 " + (fa ? "اهدا کلید برای دقت بیشتر" : "Donate a key for precision"), cb: "keys:home" }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]]),
+        ? [{ text: "✏️ " + (fa ? "دقیق‌تر بگو" : "Refine query"), cb: `n:search` }]
+        : [{ text: "🤝 " + (fa ? "اهدا کلید برای دقت بیشتر" : "Donate a key for precision"), cb: "keys:home" }]]),
+      /* one filter row, one save row, one way back — no key repeated twice */
       [
         { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` },
-        { text: "🔔 " + (fa ? "ذخیره جست‌وجو" : "Save search"), cb: `n:save:${enc(rawQuery)}` },
+        { text: "🔔 " + (fa ? "ذخیره" : "Save"), cb: `n:save:${enc(rawQuery)}` },
       ],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
     );
 
     await h.store.event(h.u.id, "search", rawQuery.slice(0, 60), { mode, count: merged.length });
@@ -234,9 +241,8 @@ export class SearchFeature {
         [{ text: "🎯 " + (fa ? "جست‌وجوی پیشرفته" : "Advanced filters"), cb: "n:filters:" }],
         [
           { text: "🗂 " + (fa ? "مرور دسته‌ها" : "Browse"), cb: "b:menu" },
-          { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" },
-        ],
-        [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+                  ],
+        
       ),
     );
   }
