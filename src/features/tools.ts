@@ -133,7 +133,7 @@ export class ToolsFeature {
     if (!pb) return this.pkg(h);
     await h.reply(
       `📦 <b>${tgEscape(pb.title)}</b>\n\n<pre>${tgEscape(pb.lines.join("\n"))}</pre>\n` +
-        pb.notes.map((n) => `⚠️ ${i(tgEscape(n))}`).join("\n") +
+        pb.notes.map((n) => `⚠️ ${i(n)}`).join("\n") +
         `\n\n🏭 ${fa ? "می‌خواهی همین تبدیل روی GitHub Actions اجرا شود؟" : "Run this conversion on GitHub Actions?"} <code>/pkgconvert ${from} ${to} &lt;url&gt;</code>`,
       kb(
         [{ text: "🏭 " + (fa ? "اجرای ابری" : "Cloud run"), cb: "u:convactions" }, { text: "📦 " + (fa ? "تبدیل دیگر" : "Another"), cb: "u:pkg" }],

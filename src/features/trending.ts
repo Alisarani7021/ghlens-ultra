@@ -42,7 +42,7 @@ export class TrendingFeature {
         const vel = r.velocity ? ` · 🚀 ${r.velocity}/day` : "";
         return (
           `${medal} <b>${tgEscape(r.full_name)}</b>\n` +
-          (r.description ? `   ${i(tgEscape(truncate(r.description, 95)))}\n` : "") +
+          (r.description ? `   ${i(truncate(r.description, 95))}\n` : "") +
           `   ⭐ ${fmt(r.stars)}${delta}${vel}${r.language ? ` · 🧩 ${tgEscape(r.language)}` : ""}\n` +
           (r.topics?.length ? `   ${r.topics.slice(0, 3).map((t: string) => code("#" + t)).join(" ")}\n` : "") +
           (r.quality ? `   ${fa ? "سلامت" : "health"}: ${r.quality}/100 · 🕒 ${rel(r.pushed_at, fa)}\n` : "")
@@ -159,7 +159,7 @@ export class TrendingFeature {
     const items = res?.items ?? [];
     const body = items.map((r: any, i2: number) => {
       const perDay = (r.stargazers_count / Math.max(1, (Date.now() - Date.parse(r.created_at)) / 86400000)).toFixed(0);
-      return `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)} · 🚀 ${perDay}/day\n   ${i(tgEscape(truncate(r.description ?? "", 80)))}`;
+      return `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)} · 🚀 ${perDay}/day\n   ${i(truncate(r.description ?? "", 80))}`;
     }).join("\n\n");
     await h.reply(
       `🆕 <b>${fa ? "موشک‌های تازه" : "Newcomers"}</b>\n\n${body || (fa ? "چیزی نبود." : "Nothing found.")}`,

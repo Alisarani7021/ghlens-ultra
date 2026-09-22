@@ -160,7 +160,7 @@ export class Assistant {
       header +
         truncate(answer, 3300) +
         `\n\n──────────\n<b>${fa ? "منابع" : "Sources"}</b>\n` +
-        sources.slice(0, 4).map((s) => `[${s.n}] ${i(tgEscape(truncate(s.excerpt, 120)))} (${s.score})`).join("\n"),
+        sources.slice(0, 4).map((s) => `[${s.n}] ${i(truncate(s.excerpt, 120))} (${s.score})`).join("\n"),
       kb(
         [
           { text: "🔁 " + (fa ? "سؤال بعدی" : "Next question"), cb: `a:repochat:${full}` },

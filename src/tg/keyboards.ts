@@ -91,6 +91,10 @@ export const L = (loc: Loc | string, key: string) => (LBL[(loc as Loc)] ?? LBL.e
 export const mainMenu = (loc: Loc, isAdmin = false, miniAppUrl?: string) =>
   kb(
     [
+      { text: "🤝 " + (loc === "fa" ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
+      { text: "🐙 " + (loc === "fa" ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
+    ],
+    [
       { text: L(loc, "search"), cb: "n:search" },
       { text: L(loc, "trending"), cb: "t:menu" },
     ],
@@ -133,7 +137,7 @@ export const replyKeyboard = (loc: Loc, miniAppUrl?: string) => ({
   keyboard: [
     [{ text: L(loc, "home") }, { text: L(loc, "trending") }],
     [{ text: L(loc, "search") }, { text: L(loc, "browse") }],
-    [{ text: L(loc, "profile") }, ...(miniAppUrl ? [{ text: L(loc, "dashboard"), web_app: { url: miniAppUrl } }] : [])],
+    [{ text: L(loc, "profile") }, { text: "🤝 " + (loc === "fa" ? "اهدای کلید" : "Donate key") }],
   ],
   resize_keyboard: true,
   is_persistent: true,

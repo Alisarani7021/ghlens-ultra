@@ -2,7 +2,7 @@ import type { H } from "../core/handler";
 import { GithubRest } from "../github/rest";
 import type { Env } from "../env";
 import { VectorIndex } from "../ai/vector";
-import { extractKeywords, searchLadder } from "../search/keywords";
+import { extractKeywords, scoreMatch, searchLadder } from "../search/keywords";
 import { fmt } from "./cards";
 import { b, code, i, link, tgEscape } from "../tg/types";
 import { kb, pager, type Loc } from "../tg/keyboards";
@@ -83,31 +83,58 @@ export class SearchFeature {
     }
 
     const merged = mode === "hybrid" ? VectorIndex.fuse(lexical, semantic) : (mode === "semantic" ? semantic : lexical);
-    const top = merged.slice(0, 10);
-    if (!top.length) return this.emptyState(h, rawQuery);
+
+    /* Relevance first, popularity second. GitHub hands us its own star-ordered
+       page; re-scoring against the user's own keywords is what turns "similar
+       things" into "the thing I asked for". Lexical results carry no semantic
+       score, so they are ranked by keyword coverage and stars. */
+    const scored = merged.map((r) => ({ ...r, match: scoreMatch(r, keywords ?? []) }));
+    const exact = scored.filter((r) => r.match.coverage >= 0.5);
+    const near = scored.filter((r) => r.match.coverage < 0.5);
+    const ranked = (exact.length >= 3 ? [...exact] : [...scored])
+      .sort((a, b) => (b.match.weight - a.match.weight) || ((b.stars ?? 0) - (a.stars ?? 0)));
+    const top = ranked.slice(0, 10);
+    if (!top.length) return this.emptyState(h, rawQuery, keywords);
+    const precise = exact.length >= 3;
 
     const fa = h.loc === "fa";
-    const explain = plan?.explain_fa && fa ? `\n<i>${tgEscape(plan.explain_fa)}</i>` : "";
-    const keywordLine = keywords?.length && fa
-      ? `\n🔤 کلیدواژه‌ها: <code>${tgEscape(keywords.slice(0, 6).join(" · "))}</code>`
+    const aiOn = !!(plan?.github_query);
+    const keywordLine = keywords?.length
+      ? (fa ? `\n🔑 کلمات: <code>${keywords.slice(0, 5).join(" · ")}</code>` : `\nKeywords: <code>${keywords.slice(0, 5).join(" · ")}</code>`)
       : "";
+
+    /* Two honest modes. With the model available the user gets the exact
+       answer; with it down we say plainly that these are the closest results
+       and offer the one thing that fixes it (a donated key). */
+    const title = precise
+      ? (fa ? "🎯 نتایج دقیق" : "🎯 Exact matches")
+      : (fa ? "✨ نزدیک‌ترین نتایج" : "✨ Closest matches");
+    const note = precise
+      ? (aiOn
+          ? (fa ? "\n<i>مرتب‌شده بر اساس تطابق با پرسش تو، نه فقط ستاره.</i>" : "")
+          : (fa ? "\n<i>هوش مصنوعی در دسترس نبود، پس بر اساس کلمات کلیدی مرتب شد.</i>" : ""))
+      : (fa
+          ? `\n<i>چیزی که عیناً خواستی پیدا نشد؛ این‌ها نزدیک‌ترین‌ها هستند.</i>` +
+            (aiOn ? "" : `\n<i>هوش مصنوعی امروز خاموش است — با یک کلید، جست‌وجو دقیق‌تر می‌شود.</i>`)
+          : `\n<i>No exact match — these are the closest.</i>`);
+
     const header =
-      `🔎 <b>${fa ? "نتایج جست‌وجو" : "Search results"}</b>${explain}\n` +
-      (usedQuery ? `<code>${tgEscape(String(usedQuery).slice(0, 120))}</code>\n` : "") +
-      keywordLine + "\n" +
-      (plan?.github_query
-        ? (fa ? `\n🧠 حالت: <b>هیبرید (معنایی + متنی)</b>\n` : `\n🧠 mode: <b>hybrid</b>\n`)
-        : (fa ? `\n🔤 حالت: <b>واژگانی (بدون AI)</b> — با کلیدواژه‌های بالا گشتم\n` : `\nLexical mode (no AI)\n`));
+      `<b>${title}</b>\n` +
+      (usedQuery ? `🔎 <code>${tgEscape(String(usedQuery).slice(0, 120))}</code>` : `🔎 <code>${tgEscape(rawQuery.slice(0, 120))}</code>`) +
+      keywordLine + "\n" + note;
 
     const body = top
       .map((r, idx) => {
-        const badge = r.source === "semantic" ? "🧠" : "📄";
+        const meta = [`⭐ ${fmt(r.stars)}`];
+        if (r.language) meta.push(tgEscape(r.language));
+        if (r.forks) meta.push(`🍴 ${fmt(r.forks)}`);
+        const tags = (r.topics ?? []).slice(0, 3).map((t: string) => `#${t}`).join(" ");
         return (
-          `<b>${idx + 1}. ${badge} ${tgEscape(r.full_name)}</b>\n` +
-          (r.description ? `   ${i(tgEscape(truncate(r.description, 110)))}\n` : "") +
-          `   ⭐ ${fmt(r.stars)}${r.language ? ` • 🧩 ${tgEscape(r.language)}` : ""}${r.forks ? ` • 🍴 ${fmt(r.forks)}` : ""}\n` +
-          `   ${(r.topics ?? []).slice(0, 4).map((t: string) => code("#" + t)).join(" ")}`
-        );
+          `<b>${idx + 1}. ${tgEscape(r.full_name)}</b>\n` +
+          `   ${meta.join(" · ")}\n` +
+          (r.description ? `   ${i(truncate(r.description, 100))}\n` : "") +
+          (tags ? `   ${tags}` : "")
+        ).trimEnd();
       })
       .join("\n\n");
 
@@ -116,14 +143,16 @@ export class SearchFeature {
     const keyboard = kb(
       ...rows,
       nav,
-      [
-        { text: "🧠 " + (fa ? "فقط معنایی" : "Semantic only"), cb: `n:mode:sem:${enc(rawQuery)}` },
-        { text: "📄 " + (fa ? "فقط متنی" : "Lexical only"), cb: `n:mode:lex:${enc(rawQuery)}` },
-      ],
+      // honest escape hatch: when we could only offer "close" results, the fix
+      // is one key away — put it right there instead of hiding it in a menu
+      ...(precise ? [] : [aiOn
+        ? [{ text: "✏️ " + (fa ? "دقیق‌تر بگو" : "Refine query"), cb: `n:search` }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]
+        : [{ text: "🤝 " + (fa ? "اهدا کلید برای دقت بیشتر" : "Donate a key for precision"), cb: "keys:home" }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]]),
       [
         { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` },
         { text: "🔔 " + (fa ? "ذخیره جست‌وجو" : "Save search"), cb: `n:save:${enc(rawQuery)}` },
       ],
+      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
     );
 
     await h.store.event(h.u.id, "search", rawQuery.slice(0, 60), { mode, count: merged.length });

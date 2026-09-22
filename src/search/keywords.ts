@@ -51,7 +51,8 @@ const FA_TECH: Record<string, string[]> = {
   کتاب: ["book", "books"], پروژه: ["project"], مخزن: ["repository"], گیت‌هاب: ["github"],
   باز: ["open-source"], سورس: ["source", "open-source"], منبع: ["source"],
   بازی: ["game"], سرگرمی: ["entertainment"], ربات: ["bot"], تلگرام: ["telegram"],
-  تلگرامی: ["telegram"], واتساپ: ["whatsapp"], خودکار: ["automation", "automatic"],
+  تلگرامی: ["telegram"], واتساپ: ["whatsapp"],
+  بات: ["bot"], بات‌ها: ["bot"], بات‌ساز: ["bot", "bot-framework"], خودکار: ["automation", "automatic"],
   اسکرپ: ["scraper", "crawler"], خزش: ["crawler"], دانلود: ["download", "downloader"],
   آپلود: ["upload"], فشرده: ["compression", "zip"], اشتراک: ["share", "sharing"],
   فایل: ["file"], سیستم: ["system"], لینوکس: ["linux"], ویندوز: ["windows"],
@@ -147,13 +148,52 @@ const STOP = new Set([
   "good", "me", "please", "some", "any", "how", "what", "i", "want", "need", "show",
   "ابزاری", "ابزارهایی", "چند", "تا", "رو", "بکن", "بکنید", "کنید", "داشتن", "داشته",
   "میخوام", "می‌خوام", "میخواهم", "می‌خواهم", "پیدا", "بگرد", "جستجو", "جست‌وجو",
+  // intent verbs: «برای ساخت بات تلگرام» must become "telegram bot", not
+  // "telegram bot build"
+  "ساخت", "ساختن", "بساز", "بسازم", "بسازیم", "درست", "طراحی", "بنویس", "نوشتن",
+  "make", "build", "create", "write", "give", "me", "want", "wanna", "looking",
 ]);
 
 const LATIN = /^[a-z0-9][a-z0-9.+#_-]*$/i;
 
 /** Distinctive first, generic last — the query's meaning lives in the nouns. */
 export function rankKeywords(kws: string[]): string[] {
+  // stable: the words the user wrote in order matter, so only filler words move
   return [...kws].sort((a, b) => Number(GENERIC.has(a)) - Number(GENERIC.has(b)));
+}
+
+/**
+ * How well a repository actually answers the query.
+ *
+ * The owner's complaint was precise: "it finds similar things — I want the one
+ * I asked for". GitHub sorts by stars, which floats famous-but-unrelated repos
+ * to the top; scoring the returned set against the query's own keywords (name,
+ * description, topics) puts the exact match first and lets us say honestly
+ * whether we found the thing or only something near it.
+ */
+export function scoreMatch(
+  repo: { full_name: string; description?: string | null; topics?: string[] | null },
+  keywords: string[],
+): { hits: number; coverage: number; weight: number } {
+  if (!keywords.length) return { hits: 0, coverage: 0, weight: 0 };
+  const nameTokens = repo.full_name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const desc = String(repo.description ?? "").toLowerCase();
+  const topics = (repo.topics ?? []).map((t) => String(t).toLowerCase());
+  let hits = 0;
+  let weight = 0;
+  for (const kw of keywords) {
+    // a keyword may be a compound ("machine-learning"): any half counts
+    const parts = kw.split(/[-_ ]/).filter((p) => p.length >= 3);
+    const probe = [kw, ...parts];
+    const inName = probe.some((p) => nameTokens.some((t) => t.includes(p)));
+    const inTopics = probe.some((p) => topics.some((t) => t.includes(p)));
+    const inDesc = probe.some((p) => desc.includes(p));
+    if (inName || inTopics || inDesc) hits++;
+    // a match in the project's own name is the strongest signal that this is
+    // the thing the user asked for; a word buried in a description is the weakest
+    weight += inName ? 1 : inTopics ? 0.8 : inDesc ? 0.4 : 0;
+  }
+  return { hits, coverage: hits / keywords.length, weight };
 }
 
 /** Split a sentence into Persian and Latin tokens. */
@@ -189,7 +229,8 @@ export function extractKeywords(text: string, max = 6): string[] {
     const exact = FA_TECH[tok];
     if (exact) { exact.forEach(push); continue; }
     // strip common Persian suffixes/prefixes and retry
-    const stripped = tok.replace(/^(ال|بی|هم)/, "").replace(/(ها|های|هایی|ی|ات|ان)$/, "");
+    const bare = tok.replace(/^(ال|بی|هم)/, "").replace(/(ها|های|هایی|ی|ات|ان)$/, "");
+    const stripped = bare.length >= 3 ? bare : tok;
     const hit = FA_TECH[stripped] ?? FA_TECH[tok.replace(/(ها|های|هایی)$/, "")];
     if (hit) { hit.forEach(push); continue; }
     // substring match against the vocabulary (longest first)
@@ -209,9 +250,11 @@ export function searchLadder(text: string, opts: { language?: string | null; aiQ
   const lang = opts.language ? ` language:${opts.language}` : "";
   const q: string[] = [];
   if (opts.aiQuery) q.push(opts.aiQuery);
-  // GitHub ANDs unquoted terms, so two strong words beat four mediocre ones
-  if (kws.length >= 2) q.push(`${kws.slice(0, 2).join(" ")}${lang}`);
+  // GitHub ANDs unquoted terms, so two strong words beat four mediocre ones.
+  // The ladder starts with the *most* specific query that is still realistic
+  // and only widens when GitHub returns nothing.
   if (kws.length >= 3) q.push(`${kws.slice(0, 3).join(" ")}${lang}`);
+  if (kws.length >= 2) q.push(`${kws.slice(0, 2).join(" ")}${lang}`);
   if (kws.length >= 2) q.push(`${kws.slice(0, 4).map((k) => `"${k}"`).join(" OR ")}${lang}`);
   if (kws.length) {
     q.push(`${kws[0]}${lang}`);

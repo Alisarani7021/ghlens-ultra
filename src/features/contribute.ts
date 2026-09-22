@@ -280,7 +280,7 @@ Mention one of them explicitly on day 1. Output plain text with emoji headers, n
           ["No license", "❌ All rights reserved — commercial use forbidden."],
         ];
     await h.reply(
-      `⚖️ <b>${fa ? "راهنمای مجوزها" : "License guide"}</b>\n\n` + rows.map(([k, v]) => `<b>${k}</b>\n${i(tgEscape(v))}`).join("\n\n") +
+      `⚖️ <b>${fa ? "راهنمای مجوزها" : "License guide"}</b>\n\n` + rows.map(([k, v]) => `<b>${k}</b>\n${i(v)}`).join("\n\n") +
         `\n\n💡 ${fa ? "می‌خواهی مجوز یک مخزن خاص را با جزئیات ببینی؟" : ""} <code>/scan owner/repo</code>`,
       kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "c:home" }]]),
       !!h.cbId,

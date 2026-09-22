@@ -25,7 +25,7 @@ import { SecurityFeature } from "./features/security";
 import { Assistant } from "./features/assistant";
 import { Discover } from "./features/discover";
 import { Contribute } from "./features/contribute";
-import { Settings } from "./features/settings";
+import { Settings, githubSetupCard, githubSetupKb, aiEngineState } from "./features/settings";
 import { Admin } from "./features/admin";
 import { handleWebhook } from "./core/webhook";
 import { runCron } from "./core/cron";
@@ -447,16 +447,42 @@ async function githubLink(h: H) {
   );
 }
 
-/** Where the user pastes the token: we just arm the wizard. */
+/**
+ * The account screen behind the 🐙 button and /connect.
+ *
+ * Linked users get the real dashboard; everyone else gets the two-step
+ * onboarding with a button that opens GitHub's token page pre-filled. The token
+ * prompt is written for someone who has never made a token before.
+ */
+async function githubOverview(h: H) {
+  const fa = h.loc === "fa";
+  const u = await h.store.user(h.u.id);
+  if ((u as any)?.github_login) return accountFeature.home(h);
+  const aiState = await aiEngineState(h.env);
+  return h.reply(githubSetupCard(fa, aiState), githubSetupKb(fa), !!h.cbId);
+}
+
+/** Where the user pastes the token: we arm the wizard and explain the steps. */
 async function githubTokenPrompt(h: H) {
   const fa = h.loc === "fa";
   await h.session.set("me:token", true);
+  const createUrl =
+    "https://github.com/settings/tokens/new?scopes=repo,read:user,user:email,read:org&description=" +
+    encodeURIComponent("GitHub Lens Ultra");
   return h.reply(
-    `🔑 <b>${fa ? "توکن شخصی گیت‌هاب" : "GitHub personal token"}</b>\n\n` +
+    `🔑 <b>${fa ? "توکن گیت‌هاب را همین‌جا بفرست" : "Paste your GitHub token here"}</b>\n\n` +
       (fa
-        ? "توکن را در همین چت بفرست. نکته‌های امنیتی:\n• فقط دسترسی خواندنِ عمومی کافی است\n• توکن رمزنگاری‌شده (AES-GCM) ذخیره می‌شود\n• بعد از مصرف، پیام توکن را در تلگرام پاک کن\n• هر زمان «جدا کردن» را بزنی، از دیتابیس حذف می‌شود"
-        : "Send the token in this chat. It is stored encrypted (AES-GCM) and can be removed any time."),
-    kb([[{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "me:home" }]]),
+        ? `اگر هنوز نساخته‌ای:\n` +
+          `۱. دکمهٔ پایین «ساخت توکن در گیت‌هاب» را بزن — دسترسی‌ها از قبل تیک خورده‌اند\n` +
+          `۲. پایین صفحه <b>Generate token</b> را بزن\n` +
+          `۳. توکن ساخته‌شده (شبیه <code>ghp_…</code>) را کپی کن و همین‌جا بفرست\n\n` +
+          `<b>امنیت:</b> رمزنگاری‌شده ذخیره می‌شود، در چت نمایش داده نمی‌شود، با «جدا کردن» پاک می‌شود.\n` +
+          `<i>پیام حاوی توکن را بعد از ارسال، از تلگرام پاک کن.</i>`
+        : `Tap “Create the token” (scopes pre-ticked), press Generate, paste it here. Stored encrypted; removable any time.`),
+    kb(
+      [{ text: "🔑 " + (fa ? "ساخت توکن در گیت‌هاب" : "Create the token"), url: createUrl }],
+      [{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "me:home" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+    ),
     !!h.cbId,
   );
 }
@@ -572,6 +598,12 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     const full = `${repoMatch[1]}/${repoMatch[2]}`.replace(/\.git$/, "");
     return scout.open(h, full, 0);
   }
+  /* The persistent bottom keyboard sends its label as plain text and nothing
+     used to handle it, so tapping «🏠 منوی اصلی» ran a GitHub search for that
+     very string. Map the labels back to their actions. */
+  const kbAction = replyKeyAction(text, h.loc);
+  if (kbAction) return kbAction(h);
+
   /* A greeting is not a search query. Handing "سلام" to GitHub search answers
      «چیزی پیدا نشد», which reads as a broken bot. Greet back instead, with the
      menu and an honest word about the AI engine when it is off. */
@@ -597,6 +629,48 @@ const GREETINGS = [
   "hi", "hey", "hello", "yo", "sup", "good morning", "good evening", "how are you",
   "thanks", "thank you", "thx", "test", "تست",
 ];
+/**
+ * Bottom-keyboard labels → actions.
+ *
+ * Telegram sends the caption as a normal message, so every label needs a route
+ * back into the router. Matching ignores emoji, spaces and ZWNJ so it keeps
+ * working when a label is renamed.
+ */
+const REPLY_LABELS: { keys: string[]; action: string }[] = [
+  { keys: ["منوی اصلی", "منو", "main menu", "menu", "خانه"], action: "home" },
+  { keys: ["جستجوی هوشمند", "جستجو", "search", "ai search"], action: "search" },
+  { keys: ["داغ‌ترین‌ها", "داغترین", "trending", "hot"], action: "trending" },
+  { keys: ["مرور پروژه‌ها", "مرور", "browse", "repos"], action: "browse" },
+  { keys: ["پروفایل", "حساب من", "profile", "account"], action: "profile" },
+  { keys: ["داشبورد", "dashboard"], action: "dashboard" },
+  { keys: ["اهدای کلید", "اهدا کلید", "donate key", "donate", "کلید هوش مصنوعی"], action: "keys" },
+  { keys: ["کاوش عمیق", "scout"], action: "scout" },
+  { keys: ["راهنما", "help"], action: "help" },
+];
+
+export function replyKeyAction(text: string, loc: string):
+  | ((h: H) => Promise<void> | void)
+  | null {
+  const norm = (x: string) =>
+    x.replace(/[\u200c\u200f\u200e]/g, "").replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  const t = norm(text);
+  if (!t || t.length > 24) return null;
+  const hit = REPLY_LABELS.find((r) => r.keys.some((k) => norm(k) === t));
+  if (!hit) return null;
+  switch (hit.action) {
+    case "home": return (h) => settings.home(h);
+    case "search": return (h) => h.reply((loc === "fa" ? "🔎 چه چیزی را پیدا کنم؟ بنویس:" : "🔎 What should I find? Type it:") + "", kb([[{ text: "🎯 " + (loc === "fa" ? "جست‌وجوی پیشرفته" : "Advanced search"), cb: "n:search" }], [{ text: "🏠", cb: "m:home" }]]), !!h.cbId);
+    case "trending": return (h) => trendingMenuOrBoard(h, "");
+    case "browse": return (h) => browse.menu(h);
+    case "profile": return (h) => profile.home(h);
+    case "dashboard": return (h) => accountFeature.home(h);
+    case "keys": return (h) => keysFeature.home(h);
+    case "scout": return (h) => scout.home(h);
+    case "help": return (h) => settings.help(h);
+    default: return null;
+  }
+}
+
 function isGreeting(raw: string): boolean {
   const t = raw.trim().toLowerCase().replace(/[!؟?.,،؛;:()\u200c«»"'']/g, " ").replace(/\s+/g, " ").trim();
   if (!t || t.length > 30) return false;
@@ -624,7 +698,7 @@ async function greetBack(h: H) {
       (fa ? "\n\n<b>مثال:</b> «یک کتابخانه سبک برای صف در Go» یا <code>vuejs/core</code>" : "\n\n<b>Try:</b> “a lightweight queue library in Go” or <code>vuejs/core</code>"),
     kb(
       [{ text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }, { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }],
-      [{ text: "🪟 " + (fa ? "اپلیکیشن شیشه‌ای" : "Mini app"), web: `${h.env.WORKER_URL}/app` }, { text: "🤝 " + (fa ? "اهدای کلید" : "Donate key"), cb: "keys:home" }],
+      [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }, { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" }],
       [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
     ),
     !!h.cbId,
@@ -643,10 +717,18 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       const text = t.trim();
       if (state.stage === "url") {
         if (!/^https?:\/\//i.test(text)) return h.reply(fa ? "❌ آدرس باید با http یا https شروع شود." : "❌ the URL must start with http(s)");
-        state.baseUrl = text;
+        const { KeyPool } = await import("./ai/keypool");
+        const clean = KeyPool.normalizeBase(text);
+        const trimmed = clean !== text.trim().replace(/\/+$/, "");
+        state.baseUrl = clean;
         state.stage = "key";
         await s.set("keys:pending", JSON.stringify(state));
-        return h.reply(fa ? `🔑 آدرس ثبت شد. حالا کلید را بفرست (برای سرور محلی بدون کلید، «-» بفرست).` : "🔑 now send the key (or “-” for a keyless local server)");
+        return h.reply(
+          (trimmed ? (fa ? `✂️ آدرس را به فرم پایه کوتاه کردم: <code>${clean}</code>\n\n` : `✂️ trimmed to the base URL: <code>${clean}</code>\n\n`) : "") +
+            (fa ? `🔑 حالا کلید را بفرست (برای سرور محلی بدون کلید، «-» بفرست).` : "🔑 now send the key (or “-” for a keyless local server)") +
+            (fa ? `\n\n<i>کلید فقط بعد از تست موفق ذخیره می‌شود.</i>` : ""),
+          kb([[{ text: "◀️", cb: "keys:add" }]]),
+        );
       }
       if (state.stage === "model") {
         // a custom/local OpenAI-compatible server has no "auto": without a real
@@ -665,8 +747,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       // the key itself
       const test = await (async () => {
         const { KeyPool } = await import("./ai/keypool");
-        await h.loading(fa ? "🧪 در حال تست کلید…" : "🧪 testing the key…");
-        return KeyPool.test(String(state.baseUrl ?? "").replace(/\/$/, ""), text === "-" ? "" : text, state.model || "");
+        return KeyPool.test(state.baseUrl ?? "", text === "-" ? "" : text, state.model || "");
       })();
       // a model-name problem is worth a retry; a dead key is not (401/402/403)
       const modelProblem = !!test.error && /(404|400|model|not found|unsupported|does not exist)/i.test(test.error)
@@ -683,7 +764,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
           kb([[{ text: "◀️", cb: "keys:add" }]]),
         );
       }
-      if (test.ok && (state.provider === "custom" || state.provider === "local")) {
+      if (test.ok && (state.provider === "custom" || state.provider === "local") && !test.model) {
         // ask for the model before storing, exactly as the provider prompt said
         state.savedKey = text;
         state.stage = "model";
@@ -790,6 +871,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
 // ── commands ───────────────────────────────────────────────────────────────
 async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) {
   if (cmd === "/keys" || cmd === "/api-keys") return keysFeature.home(h);
+  if (cmd === "/connect" || cmd === "/link") return githubOverview(h);
   if (cmd === "/login") return githubTokenPrompt(h);
   if (cmd === "/logout") return githubUnlink(h);
   const fa = h.loc === "fa";
@@ -1263,7 +1345,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
 
       // ── my GitHub account (public + private, with the user's own token) ──
       case "gh":
-        if (action === "home") return accountFeature.home(h);
+        // linked → the full dashboard; not linked → the one-tap token onboarding
+        if (action === "home") return githubOverview(h);
         if (action === "repos") return accountFeature.repos(h, Number(args[0] ?? 0));
         if (action === "private") return accountFeature.privateRepos(h);
         if (action === "orgs") return accountFeature.orgs(h);

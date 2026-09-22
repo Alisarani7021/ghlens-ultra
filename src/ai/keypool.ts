@@ -141,39 +141,162 @@ export class KeyPool {
     return "kept";
   }
 
+  /**
+   * Repair a stored key whose model name no longer exists.
+   *
+   * Providers retire model ids (Groq does it constantly). A stored key that
+   * suddenly 404s is not a dead key — it is a key with a stale model name. We
+   * ask the provider what it serves, verify the first usable chat model, store
+   * that name and put the key back in service. Without this, one retirement
+   * would silently remove a working key from the pool.
+   */
+  async repairModel(id: number, baseUrl: string, key: string): Promise<string | null> {
+    const { models } = await KeyPool.listModels(baseUrl, key).catch(() => ({ models: [] as string[] }));
+    for (const candidate of models.filter((m) => !KeyPool.NOT_CHAT.test(m)).slice(0, 5)) {
+      try {
+        const r = await KeyPool.ping(KeyPool.normalizeBase(baseUrl), key, candidate);
+        if (!r.ok) continue;
+        await this.env.DB.prepare(
+          `UPDATE ai_keys SET model=?, status='ok', last_err=NULL WHERE id=?`,
+        ).bind(candidate, id).run().catch(() => null);
+        await this.invalidate();
+        console.error("keypool-model-repaired", id, candidate);
+        return candidate;
+      } catch { /* next candidate */ }
+    }
+    return null;
+  }
+
   async invalidate() {
     await this.env.CACHE.delete(KeyPool.CACHE_KEY).catch(() => null);
   }
 
   /**
-   * Live test used when a key is donated (and by the "test" button later).
-   * Returns the model list when the endpoint exposes one.
+   * Normalise whatever the user pasted into a base URL.
+   *
+   * People paste the endpoint they copied from a docs page — the owner pasted
+   * `https://kktoken.cc/v1/chat/completions`, which we then asked for
+   * `/chat/completions/models` and got a 404 that looked like a bad key.
+   * Everything from the endpoint onwards is stripped.
    */
-  static async test(baseUrl: string, key: string, model: string): Promise<{ ok: boolean; error?: string; models?: string[]; reply?: string }> {
-    const url = baseUrl.replace(/\/$/, "");
-    const headers = { authorization: `Bearer ${key}`, "content-type": "application/json" };
+  static normalizeBase(raw: string): string {
+    let u = String(raw ?? "").trim().replace(/\s+/g, "");
+    u = u.replace(/\/(chat\/completions|completions|chat|models|embeddings)\/?$/i, "");
+    u = u.replace(/\/+$/, "");
+    return u;
+  }
+
+  /** Model names that are almost always wrong for a chat call. */
+  private static readonly NOT_CHAT = /(embed|embedding|whisper|tts|audio|image|dall|moderation|rerank|clip|stable|flux|guard|vision-encoder)/i;
+
+  /**
+   * Ask the provider which models it has, best-first for chat.
+   * Free/cheap chat models first, embedding and image models last.
+   */
+  static async listModels(baseUrl: string, key: string): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    const url = KeyPool.normalizeBase(baseUrl);
     try {
-      if (!model) {
-        const res = await fetch(`${url}/models`, { headers, signal: AbortSignal.timeout(15000) });
-        if (!res.ok) return { ok: false, error: `${res.status} ${(await res.text()).slice(0, 120)}` };
-        const j: any = await res.json().catch(() => ({}));
-        return { ok: true, models: (j?.data ?? []).map((m: any) => m.id).slice(0, 400) };
-      }
-      const res = await fetch(`${url}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 8 }),
-        signal: AbortSignal.timeout(20000),
+      const res = await fetch(`${url}/models`, {
+        headers: key ? { authorization: `Bearer ${key}` } : {},
+        signal: AbortSignal.timeout(15000),
       });
-      if (!res.ok) {
-        const body = (await res.text()).slice(0, 200);
-        return { ok: false, error: `${res.status} ${body}` };
-      }
+      if (!res.ok) return { ok: false, models: [], error: `${res.status} ${(await res.text()).slice(0, 160)}` };
       const j: any = await res.json().catch(() => ({}));
-      const reply = j?.choices?.[0]?.message?.content ?? "";
-      return { ok: true, reply: String(reply).slice(0, 40) };
+      const ids: string[] = (j?.data ?? j?.models ?? []).map((m: any) => String(m?.id ?? m?.name ?? "")).filter(Boolean);
+      const rank = (id: string) => {
+        let s = 0;
+        if (KeyPool.NOT_CHAT.test(id)) s += 100;                        // never a chat model
+        if (/free/i.test(id)) s -= 3;                                   // free tiers first
+        if (/70b|72b|large|pro|sonnet|gpt-4|gpt-5|o[13]|command-r|mixtral/i.test(id)) s -= 2;
+        if (/8b|7b|mini|flash|lite|small|instant|haiku/i.test(id)) s -= 1;
+        return s;
+      };
+      return { ok: true, models: [...new Set(ids)].sort((a, b) => rank(a) - rank(b)) };
     } catch (e: any) {
-      return { ok: false, error: String(e?.message ?? e).slice(0, 160) };
+      return { ok: false, models: [], error: String(e?.message ?? e).slice(0, 160) };
     }
+  }
+
+  /** One chat ping. */
+  private static async ping(url: string, key: string, model: string) {
+    const res = await fetch(`${url}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 8 }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const body = (await res.text()).slice(0, 200);
+    if (!res.ok) return { ok: false as const, status: res.status, error: body };
+    let reply = "";
+    try { reply = String(JSON.parse(body)?.choices?.[0]?.message?.content ?? ""); } catch { /* keep empty */ }
+    return { ok: true as const, status: res.status, reply };
+  }
+
+  /**
+   * Live test used when a key is donated (and by the "test" button later).
+   *
+   * The important part: a *valid* key must never be rejected because the model
+   * name was guesswork. Groq retired the default we shipped, so a working key
+   * failed with model_not_found and the user was told their key was broken.
+   * Now we ask the provider for its model list and try again — twice — before
+   * we call anything broken, and we hand the working model name back so it can
+   * be stored.
+   */
+  static async test(baseUrl: string, key: string, model: string): Promise<{
+    ok: boolean; error?: string; errorKind?: "auth" | "quota" | "url" | "model" | "net";
+    models?: string[]; reply?: string; model?: string;
+  }> {
+    const url = KeyPool.normalizeBase(baseUrl);
+    const kindOf = (status: number, body: string): "auth" | "quota" | "url" | "model" | "net" => {
+      if (status === 401 || status === 403 || /invalid api key|unauthorized|no auth|invalid_api_key/i.test(body)) return "auth";
+      if (status === 402 || status === 429 || /quota|credit|rate limit|insufficient/i.test(body)) return "quota";
+      if (status === 404 && /model/i.test(body)) return "model";
+      if (status === 404 || /invalid url|not found/i.test(body)) return "url";
+      if (/model.*(not|does not).*(exist|found)|unknown model|no such model|model_not_found/i.test(body)) return "model";
+      return "net";
+    };
+
+    // 1. the model we were given (if any)
+    if (model) {
+      try {
+        const r = await KeyPool.ping(url, key, model);
+        if (r.ok) return { ok: true, reply: r.reply.slice(0, 40), model, models: [model] };
+        const kind = kindOf(r.status, r.error);
+        if (kind === "auth" || kind === "quota") return { ok: false, error: `${r.status} ${r.error}`, errorKind: kind };
+        // model/url problems fall through to discovery
+      } catch (e: any) {
+        return { ok: false, error: String(e?.message ?? e).slice(0, 160), errorKind: "net" };
+      }
+    }
+
+    // 2. ask the provider what it actually serves
+    const list = await KeyPool.listModels(url, key);
+    if (!list.ok && /401|403|invalid api key|unauthorized/i.test(list.error ?? ""))
+      return { ok: false, error: list.error, errorKind: "auth" };
+    const candidates = (list.models ?? []).filter((m) => !KeyPool.NOT_CHAT.test(m)).slice(0, 6);
+
+    for (const candidate of candidates) {
+      try {
+        const r = await KeyPool.ping(url, key, candidate);
+        if (r.ok) return { ok: true, reply: r.reply.slice(0, 40), model: candidate, models: list.models };
+      } catch { /* try the next one */ }
+    }
+
+    // 3. nothing from the list — say why, precisely
+    if (!list.ok) {
+      return {
+        ok: false,
+        error: list.error ?? "no /models endpoint",
+        errorKind: /401|403|invalid api key|unauthorized/i.test(list.error ?? "") ? "auth" : "url",
+      };
+    }
+    return {
+      ok: false,
+      error: model
+        ? `model "${model}" and ${candidates.length} alternative(s) were refused by this endpoint`
+        : "the endpoint lists no usable chat model",
+      errorKind: "model",
+      models: list.models,
+    };
   }
 }

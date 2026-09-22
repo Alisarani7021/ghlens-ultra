@@ -164,7 +164,7 @@ export class ProfileFeature {
     const body = slice.map((r, i2) => {
       const m: any = metas[i2];
       return `${page * 10 + i2 + 1}. <b>${tgEscape(r.full_name)}</b>${m ? ` — ⭐ ${fmt(m.stars)}${m.language ? ` · ${tgEscape(m.language)}` : ""}` : ""}\n` +
-        (r.note ? `   📝 ${i(tgEscape(r.note))}\n` : "") +
+        (r.note ? `   📝 ${i(r.note)}\n` : "") +
         `   ➕ ${rel(new Date(r.created_at).toISOString(), fa)}`;
     }).join("\n");
     await h.reply(
@@ -337,7 +337,7 @@ export class ProfileFeature {
     await h.reply(
       `✨ <b>${fa ? "فید شخصی تو" : "Your feed"}</b>\n<i>${[...interests, ...langs].slice(0, 8).map((t) => code(t)).join(" ")}</i>\n\n` +
         (items.map((r: any, i2: number) =>
-          `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)} · 🕒 ${rel(r.pushed_at, fa)}\n   ${i(tgEscape((r.description ?? "").slice(0, 90)))}`).join("\n\n") || "—"),
+          `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)} · 🕒 ${rel(r.pushed_at, fa)}\n   ${i((r.description ?? "").slice(0, 90))}`).join("\n\n") || "—"),
       kb(
         ...items.slice(0, 5).map((r: any) => [{ text: `📦 ${r.full_name}`, cb: `s:go:${r.full_name}` }]),
         [{ text: "🧠 " + (fa ? "ویرایش علاقه‌مندی" : "Edit interests"), cb: "me:interests" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],

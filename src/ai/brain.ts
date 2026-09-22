@@ -309,6 +309,24 @@ export class AiBrain {
         });
         if (!res.ok) {
           const body = (await res.text()).slice(0, 200);
+          // a retired model name is not a dead key: discover the current one,
+          // store it and answer with the same key
+          if (res.status === 404 && /model/i.test(body)) {
+            const fixed_ = await pool.repairModel(k.id, k.baseUrl, k.key).catch(() => null);
+            if (fixed_) {
+              const retry = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+                method: "POST",
+                headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+                body: JSON.stringify({ model: fixed_, messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
+                signal: AbortSignal.timeout(45000),
+              }).catch(() => null);
+              if (retry?.ok) {
+                const rj: any = await retry.json().catch(() => ({}));
+                const rtext = String(rj?.choices?.[0]?.message?.content ?? "").trim();
+                if (rtext) { await pool.markOk(k.id, fixed_); return rtext; }
+              }
+            }
+          }
           const verdict = await pool.markFail(k.id, `${res.status} ${body}`);
           console.error("pool-key-failed", k.id, res.status, verdict);
           // tell the donor their key is gone (best effort, never blocks)

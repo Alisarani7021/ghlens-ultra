@@ -156,7 +156,7 @@ export class BrowseFeature {
       `<i>${fmt(res?.total_count ?? 0)} ${fa ? "مخزن" : "repos"}</i>\n\n`;
     const body = items.map((r: any, i2: number) =>
       `<b>${page * 10 + i2 + 1}. ${tgEscape(r.full_name)}</b>\n` +
-      (r.description ? `   ${i(tgEscape(truncate(r.description, 100)))}\n` : "") +
+      (r.description ? `   ${i(truncate(r.description, 100))}\n` : "") +
       `   ⭐ ${fmt(r.stargazers_count)} · 🍴 ${fmt(r.forks_count)}${r.language ? ` · 🧩 ${tgEscape(r.language)}` : ""} · 🕒 ${rel(r.pushed_at, fa)}\n` +
       (r.topics?.length ? `   ${r.topics.slice(0, 4).map((t: string) => code("#" + t)).join(" ")}\n` : ""),
     ).join("\n");
@@ -265,7 +265,7 @@ export class BrowseFeature {
       `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)}${r.language ? ` · ${tgEscape(r.language)}` : ""}`).join("\n");
     await h.reply(
       `👤 <b>${tgEscape(user.name ?? user.login)}</b> <code>@${tgEscape(user.login)}</code>\n` +
-        `${user.bio ? i(tgEscape(user.bio)) + "\n" : ""}` +
+        `${user.bio ? i(user.bio) + "\n" : ""}` +
         `👥 ${fmt(user.followers)} ${fa ? "دنبال‌کننده" : "followers"} · 📦 ${user.public_repos} ${fa ? "مخزن" : "repos"}\n` +
         `📍 ${tgEscape(user.location ?? "—")}\n\n` +
         `<b>${fa ? "محبوب‌ترین مخازن" : "Top repositories"}</b>\n${body}`,

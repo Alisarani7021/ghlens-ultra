@@ -42,7 +42,7 @@ export class Discover {
     const body = slice.map((r: any, i2: number) =>
       `${page * 8 + i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ${fa ? "نگین" : "gem"} <b>${r.gem}</b>\n` +
       `   ⭐ ${fmt(r.stargazers_count)} (${r.perDay}/day) · ❤️ ${r.health}/100 · 🧩 ${tgEscape(r.language ?? "—")}\n` +
-      `   ${i(tgEscape(truncate(r.description ?? "", 95)))}\n` +
+      `   ${i(truncate(r.description ?? "", 95))}\n` +
       `   ${(r.topics ?? []).slice(0, 4).map((t: string) => code("#" + t)).join(" ")}`).join("\n\n");
 
     await h.reply(
@@ -156,7 +156,7 @@ export class Discover {
 
     const body = unique.map((r: any, i2: number) =>
       `${i2 + 1}. <b>${tgEscape(r.full_name)}</b>${r.stars ? ` — ⭐ ${fmt(r.stars)}` : ""}${r.language ? ` · ${tgEscape(r.language)}` : ""}\n` +
-      (r.description ? `   ${i(tgEscape(truncate(r.description, 90)))}` : "")).join("\n");
+      (r.description ? `   ${i(truncate(r.description, 90))}` : "")).join("\n");
 
     await h.reply(
       `✨ <b>${fa ? "مشابه" : "Similar to"} ${tgEscape(full)}</b>\n<i>${source}</i>\n\n` +

@@ -40,7 +40,7 @@ export class RepoCard {
 
     const head =
       `<b>${tgEscape(m.full_name)}</b>\n` +
-      (m.description ? `${i(tgEscape(truncate(m.description, 220)))}\n` : "") +
+      (m.description ? `${i(truncate(m.description, 220))}\n` : "") +
       (m.homepage ? `🔗 ${link("Homepage", m.homepage)}\n` : "");
 
     const stats =

@@ -133,7 +133,7 @@ export class DeepScout {
     const good = (r.goodFirstIssues?.totalCount ?? 0) + (r.helpWanted?.totalCount ?? 0);
     return (
       `📊 <b>${tgEscape(m.full_name)}</b> — ${fa ? "نمای کلی" : "Overview"}\n\n` +
-      (m.description ? i(tgEscape(truncate(m.description, 260))) + "\n\n" : "") +
+      (m.description ? i(truncate(m.description, 260)) + "\n\n" : "") +
       `⭐ <b>${fmt(m.stars)}</b>  🍴 ${fmt(m.forks)}  👀 ${fmt(m.watchers)}  🐞 ${fmt(m.issues)}  🔀 ${fmt(m.prs)}\n` +
       `🏷 ${fa ? "نسخه‌ها" : "releases"}: ${fmt(m.releases)}   👥 ${fa ? "مشارکت‌کننده" : "contributors"}: ${fmt(m.contributors)}\n` +
       `${m.language ? `🧩 ${tgEscape(m.language)}` : ""}  ⚖️ ${tgEscape(m.license ?? (fa ? "بدون مجوز" : "none"))}  📅 ${rel(m.created_at, fa)}\n\n` +
@@ -235,7 +235,7 @@ export class DeepScout {
         const dls = (x.releaseAssets?.nodes ?? []).reduce((s: number, a: any) => s + (a.downloadCount ?? 0), 0);
         return (
           `• <b>${tgEscape(x.tagName || x.name || "?")}</b>${prerelease} — ${rel(x.publishedAt, fa)}${dls ? ` · ⬇️ ${fmt(dls)}` : ""}\n` +
-          (x.description ? `  ${i(tgEscape(firstLine(x.description, 100)))}\n` : "")
+          (x.description ? `  ${i(firstLine(x.description, 100))}\n` : "")
         );
       }).join("") +
       (tags.length ? `\n🏷 ${fa ? "آخرین تگ‌ها" : "recent tags"}: ${tags.slice(0, 10).map((t) => code(t.name)).join(" ")}\n` : "") +
@@ -449,7 +449,7 @@ export class DeepScout {
     await h.reply(
       `⚖️ <b>${fa ? "مقایسه مخازن" : "Repo comparison"}</b>\n\n<pre>${tgEscape(lines.join("\n"))}</pre>\n` +
         (winner ? `🏆 ${fa ? "برنده سلامت" : "health winner"}: <b>${tgEscape(winner.full_name)}</b> (${winner.health}/100)\n\n` : "") +
-        `🧠 ${i(tgEscape(verdict))}`,
+        `🧠 ${i(verdict)}`,
       kb(
         [{ text: `① ${a.slice(0, 28)}`, cb: `s:go:${a}` }, { text: `② ${b.slice(0, 28)}`, cb: `s:go:${b}` }],
         [

@@ -83,7 +83,7 @@ export const keys = {
     const pool = new KeyPool(h.env);
     const raw = keyText.trim();
     const key = raw === "-" ? "" : raw;
-    const baseUrl = String(pending.baseUrl ?? "").replace(/\/$/, "");
+    const baseUrl = KeyPool.normalizeBase(String(pending.baseUrl ?? ""));
     if (!baseUrl) {
       await h.session.clear(["keys:pending"]);
       return h.reply(fa ? "❌ آدرس پایه خالی بود؛ دوباره از ابتدا." : "❌ missing base URL", kb([[{ text: "◀️", cb: "keys:add" }]]), !!h.cbId);
@@ -93,16 +93,23 @@ export const keys = {
     const test = await KeyPool.test(baseUrl, key, pending.model || "");
     if (!test.ok) {
       await h.session.clear(["keys:pending"]);
+      const why =
+        test.errorKind === "auth" ? (fa ? "کلید رد شد (۴۰۱/۴۰۳). کلید تازه بساز یا مطمئن شو کامل کپی شده." : "the key was rejected (401/403).")
+        : test.errorKind === "quota" ? (fa ? "این کلید سهمیه‌اش تمام شده یا محدود شده (۴۰۲/۴۲۹). یک کلید دیگر اهدا کن." : "this key is out of quota (402/429).")
+        : test.errorKind === "url" ? (fa ? "آدرس پایه درست نیست. فقط تا <code>/v1</code> لازم است؛ مسیر <code>/chat/completions</code> را ننویس." : "the base URL looks wrong — stop at /v1.")
+        : test.errorKind === "model" ? (fa ? "کلید سالم است ولی هیچ مدل چتی از این آدرس جواب نداد. یک مدل درست را از فهرست ارائه‌دهنده بفرست." : "the key works but no chat model answered.")
+        : (fa ? "ارتباط برقرار نشد (شبکه یا آدرس)." : "could not reach the endpoint.");
       return h.reply(
-        (fa ? `❌ <b>کلید کار نکرد</b>\n\n` : `❌ <b>Key rejected</b>\n\n`) +
-          `<code>${tgEscape(String(test.error ?? "unknown").slice(0, 300))}</code>\n\n` +
-          (fa ? `چیزی ذخیره نشد. اگر مطمئنی کلید سالم است، مدل را هم بررسی کن یا بعداً دوباره امتحان کن.` : `Nothing was stored.`),
+        (fa ? `❌ <b>کلید ذخیره نشد</b>\n\n` : `❌ <b>Key not stored</b>\n\n`) +
+          `${why}\n\n` +
+          (fa ? `<b>پاسخ سرور:</b>\n<code>${tgEscape(String(test.error ?? "unknown").slice(0, 220))}</code>\n\n` : `<code>${tgEscape(String(test.error ?? "unknown").slice(0, 220))}</code>\n\n`) +
+          (fa ? "چیزی ذخیره نشد ✓" : "Nothing was stored."),
         kb([[{ text: "🔁 " + (fa ? "تلاش دوباره" : "Retry"), cb: `keys:p:${pending.provider}` }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "keys:home" }]]),
         true,
       );
     }
 
-    const model = pending.model || test.models?.[0] || "";
+    const model = test.model || pending.model || test.models?.[0] || "";
     const id = await pool.add({ ownerId: h.u.id, label: providerPreset(pending.provider)?.label ?? pending.provider, provider: pending.provider, baseUrl, model, key });
     await h.session.clear(["keys:pending"]);
     const { total, ok } = await pool.stats().catch(() => ({ total: 0, ok: 0 }));
@@ -115,7 +122,7 @@ export const keys = {
         ? `✅ <b>کلید سالم است و به استخر اضافه شد</b>\n\n` +
           `🧪 تست: ${test.reply ? `<code>${tgEscape(test.reply)}</code>` : "اتصال برقرار شد"}\n` +
           `🏷 ارائه‌دهنده: <b>${tgEscape(providerPreset(pending.provider)?.label ?? pending.provider)}</b>\n` +
-          `🧠 مدل: <code>${tgEscape(model || "auto")}</code>\n` +
+          `🧠 مدل: <code>${tgEscape(model || "auto")}</code>${test.model && test.model !== pending.model ? (fa ? " <i>(خودکار انتخاب شد)</i>" : " <i>(auto-picked)</i>") : ""}\n` +
           `🔑 استخر: <b>${ok}</b> کلید سالم از <b>${total}</b>\n\n` +
           `<i>از این لحظه همهٔ قابلیت‌های هوش مصنوعی ربات از این استخر (و کلیدهای دیگران) کار می‌کنند.</i>`
         : `✅ Key verified and pooled. ${ok}/${total} healthy.`)
