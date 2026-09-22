@@ -642,6 +642,11 @@ export async function aiDownNotice(env: Env, loc: string): Promise<string> {
   } catch {
     reason = null;
   }
+  /* If the breaker is open but the recorded cause was cleared (a new key, a
+     reset), the trip itself is the evidence: it is only ever set when the
+     day's neurons ran out. Without this the user gets a vague "did not answer"
+     while the honest answer is "the free quota is spent, here is the way out". */
+  if (!reason && (await env.CACHE.get("ai:halt").catch(() => null))) reason = "quota";
   const fa = loc === "fa";
   if (reason === "quota") {
     return fa

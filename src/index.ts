@@ -572,6 +572,10 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     const full = `${repoMatch[1]}/${repoMatch[2]}`.replace(/\.git$/, "");
     return scout.open(h, full, 0);
   }
+  /* A greeting is not a search query. Handing "سلام" to GitHub search answers
+     «چیزی پیدا نشد», which reads as a broken bot. Greet back instead, with the
+     menu and an honest word about the AI engine when it is off. */
+  if (isGreeting(text)) return greetBack(h);
   if (text.length < 60 && /^(find|search|جست|پیدا|دنبال|چی|چه|recommend|پیشنهاد)/i.test(text)) {
     return search.run(h, text);
   }
@@ -579,6 +583,52 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     return assistant.ask(h, text);
   }
   return search.run(h, text);
+}
+
+/**
+ * Small-talk detector — Persian and English, tolerant of punctuation and the
+ * different ways people type a greeting. Deliberately tight: 「سلامت باشی» is a
+ * greeting, 「سلامت سنج» is a search.
+ */
+const GREETINGS = [
+  "سلام", "درود", "سلان", "سلم", "های", "هی", "چطوری", "چطورید", "خوبی", "خوبید",
+  "حالت چطوره", "حالتون چطوره", "صبح بخیر", "شب بخیر", "روز بخیر", "وقت بخیر",
+  "ممنون", "مرسی", "تشکر", "دستت درد نکنه", "خسته نباشی",
+  "hi", "hey", "hello", "yo", "sup", "good morning", "good evening", "how are you",
+  "thanks", "thank you", "thx", "test", "تست",
+];
+function isGreeting(raw: string): boolean {
+  const t = raw.trim().toLowerCase().replace(/[!؟?.,،؛;:()\u200c«»"'']/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 30) return false;
+  return GREETINGS.some((g) => t === g || t.startsWith(g + " ") || t.startsWith(g + "‌"));
+}
+
+async function greetBack(h: H) {
+  const fa = h.loc === "fa";
+  const name = h.u.first_name || (fa ? "دوست من" : "friend");
+  const ai = await import("./ai/brain");
+  const halted = await ai.aiHalted(h.env).catch(() => false);
+  const pool = await h.env.DB.prepare("SELECT COUNT(*) AS n FROM ai_keys WHERE status IN ('ok','new')")
+    .first<{ n: number }>().catch(() => null);
+  const engine = Number(pool?.n ?? 0) > 0
+    ? (fa ? "🤝 موتور AI از استخر کلیدهای اهدایی کار می‌کند" : "🤝 AI runs on the donated-key pool")
+    : halted
+      ? (fa ? "⚠️ موتور AI امروز سهمیه‌اش تمام شده — با <code>/keys</code> یک کلید اهدا کن یا فردا دوباره امتحان کن" : "⚠️ the free AI quota is spent until tomorrow — donate a key with /keys")
+      : (fa ? "✅ همه‌چیز آماده است" : "✅ all set");
+  const { kb } = await import("./tg/keyboards");
+  return h.reply(
+    (fa
+      ? `👋 <b>${tgEscape(name)} عزیز، خوش آمدی!</b>\n\nمن لنز اولترا هستم؛ برای پیدا کردن، ترجمه و دانلود پروژه‌های گیت‌هاب ساخته شده‌ام و کاملاً روی کلودفلر اجرا می‌شوم.\n\n`
+      : `👋 <b>Hi ${tgEscape(name)}!</b>\n\nI'm Lens Ultra — search, translate and download GitHub projects, all on Cloudflare.\n\n`) +
+      engine +
+      (fa ? "\n\n<b>مثال:</b> «یک کتابخانه سبک برای صف در Go» یا <code>vuejs/core</code>" : "\n\n<b>Try:</b> “a lightweight queue library in Go” or <code>vuejs/core</code>"),
+    kb(
+      [{ text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }, { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }],
+      [{ text: "🪟 " + (fa ? "اپلیکیشن شیشه‌ای" : "Mini app"), web: `${h.env.WORKER_URL}/app` }, { text: "🤝 " + (fa ? "اهدای کلید" : "Donate key"), cb: "keys:home" }],
+      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+    ),
+    !!h.cbId,
+  );
 }
 
 /** Detects whether the user is mid-wizard, and returns the handler for their next message. */
