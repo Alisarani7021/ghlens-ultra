@@ -165,9 +165,9 @@ export const keys = {
     const fa = h.loc === "fa";
     const pool = new KeyPool(h.env);
     const row = (await pool.rows()).find((r) => r.id === id);
-    if (!row) return h.toast(fa ? "پیدا نشد" : "not found", true);
+    if (!row) return h.toast(fa ? "این کلید قبلاً حذف شده — فهرست را دوباره باز کن" : "already gone — reopen the list", true);
     const isAdmin = (h.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).includes(String(h.u.id));
-    if (row.owner_id !== h.u.id && !isAdmin) return h.toast(fa ? "این کلید مال تو نیست" : "not yours", true);
+    if (row.owner_id !== h.u.id && !isAdmin) return h.toast(fa ? "این کلید متعلق به تو نیست و حذف نشد" : "this key is not yours", true);
     await pool.remove(id, "owner request");
     await h.toast(fa ? "🗑 حذف شد" : "deleted");
     return this.mine(h);

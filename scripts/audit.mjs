@@ -180,9 +180,9 @@ for (const cb of targets) {
       : bad.length ? "bad-text"
       : stuck ? "stuck"
       : content.length ? "ok"
-      // a pop-up that explains what happened is feedback; a bare/broken one is not
-      : toast && toastText.length > 8 && !/error|خراب|نشد|موفق/i.test(toastText) ? "toast"
-      : toast ? "ok-toast" : "silent";
+      // a pop-up that explains what happened is feedback; a bare or broken one is not
+      : toast && toastText.length > 8 && !/error|خراب|نشد|موفق/i.test(toastText) ? "ok-toast"
+      : toast ? "toast" : "silent";
     row = { cb, ms: d.ms, status, error: d.error, bad, logs: d.logs, replies: replies.map((r) => r.text.slice(0, 160)) };
   } catch (e) {
     row = { cb, status: "threw", error: String(e.message) };
