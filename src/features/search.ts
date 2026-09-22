@@ -6,6 +6,7 @@ import { extractKeywords, scoreMatch, searchLadder } from "../search/keywords";
 import { fmt } from "./cards";
 import { b, code, i, link, tgEscape } from "../tg/types";
 import { kb, pager, type Loc } from "../tg/keyboards";
+import { isQuestion } from "../core/ask";
 
 /**
  * Multi-modal search:
@@ -140,14 +141,14 @@ export class SearchFeature {
 
     const rows = top.slice(0, 8).map((r, idx) => [{ text: `${idx + 1}. ${r.full_name}`, cb: `s:go:${r.full_name}` }]);
     const nav = pager("n", "page", page, Math.max(1, Math.ceil((lexical.length || 10) / 10)), [encodeURIComponent(rawQuery).slice(0, 30)]);
-    const isQuestion = /\?|؟|\b(how|why|what|which|چطور|چگونه|چرا|آیا|کدام)\b/i.test(rawQuery);
+    const question = isQuestion(rawQuery);
     const keyboard = kb(
       ...rows,
       nav,
       /* A question typed outside the AI section still deserves an answer — but
          the AI lives in its own section, so we hand over a one-tap door instead
          of turning every search into a chat. */
-      ...(isQuestion
+      ...(question
         ? [[{ text: "🧠 " + (fa ? "این را از هوش مصنوعی بپرس" : "Ask the AI this"), cb: `a:q:${enc(rawQuery)}` }]]
         : []),
       // honest escape hatch: when we could only offer "close" results, the fix

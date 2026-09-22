@@ -880,6 +880,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         return (t) => assistant.repoChat(h, full, t);
       }
       case "ask": return (t) => assistant.ask(h, t);
+      case "tr": return (t) => assistant.translateReadme(h, t.trim());
       case "wf": return (t) => assistant.workflow(h, t);
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1245,7 +1246,20 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── AI ──
       case "ai":
         if (action === "repo") return assistant.dossier(h, arg);
-        if (action === "tr") return arg === "ask" ? assistant.home(h) : assistant.translateReadme(h, arg);
+        if (action === "tr") {
+          // «ترجمه README» from the assistant home asks for the repo; the same
+          // key on a repo screen translates it directly. Either way the user
+          // stays in the translation flow, not in a generic menu.
+          if (arg !== "ask") return assistant.translateReadme(h, arg);
+          await setMode(h.session, "tr");
+          return h.reply(
+            fa
+              ? `📝 <b>ترجمهٔ README</b>\n\nنام مخزن را بفرست (<code>owner/repo</code>) تا کل README را فارسی کنم — با حفظ ساختار و کدها.\n\n<i>مثال: <code>python-telegram-bot/python-telegram-bot</code></i>`
+              : `📝 <b>Translate a README</b>\n\nSend the repo (<code>owner/repo</code>) and I translate the whole README to Persian.`,
+            kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
+            !!h.cbId,
+          );
+        }
         if (action === "trmore") return translateMore(h, args[0] ?? "", Number(args[1] ?? 1));
         if (action === "tre") return translateTo(h, args[0] ?? "", args[1] ?? "en");
         if (action === "trpdf") return translatePdf(h, args[0] ?? "");
