@@ -312,6 +312,15 @@ export default {
         }
         return json({ models: out });
       }
+      if (url.pathname === "/health" && url.searchParams.get("session") === "purge") {
+        if (url.searchParams.get("deep") !== env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "forbidden" }, 403);
+        const uid = Number(url.searchParams.get("uid") ?? 0);
+        if (uid) {
+          const stub: any = env.SESSION.get(env.SESSION.idFromName(`user:${uid}`));
+          await stub.clear();
+        }
+        return json({ ok: true, purged: uid || "none" });
+      }
       if (url.pathname === "/health" && url.searchParams.get("cron") === "1") {
         return json({ scheduler: await cronHeartbeat(env) });
       }
@@ -759,6 +768,18 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         }
       }
       return settings.home(h);
+    }
+    case "/reset": case "/cancel": case "/esc": {
+      // any user can escape a half-finished wizard or a stale step: nothing the
+      // bot asked for is more important than getting back to a known state
+      await h.session.clear();
+      return h.reply(
+        fa
+          ? "🧹 <b>حالت پاک شد</b>\nهر پرسش نیمه‌تمام (جست‌وجو، اهدای کلید، بازبینی، ورک‌فلو…) کنار گذاشته شد. از صفر شروع کن."
+          : "🧹 <b>Reset</b> — any half-finished step was dropped. Start fresh.",
+        kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }]),
+        !!h.cbId,
+      );
     }
     case "/help": case "/h": return settings.help(h);
     case "/about": return settings.about(h);

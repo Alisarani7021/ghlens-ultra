@@ -184,7 +184,11 @@ npx wrangler secret put OPENAI_COMPAT_BASE_URL   # مثل https://api.groq.com/o
 npx wrangler secret put OPENAI_COMPAT_KEY
 # ۲) یا پلن Workers Paid (سهمیهٔ نورون بالاتر)
 # ۳) یا فقط صبر: سهمیهٔ رایگان در ۰۰:۰۰ UTC خودکار برمی‌گردد
-curl -s "https://ghlens-ultra.gitguts.workers.dev/health?deep=$TG_HOOK_SECRET" | jq .checks.ai_text
+curl -s "https://ghlens-ultra.gitguts.workers.dev/health?deep=$TG_HOOK_SECRET" | jq .
+curl -s "https://ghlens-ultra.gitguts.workers.dev/health?session=purge&uid=<id>&deep=$TG_HOOK_SECRET"   # پاککردن نشست یک کاربر
+# بازرسی کامل (دکمه‌ها و دستورها) — هیچ‌کدام نباید stuck بدهند:
+node scripts/audit.mjs --json /tmp/audit.json
+node scripts/audit-commands.mjs --json /tmp/cmd.jsonchecks.ai_text
 curl -s "https://ghlens-ultra.gitguts.workers.dev/health?ai=reset&deep=$TG_HOOK_SECRET"   # پاک‌کردن کلید مداری
 ```
 
