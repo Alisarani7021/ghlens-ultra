@@ -147,7 +147,7 @@ const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, 
  * A reply that is only "در حال …" means the flow never finished — the user
  * stares at a spinner. That is a failure, not content.
  */
-const LOADING_ONLY = /^\s*(🔎|⚙️|🧠|📚|📊|🛰|🌍|🔬|🧪)?\s*(در حال|دارم|چند لحظه|Searching|Loading|Analyzing)/;
+const LOADING_ONLY = /^\s*[^\p{L}\p{N}]{0,3}\s*(در حال|دارم|چند لحظه|Searching|Loading|Analyzing)/u;
 const isLoaderOnly = (text) => {
   const plain = String(text ?? "").replace(/<[^>]+>/g, "").trim();
   return plain.length > 0 && LOADING_ONLY.test(plain);

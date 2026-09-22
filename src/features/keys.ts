@@ -78,6 +78,15 @@ export const keys = {
   },
 
   /** Step 3: the key itself arrived — test, then store. */
+  /** One place that turns a failed test into a sentence a human understands. */
+  explain(fa: boolean, test: { errorKind?: string; error?: string }): string {
+    return test.errorKind === "auth" ? (fa ? "کلید رد شد (۴۰۱/۴۰۳). کلید تازه بساز یا مطمئن شو کامل کپی شده." : "the key was rejected (401/403).")
+      : test.errorKind === "quota" ? (fa ? "این کلید سهمیه‌اش تمام شده یا محدود شده (۴۰۲/۴۲۹). یک کلید دیگر اهدا کن." : "this key is out of quota (402/429).")
+      : test.errorKind === "url" ? (fa ? "آدرس پایه درست نیست. فقط تا <code>/v1</code> لازم است؛ مسیر <code>/chat/completions</code> را ننویس." : "the base URL looks wrong — stop at /v1.")
+      : test.errorKind === "model" ? (fa ? "کلید سالم است ولی هیچ مدل چتی از این آدرس جواب نداد. یک مدل درست را از فهرست ارائه‌دهنده بفرست." : "the key works but no chat model answered.")
+      : (fa ? "ارتباط برقرار نشد (شبکه یا آدرس)." : "could not reach the endpoint.");
+  },
+
   async accept(h: H, pending: any, keyText: string) {
     const fa = h.loc === "fa";
     const pool = new KeyPool(h.env);
@@ -93,12 +102,7 @@ export const keys = {
     const test = await KeyPool.test(baseUrl, key, pending.model || "");
     if (!test.ok) {
       await h.session.clear(["keys:pending"]);
-      const why =
-        test.errorKind === "auth" ? (fa ? "کلید رد شد (۴۰۱/۴۰۳). کلید تازه بساز یا مطمئن شو کامل کپی شده." : "the key was rejected (401/403).")
-        : test.errorKind === "quota" ? (fa ? "این کلید سهمیه‌اش تمام شده یا محدود شده (۴۰۲/۴۲۹). یک کلید دیگر اهدا کن." : "this key is out of quota (402/429).")
-        : test.errorKind === "url" ? (fa ? "آدرس پایه درست نیست. فقط تا <code>/v1</code> لازم است؛ مسیر <code>/chat/completions</code> را ننویس." : "the base URL looks wrong — stop at /v1.")
-        : test.errorKind === "model" ? (fa ? "کلید سالم است ولی هیچ مدل چتی از این آدرس جواب نداد. یک مدل درست را از فهرست ارائه‌دهنده بفرست." : "the key works but no chat model answered.")
-        : (fa ? "ارتباط برقرار نشد (شبکه یا آدرس)." : "could not reach the endpoint.");
+      const why = keys.explain(fa, test);
       return h.reply(
         (fa ? `❌ <b>کلید ذخیره نشد</b>\n\n` : `❌ <b>Key not stored</b>\n\n`) +
           `${why}\n\n` +
@@ -197,20 +201,31 @@ export const keys = {
     );
   },
 
-  /** Hard clean: re-test and delete everything that fails. */
+  /**
+   * Re-test every key and drop the ones that are really gone.
+   *
+   * Deliberately conservative: a slow provider that times out once, or a
+   * rate-limited key, is *not* dead. Only hard rejections (401/402/403, quota,
+   * revoked) remove a key; everything else stays and merely goes on cooldown.
+   * A previous version deleted on any failure, which silently threw away
+   * working keys whose provider was just slow.
+   */
   async clean(h: H) {
     const fa = h.loc === "fa";
     const pool = new KeyPool(h.env);
     const keys = await pool.candidates(20);
-    let dead = 0;
+    let dead = 0, kept = 0;
     for (const k of keys) {
       const r = await KeyPool.test(k.baseUrl, k.key, k.model);
-      if (!r.ok) { await pool.remove(k.id, r.error ?? "clean"); dead++; }
-      else await pool.markOk(k.id, k.model);
+      if (r.ok) { await pool.markOk(k.id, r.model ?? k.model); kept++; continue; }
+      const hard = r.errorKind === "auth" || r.errorKind === "quota";
+      if (hard) { await pool.remove(k.id, r.error ?? "clean"); dead++; }
+      else { await pool.markFail(k.id, r.error ?? "clean"); kept++; }
     }
     const { total, ok } = await pool.stats().catch(() => ({ total: 0, ok: 0 }));
     await h.reply(
-      fa ? `♻️ پاک‌سازی انجام شد: ${dead} کلید خراب حذف شد · ${ok} کلید سالم از ${total}`
+      fa ? `♻️ پاک‌سازی انجام شد: ${dead} کلید سوخته حذف شد · ${ok} کلید سالم از ${total}` +
+             (kept ? `\n<i>${kept} کلید فقط کند یا محدود بود؛ نگه داشته شد و خودکار دوباره امتحان می‌شود.</i>` : "")
          : `♻️ cleaned: removed ${dead} · ${ok}/${total} healthy`,
       kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "keys:home" }]]),
       !!h.cbId,

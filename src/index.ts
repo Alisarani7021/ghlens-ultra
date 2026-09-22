@@ -643,6 +643,7 @@ const REPLY_LABELS: { keys: string[]; action: string }[] = [
   { keys: ["مرور پروژه‌ها", "مرور", "browse", "repos"], action: "browse" },
   { keys: ["پروفایل", "حساب من", "profile", "account"], action: "profile" },
   { keys: ["داشبورد", "dashboard"], action: "dashboard" },
+  { keys: ["حساب گیت‌هاب", "github account", "حساب گیت هاب", "اتصال گیت‌هاب", "github"], action: "github" },
   { keys: ["اهدای کلید", "اهدا کلید", "donate key", "donate", "کلید هوش مصنوعی"], action: "keys" },
   { keys: ["کاوش عمیق", "scout"], action: "scout" },
   { keys: ["راهنما", "help"], action: "help" },
@@ -663,6 +664,7 @@ export function replyKeyAction(text: string, loc: string):
     case "trending": return (h) => trendingMenuOrBoard(h, "");
     case "browse": return (h) => browse.menu(h);
     case "profile": return (h) => profile.home(h);
+    case "github": return (h) => githubOverview(h);
     case "dashboard": return (h) => accountFeature.home(h);
     case "keys": return (h) => keysFeature.home(h);
     case "scout": return (h) => scout.home(h);
@@ -749,19 +751,52 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         const { KeyPool } = await import("./ai/keypool");
         return KeyPool.test(state.baseUrl ?? "", text === "-" ? "" : text, state.model || "");
       })();
-      // a model-name problem is worth a retry; a dead key is not (401/402/403)
-      const modelProblem = !!test.error && /(404|400|model|not found|unsupported|does not exist)/i.test(test.error)
-        && !/(401|402|403|quota|credit|invalid api key|unauthorized)/i.test(test.error);
-      if (!test.ok && state.model && modelProblem) {
+      const modelProblem = !test.ok && (
+        test.errorKind === "model"
+        || (/404|400|unsupported|unknown|does not exist/i.test(test.error ?? "")
+            && !/(401|402|403|429|quota|credit|invalid api key|unauthorized)/i.test(test.error ?? ""))
+      );
+      if (!test.ok && (modelProblem || state.model || test.errorKind === "model")) {
+        // the key itself may be fine — the model name is what the server refused
         state.savedKey = text;
         state.stage = "model";
         state.lastError = test.error ?? "";
+        state.models = (test.models ?? state.models ?? []).slice(0, 40);
         await s.set("keys:pending", JSON.stringify(state));
         return h.reply(
-          (fa ? `⚠️ کلید جواب نداد با مدل <code>${state.model}</code>:\n<code>${String(test.error).slice(0, 200)}</code>\n\n` +
-                `اگر کلید سالم است، نام مدل را درست بفرست (یا «-» برای پیش‌فرض).` :
-                `⚠️ failed with model ${state.model}: ${String(test.error).slice(0, 160)}\nSend another model name, or “-”.`),
-          kb([[{ text: "◀️", cb: "keys:add" }]]),
+          (fa
+            ? `⚠️ با مدل <code>${tgEscape(String(state.model || "(خودکار)"))}</code> جواب نداد:\n<code>${tgEscape(String(test.error ?? "").slice(0, 200))}</code>\n\n` +
+              `اگر کلید سالم است، نام مدل را درست بفرست.`
+            : `⚠️ failed with model ${tgEscape(String(state.model || "auto"))}: ${tgEscape(String(test.error ?? "").slice(0, 160))}\nSend another model name.`) +
+            (state.models.length
+              ? `\n\n<i>${fa ? "مدل‌های دیده‌شده" : "seen"}: ${state.models.slice(0, 10).map((m: string) => `<code>${tgEscape(m)}</code>`).join(" · ")}</i>`
+              : ""),
+          kb(
+            state.models.slice(0, 6).map((m: string) => ({ text: "🧠 " + m.slice(0, 22), cb: `keys:m:${encodeURIComponent(m).slice(0, 20)}` })),
+          ),
+        );
+      }
+      if (!test.ok) {
+        // the wizard stays open: the next message is another key (or a new URL),
+        // never a search query — that is how a working key used to get "lost"
+        const kind = test.errorKind === "url" ? "url" : "key";
+        state.stage = kind;
+        state.lastError = test.error ?? "";
+        state.models = (test.models ?? state.models ?? []).slice(0, 40);
+        await s.set("keys:pending", JSON.stringify(state));
+        const { keys: keysFeature } = await import("./features/keys");
+        return h.reply(
+          (fa ? `❌ <b>کلید ذخیره نشد</b>\n\n` : `❌ <b>Key not stored</b>\n\n`) +
+            `${keysFeature.explain(fa, test)}\n\n` +
+            (fa ? `<b>پاسخ سرور:</b>\n<code>${tgEscape(String(test.error ?? "unknown").slice(0, 220))}</code>\n\n` : `<code>${tgEscape(String(test.error ?? "unknown").slice(0, 220))}</code>\n\n`) +
+            (kind === "url"
+              ? (fa ? `✏️ آدرس پایه را دوباره بفرست (فقط تا <code>/v1</code>).` : `✏️ send the base URL again (stop at /v1).`)
+              : (fa ? `✏️ کلید را دوباره بفرست (همین‌جا می‌مانیم؛ چیزی ذخیره نشد).` : `✏️ send the key again — nothing was stored.`)) +
+            (fa ? `\n\n<i>برای انصراف: /cancel</i>` : `\n\n<i>/cancel to stop</i>`),
+          kb(
+            [{ text: "🔄 " + (fa ? "آدرس را عوض کن" : "Change URL"), cb: `keys:p:${state.provider}` }],
+            [{ text: "❌ " + (fa ? "انصراف" : "Cancel"), cb: "keys:home" }],
+          ),
         );
       }
       if (test.ok && (state.provider === "custom" || state.provider === "local") && !test.model) {
@@ -1341,6 +1376,14 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "del") return keysFeature.del(h, Number(args[0] ?? 0));
         if (action === "test") return keysFeature.test(h);
         if (action === "clean") return keysFeature.clean(h);
+        if (action === "m") {
+          // one tap on a model we discovered during onboarding: store the key
+          // that was already tested, now with a model the server accepts
+          const pending: any = await h.session.get("keys:pending");
+          const state = typeof pending === "string" ? JSON.parse(pending) : (pending ?? {});
+          if (!state?.baseUrl || !state?.savedKey) return keysFeature.home(h);
+          return keysFeature.accept(h, { ...state, model: decodeURIComponent(args[0] ?? "") }, state.savedKey);
+        }
         break;
 
       // ── my GitHub account (public + private, with the user's own token) ──

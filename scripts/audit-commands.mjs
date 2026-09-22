@@ -16,8 +16,10 @@ const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.
 const src = readFileSync('src/index.ts', 'utf8');
 const cmds = [...new Set([...src.matchAll(/case "(\/[a-z-]+)"/g)].map((m) => m[1]))].sort();
 
-const LOADING_ONLY = /^\s*(🔎|⚙️|🧠|📚|📊|🛰|🌍|🔬|🧪)?\s*(در حال|دارم|چند لحظه)/;
-const BAD = [/^❌/m, /Error:/, /\bNaN\b/, /undefined/, /[а-яА-Я]/, /[ăâêôơưđ]/];
+const LOADING_ONLY = /^\s*[^\p{L}\p{N}]{0,3}\s*(در حال|دارم|چند لحظه|Searching|Loading|Analyzing)/u;
+// system failures only: an error line, not a repo/issue title that happens to
+// contain the word "Error:"
+const BAD = [/^❌/m, /^\s*(?:⚠️|⛔)?\s*Error[:\s]/m, /\bNaN\b/, /\bundefined\b/, /[а-яА-Я]/, /[ăâêôơưđ]/];
 
 const rows = [];
 for (const cmd of cmds) {

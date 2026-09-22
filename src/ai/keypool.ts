@@ -84,7 +84,9 @@ export class KeyPool {
     const out: LiveKey[] = [];
     for (const r of usable) {
       const key = await decryptSecret(this.env, r.enc_key, "ai-key");
-      if (key) out.push({ id: r.id, provider: r.provider, baseUrl: r.base_url, model: r.model, key });
+      // decryptSecret returns null only on a real crypto failure; an empty
+      // string is a legitimate "this endpoint needs no key" donor
+      if (key !== null) out.push({ id: r.id, provider: r.provider, baseUrl: r.base_url, model: r.model, key });
       else await this.remove(r.id, "decrypt failed");
     }
     return out;
@@ -186,6 +188,9 @@ export class KeyPool {
     return u;
   }
 
+  /** Last-resort model ids for endpoints with no /models list. */
+  private static readonly GUESSES = ["gpt-4o-mini", "openai", "llama-3.3-70b-versatile", "mistral-small-latest"];
+
   /** Model names that are almost always wrong for a chat call. */
   private static readonly NOT_CHAT = /(embed|embedding|whisper|tts|audio|image|dall|moderation|rerank|clip|stable|flux|guard|vision-encoder)/i;
 
@@ -221,9 +226,12 @@ export class KeyPool {
   private static async ping(url: string, key: string, model: string) {
     const res = await fetch(`${url}/chat/completions`, {
       method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      headers: {
+        ...(key ? { authorization: `Bearer ${key}` } : {}),   // keyless endpoints are welcome
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 8 }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(model === "ping-probe" ? 8000 : 20000),
     });
     const body = (await res.text()).slice(0, 200);
     if (!res.ok) return { ok: false as const, status: res.status, error: body };
@@ -275,12 +283,40 @@ export class KeyPool {
       return { ok: false, error: list.error, errorKind: "auth" };
     const candidates = (list.models ?? []).filter((m) => !KeyPool.NOT_CHAT.test(m)).slice(0, 6);
 
-    for (const candidate of candidates) {
+    /* Some OpenAI-compatible endpoints answer /chat/completions but expose no
+       /models list at all (pollinations, small self-hosted gateways). Rather
+       than reject a key that works, try the handful of model ids those servers
+       actually use. */
+    // a rejected key must be reported as such — not as "no usable model"
+    let refusals: { kind: "auth" | "quota"; error: string } | null = null;
+    let lastError = "";
+    const attempt = async (candidate: string) => {
       try {
         const r = await KeyPool.ping(url, key, candidate);
-        if (r.ok) return { ok: true, reply: r.reply.slice(0, 40), model: candidate, models: list.models };
-      } catch { /* try the next one */ }
+        if (r.ok) return { ok: true as const, reply: r.reply.slice(0, 40), model: candidate, models: list.models?.length ? list.models : [candidate] };
+        const kind = kindOf(r.status, r.error);
+        lastError = `${r.status} ${r.error}`;
+        if (kind === "auth" || kind === "quota") refusals = refusals ?? { kind, error: lastError };
+      } catch (e: any) {
+        lastError = String(e?.message ?? e).slice(0, 160);
+      }
+      return null;
+    };
+
+    if (!candidates.length && !model) {
+      for (const guess of KeyPool.GUESSES) {
+        const hit = await attempt(guess);
+        if (hit) return hit;
+        if (refusals) break;   // an auth failure will not improve with another model name
+      }
     }
+
+    for (const candidate of candidates) {
+      const hit = await attempt(candidate);
+      if (hit) return hit;
+      if (refusals) break;
+    }
+    if (refusals) return { ok: false, error: (refusals as any).error, errorKind: (refusals as any).kind, models: list.models };
 
     // 3. nothing from the list — say why, precisely
     if (!list.ok) {
@@ -294,7 +330,7 @@ export class KeyPool {
       ok: false,
       error: model
         ? `model "${model}" and ${candidates.length} alternative(s) were refused by this endpoint`
-        : "the endpoint lists no usable chat model",
+        : lastError || "the endpoint lists no usable chat model",
       errorKind: "model",
       models: list.models,
     };

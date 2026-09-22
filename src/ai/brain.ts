@@ -149,7 +149,10 @@ export class AiBrain {
     }
     if (!text) {
       console.error("ai-chain-exhausted", failures.join(" | "));
-      this.failure = failures.some((f) => /4006|neuron/i.test(f)) ? "quota"
+      // If donated keys were tried and did not answer, that is the cause the
+      // user needs to hear — not the account-wide quota message.
+      this.failure = this.poolAttempted ? "pool-cooling"
+        : failures.some((f) => /4006|neuron/i.test(f)) ? "quota"
         : failures.every((f) => /deprecat|no such model|not allowed|not available/i.test(f)) ? "missing"
         : "unconfigured";
       await this.env.CACHE.put("ai:last-failure", JSON.stringify({ at: Date.now(), reason: this.failure }), { expirationTtl: 3600 })
@@ -204,9 +207,9 @@ export class AiBrain {
       try {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
-          headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+          headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
           body: JSON.stringify({ model: k.model || "auto", messages: [{ role: "user", content: prompt }], max_tokens: opts.max_tokens ?? 2048, temperature: opts.temperature ?? 0.2 }),
-          signal: AbortSignal.timeout(60000),
+          signal: AbortSignal.timeout(90000),
         });
         if (!res.ok) {
           await pool.markFail(k.id, `${res.status} ${(await res.text()).slice(0, 160)}`);
@@ -280,6 +283,9 @@ export class AiBrain {
    * Try the donated-key pool. Each key is used with its own base URL and model;
    * failures are accounted per key, and a dead key is deleted on the spot.
    */
+  /** Set when the pool was consulted this request (used for honest notices). */
+  private poolAttempted = false;
+
   private async tryPool(messages: any[], opts: ChatOpts): Promise<string> {
     let keys: { id: number; provider: string; baseUrl: string; model: string; key: string }[] = [];
     try {
@@ -288,6 +294,7 @@ export class AiBrain {
       console.error("keypool-load-failed", String(e?.message ?? e));
       return "";
     }
+    this.poolAttempted = true;
     if (!keys.length) {
       await this.env.CACHE.delete("aipool:has").catch(() => null);
       // keys exist but every one is in its post-failure cooldown: say that,
@@ -303,9 +310,9 @@ export class AiBrain {
       try {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
-          headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+          headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
           body: JSON.stringify({ model: k.model || "auto", messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
-          signal: AbortSignal.timeout(45000),
+          signal: AbortSignal.timeout(90000),
         });
         if (!res.ok) {
           const body = (await res.text()).slice(0, 200);
@@ -316,9 +323,9 @@ export class AiBrain {
             if (fixed_) {
               const retry = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
                 method: "POST",
-                headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+                headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
                 body: JSON.stringify({ model: fixed_, messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
-                signal: AbortSignal.timeout(45000),
+                signal: AbortSignal.timeout(90000),
               }).catch(() => null);
               if (retry?.ok) {
                 const rj: any = await retry.json().catch(() => ({}));

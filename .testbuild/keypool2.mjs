@@ -114,6 +114,33 @@ var _KeyPool = class {
     await this.invalidate();
     return "kept";
   }
+  /**
+   * Repair a stored key whose model name no longer exists.
+   *
+   * Providers retire model ids (Groq does it constantly). A stored key that
+   * suddenly 404s is not a dead key — it is a key with a stale model name. We
+   * ask the provider what it serves, verify the first usable chat model, store
+   * that name and put the key back in service. Without this, one retirement
+   * would silently remove a working key from the pool.
+   */
+  async repairModel(id, baseUrl, key) {
+    const { models } = await _KeyPool.listModels(baseUrl, key).catch(() => ({ models: [] }));
+    for (const candidate of models.filter((m) => !_KeyPool.NOT_CHAT.test(m)).slice(0, 5)) {
+      try {
+        const r = await _KeyPool.ping(_KeyPool.normalizeBase(baseUrl), key, candidate);
+        if (!r.ok)
+          continue;
+        await this.env.DB.prepare(
+          `UPDATE ai_keys SET model=?, status='ok', last_err=NULL WHERE id=?`
+        ).bind(candidate, id).run().catch(() => null);
+        await this.invalidate();
+        console.error("keypool-model-repaired", id, candidate);
+        return candidate;
+      } catch {
+      }
+    }
+    return null;
+  }
   async invalidate() {
     await this.env.CACHE.delete(_KeyPool.CACHE_KEY).catch(() => null);
   }
@@ -169,7 +196,7 @@ var _KeyPool = class {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 8 }),
-      signal: AbortSignal.timeout(2e4)
+      signal: AbortSignal.timeout(model === "ping-probe" ? 8e3 : 2e4)
     });
     const body = (await res.text()).slice(0, 200);
     if (!res.ok)
@@ -222,6 +249,16 @@ var _KeyPool = class {
     if (!list.ok && /401|403|invalid api key|unauthorized/i.test(list.error ?? ""))
       return { ok: false, error: list.error, errorKind: "auth" };
     const candidates = (list.models ?? []).filter((m) => !_KeyPool.NOT_CHAT.test(m)).slice(0, 6);
+    if (!candidates.length && !model) {
+      for (const guess of _KeyPool.GUESSES) {
+        try {
+          const r = await _KeyPool.ping(url, key, guess);
+          if (r.ok)
+            return { ok: true, reply: r.reply.slice(0, 40), model: guess, models: [guess] };
+        } catch {
+        }
+      }
+    }
     for (const candidate of candidates) {
       try {
         const r = await _KeyPool.ping(url, key, candidate);
@@ -249,6 +286,8 @@ var KeyPool = _KeyPool;
 __publicField(KeyPool, "CACHE_KEY", "aipool:keys:v1");
 /** How long a merely-failed key (429, timeout, provider hiccup) stays out. */
 __publicField(KeyPool, "COOLDOWN_MS", 10 * 6e4);
+/** Last-resort model ids for endpoints with no /models list. */
+__publicField(KeyPool, "GUESSES", ["gpt-4o-mini", "openai", "llama-3.3-70b-versatile", "mistral-small-latest"]);
 /** Model names that are almost always wrong for a chat call. */
 __publicField(KeyPool, "NOT_CHAT", /(embed|embedding|whisper|tts|audio|image|dall|moderation|rerank|clip|stable|flux|guard|vision-encoder)/i);
 export {
