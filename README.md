@@ -13,6 +13,10 @@
 > ### 🟢 زنده و در حال اجرا — و روی گیت‌هاب
 > 📦 مخزن: **[github.com/Alisarani7021/ghlens-ultra](https://github.com/Alisarani7021/ghlens-ultra)** — با CI/CD: هر پوش به `main` تست می‌شود، منتشر می‌شود و سلامت زنده چک می‌شود.
 > ربات: [@Gitguts_bot](https://t.me/Gitguts_bot) · Worker: `https://ghlens-ultra.gitguts.workers.dev` · سلامت: `/health` · مینی‌اپ: `/app`
+>
+> 🌐 دامنهٔ اختصاصی `https://lens.gitguts.dpdns.org` روی همین ورکر سوار شده و به‌محض
+> فعال‌شدن NS دامنه (`blair.ns.cloudflare.com` و `otto.ns.cloudflare.com` در پنل DigitalPlat)
+> خودکار بالا می‌آید؛ جابه‌جایی با `bash scripts/use-domain.sh` انجام می‌شود.
 > گزارش کامل استقرار، تست‌ها، محدودیت‌ها و کارهای باقی‌مانده: **[docs/LIVE.md](docs/LIVE.md)**
 >
 > استقرار از اکانت کلادفلر قبلی منتقل شد، چون روی آن اکانت زیردامنه‌ی `*.workers.dev` از سمت خود کلادفلر خراب بود (هر اسکریپت، حتی «hello world»، خطای ۱۱۰۱ می‌گرفت). روی اکانت فعلی، همان تست سال اول `probe-ok` برمی‌گرداند.
