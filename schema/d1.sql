@@ -268,6 +268,7 @@ CREATE TABLE IF NOT EXISTS ai_keys (
   ok_count     INTEGER NOT NULL DEFAULT 0,
   fail_count   INTEGER NOT NULL DEFAULT 0,
   last_ok_at   INTEGER,
+  last_fail_at INTEGER,               -- when it last failed (429s retire, then retry)
   last_err     TEXT,
   created_at   INTEGER NOT NULL
 );

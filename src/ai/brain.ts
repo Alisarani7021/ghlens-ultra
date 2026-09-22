@@ -40,7 +40,7 @@ const FALLBACK: Record<string, AiModel[]> = {
 };
 
 /** Why the last call produced nothing — surfaced to users instead of a shrug. */
-export type AiFailure = "quota" | "missing" | "unconfigured" | null;
+export type AiFailure = "quota" | "missing" | "unconfigured" | "pool-cooling" | null;
 export type Tier = keyof typeof FALLBACK;
 
 export interface ChatOpts {
@@ -90,7 +90,11 @@ export class AiBrain {
      * would just fail (and cost latency), so we short-circuit until UTC
      * midnight — unless a gateway with its own quota is configured. */
     const compatReady = !!(this.env.OPENAI_COMPAT_BASE_URL && this.env.OPENAI_COMPAT_KEY);
-    const poolReady = compatReady ? true : !!(await this.env.CACHE.get("aipool:has").catch(() => null));
+    /* The breaker must never outrank a donated key. This used to happen: the
+     * "pool has keys" flag was only written *after* a successful pool call, so
+     * a halted account short-circuited before the pool was ever consulted and
+     * a freshly donated key looked like it did nothing at all. */
+    const poolReady = compatReady ? true : await this.poolReady();
     if (!compatReady && !poolReady && (await this.env.CACHE.get("ai:halt").catch(() => null))) {
       this.failure = "quota";
       return "";
@@ -102,6 +106,8 @@ export class AiBrain {
       text = await this.tryPool(messages, opts);
       if (text) {
         this.failure = null;
+        // pooled keys answered → the account-wide breaker is stale, clear it
+        await this.env.CACHE.delete("ai:halt").catch(() => null);
         if (cacheKey) await this.env.CACHE.put(cacheKey, text, { expirationTtl: opts.cacheTtl ?? 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
         if (opts.userId) await this.meter(opts.userId, opts.feature ?? "chat", text.length);
         return text;
@@ -250,6 +256,27 @@ export class AiBrain {
   }
 
   /**
+   * Is there a usable donated key right now?
+   *
+   * Cheap path first (KV flag), then the truth (a COUNT on a table with a
+   * handful of rows). The flag is a cache, never the source of truth.
+   */
+  private async poolReady(): Promise<boolean> {
+    if (await this.env.CACHE.get("aipool:has").catch(() => null)) return true;
+    try {
+      const row = await this.env.DB.prepare("SELECT COUNT(*) AS n FROM ai_keys WHERE status IN ('ok','new','warn')")
+        .first<{ n: number }>();
+      if (Number(row?.n ?? 0) > 0) {
+        await this.env.CACHE.put("aipool:has", "1", { expirationTtl: 300 }).catch(() => null);
+        return true;
+      }
+    } catch (e: any) {
+      console.error("lens-swallowed", String(e?.message ?? e));
+    }
+    return false;
+  }
+
+  /**
    * Try the donated-key pool. Each key is used with its own base URL and model;
    * failures are accounted per key, and a dead key is deleted on the spot.
    */
@@ -263,6 +290,10 @@ export class AiBrain {
     }
     if (!keys.length) {
       await this.env.CACHE.delete("aipool:has").catch(() => null);
+      // keys exist but every one is in its post-failure cooldown: say that,
+      // instead of blaming the account quota
+      const any = await this.env.DB.prepare("SELECT COUNT(*) AS n FROM ai_keys").first<{ n: number }>().catch(() => null);
+      if (Number(any?.n ?? 0) > 0) this.failure = "pool-cooling";
       return "";
     }
     await this.env.CACHE.put("aipool:has", "1", { expirationTtl: 300 }).catch(() => null);
@@ -619,6 +650,14 @@ export async function aiDownNotice(env: Env, loc: string): Promise<string> {
         "• یا اپراتور می‌تواند یک کلید سازگار با OpenAI (Groq / OpenRouter / Gemini) بسازد و با <code>OPENAI_COMPAT_KEY</code> وصل کند؛ آن سهمیه جداست.\n" +
         "بقیهٔ ربات بدون AI کار می‌کند."
       : "⚠️ The account's free Workers AI neurons are spent for today. It resets automatically, or add an OpenAI-compatible key (Groq / OpenRouter / Gemini) as OPENAI_COMPAT_KEY. Everything else keeps working.";
+  }
+  if (reason === "pool-cooling") {
+    return fa
+      ? "⏳ کلیدهای اهدایی همین حالا از سوی ارائه‌دهنده محدود شده‌اند (نرخ/صف).\n" +
+        "• چند دقیقه دیگر خودکار دوباره امتحان می‌شوند\n" +
+        "• اگر کلید تازه‌ای اهدا شود، بلافاصله استفاده می‌شود\n" +
+        "بقیهٔ ربات (جست‌وجو، مخزن‌ها، ابزارها) کامل کار می‌کند."
+      : "⏳ The donated keys are currently rate-limited by their providers; they retry automatically in a few minutes.";
   }
   if (reason === "missing") {
     return fa

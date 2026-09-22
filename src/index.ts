@@ -171,6 +171,39 @@ export default {
         }
       }
 
+      // ── mock OpenAI-compatible provider (secret-gated) ─────────────────
+      // Lets the key-donation flow be tested end to end against a provider
+      // that behaves like a real one: the right key answers, and a flipped
+      // flag makes it answer 402 so "exhausted keys are deleted at once" can
+      // be proven instead of assumed. The gate *is* the API key, so with the
+      // secret unknown this endpoint is just a 401.
+      if (url.pathname.startsWith("/mock/v1/")) {
+        const auth = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+        if (!env.TELEGRAM_WEBHOOK_SECRET || auth !== env.TELEGRAM_WEBHOOK_SECRET) {
+          return json({ error: { code: 401, message: "invalid api key" } }, 401);
+        }
+        if (await env.CACHE.get("mock:exhausted")) {
+          return json({ error: { code: 402, message: "quota exceeded — insufficient credits (mock)" } }, 402);
+        }
+        if (url.pathname.endsWith("/models")) {
+          return json({ object: "list", data: [{ id: "mock-chat", object: "model", owned_by: "mock" }] });
+        }
+        const body: any = await request.json().catch(() => ({}));
+        const last = (body?.messages ?? []).slice(-1)[0]?.content ?? "";
+        return json({
+          id: "mock-1", object: "chat.completion",
+          choices: [{ index: 0, message: { role: "assistant", content: `پاسخ آزمایشی از کلید اهدایی ✅ — ${String(last).replace(/<[^>]+>/g, "").slice(0, 60)}` }, finish_reason: "stop" }],
+          usage: { total_tokens: 7 },
+        });
+      }
+      if (url.pathname === "/mock/control") {
+        if (url.searchParams.get("deep") !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        const on = url.searchParams.get("exhausted") === "1";
+        if (on) await env.CACHE.put("mock:exhausted", "1", { expirationTtl: 900 });
+        else await env.CACHE.delete("mock:exhausted");
+        return json({ ok: true, exhausted: on });
+      }
+
       // ── GitHub webhook (releases, security, pushes) ────────────────────
       if (url.pathname === "/gh-webhook" && request.method === "POST") {
         return handleWebhook(request, env, ctx);
@@ -557,6 +590,15 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         return h.reply(fa ? `🔑 آدرس ثبت شد. حالا کلید را بفرست (برای سرور محلی بدون کلید، «-» بفرست).` : "🔑 now send the key (or “-” for a keyless local server)");
       }
       if (state.stage === "model") {
+        // a custom/local OpenAI-compatible server has no "auto": without a real
+        // model name every later call answers 404 and the key looks broken
+        const needsModel = state.provider === "custom" || state.provider === "local";
+        if (needsModel && text === "-")
+          return h.reply(
+            (fa ? "❗️ سرور سفارشی مدل «خودکار» ندارد — نام دقیق مدل را بفرست." : "❗️ a custom server has no auto model — send the exact name.") +
+              (state.models?.length ? `\n\n<i>${fa ? "فهرست دیده‌شده" : "seen"}: ${state.models.slice(0, 10).map((m: string) => `<code>${m}</code>`).join(" · ")}</i>` : ""),
+            kb([[{ text: "◀️", cb: "keys:add" }]]),
+          );
         state.model = text === "-" ? "" : text;
         await keysFeature.accept(h, state, state.savedKey ?? "");
         return;
@@ -579,6 +621,22 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
           (fa ? `⚠️ کلید جواب نداد با مدل <code>${state.model}</code>:\n<code>${String(test.error).slice(0, 200)}</code>\n\n` +
                 `اگر کلید سالم است، نام مدل را درست بفرست (یا «-» برای پیش‌فرض).` :
                 `⚠️ failed with model ${state.model}: ${String(test.error).slice(0, 160)}\nSend another model name, or “-”.`),
+          kb([[{ text: "◀️", cb: "keys:add" }]]),
+        );
+      }
+      if (test.ok && (state.provider === "custom" || state.provider === "local")) {
+        // ask for the model before storing, exactly as the provider prompt said
+        state.savedKey = text;
+        state.stage = "model";
+        state.models = (test.models ?? []).slice(0, 40);
+        await s.set("keys:pending", JSON.stringify(state));
+        return h.reply(
+          (fa
+            ? "✅ اتصال برقرار شد. حالا <b>نام مدل</b> را بفرست (مثلاً <code>openai</code> یا <code>llama-3.3-70b</code>)."
+            : "✅ reachable. Now send the <b>model name</b>.") +
+            (state.models.length
+              ? `\n\n<i>${fa ? "مدل‌های دیده‌شده" : "seen models"}: ${state.models.slice(0, 12).map((m: string) => `<code>${m}</code>`).join(" · ")}</i>`
+              : ""),
           kb([[{ text: "◀️", cb: "keys:add" }]]),
         );
       }

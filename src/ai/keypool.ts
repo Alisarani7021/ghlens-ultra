@@ -51,6 +51,7 @@ export interface PoolKey {
   ok_count: number;
   fail_count: number;
   last_ok_at: number | null;
+  last_fail_at: number | null;
   last_err: string | null;
   created_at: number;
 }
@@ -63,15 +64,20 @@ export class KeyPool {
 
   private static readonly CACHE_KEY = "aipool:keys:v1";
 
+  /** How long a merely-failed key (429, timeout, provider hiccup) stays out. */
+  static readonly COOLDOWN_MS = 10 * 60_000;
+
   /** Pool ordered for use: healthiest first, least-recently-used first. */
   async candidates(limit = 8): Promise<LiveKey[]> {
     const cached = await this.env.CACHE.get<PoolKey[]>(KeyPool.CACHE_KEY, "json").catch(() => null);
     const rows = cached ?? (await this.rows()).slice(0, 40);
-    if (!cached) await this.env.CACHE.put(KeyPool.CACHE_KEY, JSON.stringify(rows), { expirationTtl: 45 })
+    if (!cached) await this.env.CACHE.put(KeyPool.CACHE_KEY, JSON.stringify(rows), { expirationTtl: 120 })
       .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
 
     const usable = rows
-      .filter((r) => r.status === "ok" || r.status === "new")
+      .filter((r) => r.status === "ok" || r.status === "new" ||
+        // a rate-limited provider is not a dead key: try it again after the cooldown
+        (r.status === "warn" && Date.now() - Number(r.last_fail_at ?? 0) > KeyPool.COOLDOWN_MS))
       .sort((a, b) => (a.last_ok_at ?? 0) - (b.last_ok_at ?? 0))   // round-robin by age
       .slice(0, limit);
 
@@ -129,8 +135,8 @@ export class KeyPool {
       return "deleted";
     }
     await this.env.DB.prepare(
-      `UPDATE ai_keys SET status='warn', fail_count=fail_count+1, last_err=? WHERE id=?`,
-    ).bind(err.slice(0, 160), id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      `UPDATE ai_keys SET status='warn', fail_count=fail_count+1, last_fail_at=?, last_err=? WHERE id=?`,
+    ).bind(Date.now(), err.slice(0, 160), id).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
     await this.invalidate();
     return "kept";
   }
