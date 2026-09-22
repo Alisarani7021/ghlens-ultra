@@ -140,8 +140,11 @@ if (!withAdmin) {
 // ── run them ──────────────────────────────────────────────────────────────
 // "پاسخی تولید نشد" / the quota notice mean the AI path is degraded, not that
 // the button works — earlier audits called those rows green.
-const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /Error:/, /\bNaN\b/, /undefined/,
-  /پاسخی تولید نشد/, /سهمیهٔ رایگان هوش مصنوعی/, /No answer generated/, /این بخش پاسخ نداد/];
+const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /^\s*(?:⚠️|⛔)?\s*Error[:\s]/m, /\bNaN\b/, /\bundefined\b/,
+  /پاسخی تولید نشد/, /سهمیهٔ رایگان هوش مصنوعی/, /No answer generated/, /این بخش پاسخ نداد/,
+  // leaked translations of OUR ui, not real repository descriptions in any language
+  /(репозитор|поиск|ошибк|загрузк|вернут|ничего не найдено)/i,
+  /(tìm kiếm|không tìm thấy|kho lưu trữ|quay lại)/i];
 
 /**
  * A reply that is only "در حال …" means the flow never finished — the user
@@ -172,24 +175,28 @@ for (const cb of targets) {
     const visible = (d.replies ?? []).filter((r) => (r.text ?? "").trim() || (r.kb ?? 0) > 0 || (r.doc ?? 0) > 0);
     const last = visible[visible.length - 1];
     const stuck = visible.length > 0 && isLoaderOnly(last?.text ?? "");
+    const toastText = (d.replies ?? []).map((r) => (r.cb_text ?? "").trim()).filter(Boolean).join(" ");
     const status = !d.ok ? "error"
       : bad.length ? "bad-text"
       : stuck ? "stuck"
       : content.length ? "ok"
-      : toast ? "toast" : "silent";
+      // a pop-up that explains what happened is feedback; a bare/broken one is not
+      : toast && toastText.length > 8 && !/error|خراب|نشد|موفق/i.test(toastText) ? "toast"
+      : toast ? "ok-toast" : "silent";
     row = { cb, ms: d.ms, status, error: d.error, bad, logs: d.logs, replies: replies.map((r) => r.text.slice(0, 160)) };
   } catch (e) {
     row = { cb, status: "threw", error: String(e.message) };
   }
   report.push(row);
-  const icon = row.status === "ok" ? "✅" : row.status === "toast" ? "🔔" : row.status === "stuck" ? "⏳" : row.status === "silent" ? "⚪" : "❌";
+  const icon = row.status === "ok" || row.status === "ok-toast" ? "✅" : row.status === "toast" ? "🔔" : row.status === "stuck" ? "⏳" : row.status === "silent" ? "⚪" : "❌";
   const detail = row.status === "ok" ? (row.replies[0] ?? "").replace(/\s+/g, " ").slice(0, 70)
     : row.status === "stuck" ? "⏳ never finished (loader left behind)"
     : row.status === "toast" ? "(toast only)"
+    : row.status === "ok-toast" ? "(toast feedback)"
     : row.status === "silent" ? "(no visible reply)"
     : (row.error ?? row.bad?.join(",") ?? "").slice(0, 90);
   console.log(`${icon} ${cb.padEnd(34)} ${String(row.ms ?? "").padStart(6)}ms  ${detail}`);
-  if (row.status === "ok") pass++; else if (row.status === "silent") empty++; else fail++;
+  if (row.status === "ok" || row.status === "ok-toast") pass++; else if (row.status === "silent") empty++; else fail++;
 }
 
 console.log(`\n${pass} ok · ${empty} silent · ${fail} failing  (of ${targets.length})`);

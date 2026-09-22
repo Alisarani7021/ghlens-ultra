@@ -19,7 +19,10 @@ const cmds = [...new Set([...src.matchAll(/case "(\/[a-z-]+)"/g)].map((m) => m[1
 const LOADING_ONLY = /^\s*[^\p{L}\p{N}]{0,3}\s*(در حال|دارم|چند لحظه|Searching|Loading|Analyzing)/u;
 // system failures only: an error line, not a repo/issue title that happens to
 // contain the word "Error:"
-const BAD = [/^❌/m, /^\s*(?:⚠️|⛔)?\s*Error[:\s]/m, /\bNaN\b/, /\bundefined\b/, /[а-яА-Я]/, /[ăâêôơưđ]/];
+const BAD = [/^❌/m, /^\s*(?:⚠️|⛔)?\s*Error[:\s]/m, /\bNaN\b/, /\bundefined\b/,
+  // leaked translations of our own ui — repository descriptions may be any language
+  /(репозитор|поиск|ошибк|загрузк|вернут|ничего не найдено)/i,
+  /(tìm kiếm|không tìm thấy|kho lưu trữ|quay lại)/i];
 
 const rows = [];
 for (const cmd of cmds) {
