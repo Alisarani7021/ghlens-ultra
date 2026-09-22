@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#070b14">
+<title>GitHub Lens Ultra</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --glass: rgba(255,255,255,.06);
+    --glass-2: rgba(255,255,255,.10);
+    --stroke: rgba(255,255,255,.14);
+    --stroke-2: rgba(255,255,255,.22);
+    --fg:#eaf2ff; --mut:#9fb0c9;
+    --acc:#4de2ff; --acc2:#a6ff6b; --warn:#ffd166; --bad:#ff8095;
+    --r:22px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;
+    background:#070b14;overflow-x:hidden;padding:0 0 96px;
+  }
+  /* ── aurora background ─────────────────────────────────────────────── */
+  .aurora{position:fixed;inset:-20% -10%;z-index:-2;filter:blur(60px) saturate(140%);opacity:.85}
+  .aurora i{position:absolute;display:block;border-radius:50%;mix-blend-mode:screen;animation:float 22s ease-in-out infinite}
+  .aurora i:nth-child(1){width:52vw;height:52vw;background:#1f6feb;top:-6%;right:-8%}
+  .aurora i:nth-child(2){width:46vw;height:46vw;background:#12b981;bottom:2%;left:-10%;animation-delay:-7s}
+  .aurora i:nth-child(3){width:38vw;height:38vw;background:#7c3aed;top:38%;left:24%;animation-delay:-13s}
+  @keyframes float{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(-6%,6%,0) scale(1.12)}}
+  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+    background:radial-gradient(120% 80% at 50% 0%,rgba(255,255,255,.06),transparent 60%)}
+
+  /* ── layout ────────────────────────────────────────────────────────── */
+  .wrap{max-width:680px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 14px 0}
+  header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .brand{font-size:21px;font-weight:800;letter-spacing:.2px;
+    background:linear-gradient(100deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand small{display:block;font-size:11px;font-weight:600;color:var(--mut);-webkit-text-fill-color:var(--mut)}
+  .spacer{flex:1}
+  .iconbtn{
+    width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-size:17px;cursor:pointer;
+    background:var(--glass);border:1px solid var(--stroke);backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);color:var(--fg);transition:transform .15s, background .15s
+  }
+  .iconbtn:active{transform:scale(.93);background:var(--glass-2)}
+  .iconbtn[hidden]{display:none}
+
+  /* ── glass panels ──────────────────────────────────────────────────── */
+  .glass{
+    background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.045));
+    border:1px solid var(--stroke);border-radius:var(--r);
+    backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%);
+    box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.10);
+  }
+  section{margin-bottom:14px;padding:14px}
+  .shead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .shead h2{margin:0;font-size:15px;font-weight:700;letter-spacing:.2px}
+  .shead .em{font-size:17px}
+  .key{
+    margin-inline-start:auto;width:34px;height:34px;border-radius:12px;display:grid;place-items:center;cursor:pointer;
+    background:rgba(255,255,255,.09);border:1px solid var(--stroke-2);color:var(--acc);font-weight:800;font-size:14px;
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  }
+  .key:active{transform:scale(.9)}
+  .key[aria-expanded="true"]{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04141a;border-color:transparent}
+  .hint{
+    overflow:hidden;max-height:0;opacity:0;transition:max-height .28s ease,opacity .2s ease,margin .2s;
+    font-size:13px;line-height:1.85;color:#dce8ff;
+    background:linear-gradient(135deg,rgba(77,226,255,.10),rgba(166,255,107,.08));
+    border:1px dashed var(--stroke-2);border-radius:16px;padding:0 12px;
+  }
+  .hint.open{max-height:260px;opacity:1;padding:10px 12px;margin-bottom:10px}
+  .hint b{color:var(--acc)}
+  .hint code{background:rgba(0,0,0,.35);padding:1px 5px;border-radius:6px;direction:ltr;display:inline-block}
+
+  /* ── controls ──────────────────────────────────────────────────────── */
+  input,select{
+    width:100%;padding:13px 15px;border-radius:16px;border:1px solid var(--stroke);
+    background:rgba(6,10,20,.55);color:var(--fg);font-size:15px;margin-bottom:10px;
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);outline:none
+  }
+  input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(77,226,255,.15)}
+  .btn{
+    width:100%;padding:14px;border:none;border-radius:16px;font-size:15px;font-weight:800;cursor:pointer;
+    background:linear-gradient(100deg,var(--acc),var(--acc2));color:#04141a;
+    box-shadow:0 8px 22px rgba(77,226,255,.22)
+  }
+  .btn:active{transform:scale(.985)}
+  .chips{display:flex;gap:8px;overflow:auto;padding:2px 0 4px;margin-bottom:6px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{
+    padding:9px 14px;border-radius:999px;font-size:13px;white-space:nowrap;cursor:pointer;color:var(--mut);
+    background:var(--glass);border:1px solid var(--stroke);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)
+  }
+  .chip.on{color:#04141a;font-weight:800;background:linear-gradient(100deg,var(--acc),var(--acc2));border-color:transparent}
+  .chip:active{transform:scale(.96)}
+
+  /* ── repo cards ────────────────────────────────────────────────────── */
+  .repo{display:block;padding:13px;border-radius:18px;margin-bottom:9px;text-decoration:none;color:var(--fg);
+    background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.035));
+    border:1px solid var(--stroke);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+  .repo:active{transform:scale(.99)}
+  .repo .n{font-weight:800;font-size:14px;direction:ltr;text-align:left;display:block}
+  .repo .d{color:var(--mut);font-size:12.5px;margin:5px 0 7px;line-height:1.7;direction:auto}
+  .repo .m{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:#cfe0ff}
+  .repo .lang{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:4px;vertical-align:middle}
+  .tagline{font-size:11px;color:var(--mut);direction:ltr;text-align:left;margin-top:6px;opacity:.9}
+  .skeleton{height:74px;border-radius:18px;margin-bottom:9px;
+    background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));
+    background-size:200% 100%;animation:sk 1.2s linear infinite}
+  @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  .empty{text-align:center;color:var(--mut);font-size:13px;padding:22px 10px}
+  .empty .big{display:block;font-size:30px;margin-bottom:8px}
+  .err{color:var(--bad)}
+  footer{position:fixed;inset-inline:0;bottom:0;padding:12px 14px calc(14px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,transparent,rgba(4,7,14,.92) 40%);backdrop-filter:blur(6px);z-index:5}
+  footer .btn{max-width:680px;margin:0 auto;display:block}
+  .toast{position:fixed;top:calc(12px + env(safe-area-inset-top));inset-inline:0;margin:auto;width:max-content;max-width:86%;
+    padding:10px 16px;border-radius:14px;font-size:13px;background:rgba(10,16,28,.92);border:1px solid var(--stroke-2);
+    backdrop-filter:blur(14px);opacity:0;transform:translateY(-12px);transition:.25s;z-index:9;pointer-events:none}
+  .toast.show{opacity:1;transform:none}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <div class="iconbtn" id="back" hidden title="بازگشت">◀️</div>
+    <div>
+      <div class="brand">GitHub Lens Ultra<small id="crumb">داشبورد</small></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="iconbtn" id="refresh" title="تازه‌سازی">⟳</div>
+  </header>
+
+  <div id="view"></div>
+</div>
+
+<footer><button class="btn" id="searchBtn">🔍 جست‌وجو</button></footer>
+<div class="toast" id="toast"></div>
+
+
+<script>
+/* Offline preview: the real mini-app with a stubbed API so the design can be
+   reviewed without a Telegram client or a network. Live app: /app */
+(function () {
+  const REPOS = [
+    ['vuejs/core','🖖 Vue.js is a progressive, incrementally-adoptable JavaScript framework for building UI on the web.',54000,9200,'TypeScript','MIT','2026-09-21T18:20:00Z'],
+    ['cloudflare/workerd','The JavaScript / Wasm runtime that powers Cloudflare Workers',9800,2400,'C++','Apache-2.0','2026-09-22T05:10:00Z'],
+    ['openai/whisper','Robust Speech Recognition via Large-Scale Weak Supervision',71000,8600,'Python','MIT','2026-09-19T11:00:00Z'],
+    ['fastify/fastify','Fast and low overhead web framework, for Node.js',32000,2300,'JavaScript','MIT','2026-09-20T09:30:00Z'],
+    ['rust-lang/rust','Empowering everyone to build reliable and efficient software.',101000,13000,'Rust','MIT','2026-09-22T04:00:00Z'],
+    ['browser-use/jev-ultrafast','Fastest and cheapest web agent — 1272 stars this week',15576,900,'Python','MIT','2026-09-22T02:00:00Z'],
+  ];
+  const item = (r, i) => ({ full_name: r[0], description: r[1], stars: r[2], forks: r[3], language: r[4], license: r[5], pushed_at: r[6], url: 'https://github.com/' + r[0], health: 80 + (i % 15), gained: 120 + i * 37 });
+  const items = REPOS.map(item);
+  const json = (o) => Promise.resolve(new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } }));
+  const realFetch = window.fetch;
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.indexOf('/api/') === -1) return realFetch ? realFetch(input, init) : Promise.reject(new Error('offline'));
+    if (url.indexOf('/api/me') === 0) return json({ linked: true, login: 'Alisarani7021', linked_at: Date.now() - 86400000 });
+    if (url.indexOf('/api/gems') === 0) return json({ items: items.slice().reverse() });
+    if (url.indexOf('/api/search') === 0) return json({ items: items.slice(0, 5), note: 'پیش‌نمایش آفلاین — داده نمونه' });
+    if (url.indexOf('/api/repo') === 0) {
+      const full = decodeURIComponent((url.match(/full=([^&]*)/) || [])[1] || 'vuejs/core');
+      const base = items.find((x) => x.full_name === full) || items[0];
+      return json(Object.assign({}, base, {
+        full_name: full, health_score: 88, homepage: 'https://' + full.split('/')[0] + '.dev',
+        languages: [{ name: 'TypeScript', pct: 82 }, { name: 'JavaScript', pct: 11 }, { name: 'CSS', pct: 4 }],
+        topics: ['framework', 'frontend'],
+      }));
+    }
+    if (url.indexOf('/api/miniapp') === 0) return json({ items, period: 'daily', source: 'board' });
+    if (url.indexOf('/api/card') === 0) return json({ html: '' });
+    return json({ items });
+  };
+  document.addEventListener('DOMContentLoaded', function () {
+    const s = document.createElement('div');
+    s.textContent = 'پیش‌نمایش آفلاین — داده‌ها نمونه‌اند';
+    s.style.cssText = 'position:fixed;bottom:6px;left:50%;transform:translateX(-50%);font:11px system-ui;color:#9fb3c8;background:#0b1220cc;padding:4px 10px;border-radius:999px;z-index:99';
+    document.body.appendChild(s);
+  });
+})();
+</script>
+<script>
+const TG = window.Telegram?.WebApp;
+try { TG?.ready(); TG?.expand(); TG?.setHeaderColor?.('#070b14'); } catch (e) {}
+const API = 'https://ghlens-ultra.gitguts.workers.dev';
+const BOT = 'Gitguts_bot';
+
+const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const num = (n) => { n = Number(n || 0); if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'm'; if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'; return String(n); };
+const ago = (d) => { if (!d) return '—'; const s = (Date.now() - new Date(d)) / 1000;
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' دقیقه پیش';
+  if (s < 86400) return Math.round(s / 3600) + ' ساعت پیش';
+  if (s < 2592000) return Math.round(s / 86400) + ' روز پیش';
+  return Math.round(s / 2592000) + ' ماه پیش'; };
+const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); };
+const haptic = (k = 'light') => { try { TG?.HapticFeedback?.impactOccurred(k); } catch (e) {} };
+
+/* ── state + history ─────────────────────────────────────────────────── */
+const S = {
+  screen: 'home', stack: [], period: 'daily', query: '', repo: null, tab: 0,
+  hints: JSON.parse(localStorage.getItem('hints') || '{}'),
+  cache: {},
+};
+const BACK = { repo: 'home', results: 'home', tools: 'home', about: 'home', me: 'home' };
+
+function go(screen, opts = {}) {
+  if (S.screen !== screen) S.stack.push({ screen: S.screen, snapshot: { ...S, stack: null, hints: null, cache: null } });
+  Object.assign(S, opts, { screen });
+  render();
+}
+function back() {
+  const prev = S.stack.pop();
+  if (prev) { Object.assign(S, prev.snapshot, { screen: prev.screen }); render(); }
+  else go('home');
+}
+
+/* ── api ─────────────────────────────────────────────────────────────── */
+async function api(path, ttl = 60000) {
+  const hit = S.cache[path];
+  if (hit && Date.now() - hit.at < ttl) return hit.data;
+  const initData = TG?.initData ? (path.includes('?') ? '&' : '?') + 'initData=' + encodeURIComponent(TG.initData) : '';
+  const res = await fetch(API + path + initData, { headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  S.cache[path] = { at: Date.now(), data };
+  try { localStorage.setItem('lens:' + path, JSON.stringify({ at: Date.now(), data })); } catch (e) {}
+  return data;
+}
+
+/* ── building blocks ─────────────────────────────────────────────────── */
+function hint(key, title, brief, details) {
+  const open = !!S.hints[key];
+  return [
+    '<div class="hint ' + (open ? 'open' : '') + '" data-hint="' + key + '"><b>' + title + '</b><br>' + details + '</div>',
+  ].join('');
+}
+function section(key, emoji, title, brief, details, bodyHtml) {
+  const open = !!S.hints[key];
+  return '<section class="glass">' +
+    '<div class="shead"><span class="em">' + emoji + '</span><h2>' + title + '</h2>' +
+    '<div class="key" role="button" aria-expanded="' + open + '" data-key="' + key + '" title="توضیح">؟</div></div>' +
+    '<div class="hint ' + (open ? 'open' : '') + '" data-hint="' + key + '"><b>' + brief + '</b><br>' + details + '</div>' +
+    bodyHtml + '</section>';
+}
+function repoCard(r) {
+  const color = r.language_color || '#4de2ff';
+  return '<a class="repo" href="#" data-repo="' + esc(r.full_name) + '">' +
+    '<span class="n">' + esc(r.full_name) + '</span>' +
+    '<div class="d">' + esc((r.description || '—').slice(0, 150)) + '</div>' +
+    '<div class="m">⭐ ' + num(r.stars) + ' · 🍴 ' + num(r.forks) + ' · ' +
+    (r.language ? '<span><span class="lang" style="background:' + esc(color) + '"></span>' + esc(r.language) + '</span> · ' : '') +
+    '🕒 ' + ago(r.pushed_at) + (r.license ? ' · ⚖️ ' + esc(r.license) : '') + '</div>' +
+    (r.topics ? '<div class="tagline">' + esc(r.topics.slice(0, 120)) + '</div>' : '') + '</a>';
+}
+const skeleton = (n = 5) => Array.from({ length: n }, () => '<div class="skeleton"></div>').join('');
+const emptyState = (icon, title, sub) => '<div class="empty"><span class="big">' + icon + '</span><b>' + title + '</b><br><span>' + sub + '</span></div>';
+
+/* ── screens ─────────────────────────────────────────────────────────── */
+async function render() {
+  const v = document.getElementById('view');
+  document.getElementById('back').hidden = S.screen === 'home';
+  document.getElementById('crumb').textContent = {
+    home: 'داشبورد', results: 'نتایج جست‌وجو', repo: 'مخزن', tools: 'جعبه‌ابزار', about: 'راهنما', me: 'حساب من',
+  }[S.screen] || '';
+  S.stack.length ? document.getElementById('back').removeAttribute('hidden') : null;
+
+  if (S.screen === 'home') return home(v);
+  if (S.screen === 'results') return results(v);
+  if (S.screen === 'repo') return repo(v);
+  if (S.screen === 'tools') return tools(v);
+  if (S.screen === 'about') return about(v);
+  if (S.screen === 'me') return me(v);
+}
+
+async function home(v) {
+  v.innerHTML =
+    section('search', '🔍', 'جست‌وجوی هوشمند',
+      'اینجا هم می‌توانی نام مخزن بنویسی، هم لینک گیت‌هاب بچسبانی، هم یک موضوع.',
+      'مثال‌ها: <code>facebook/react</code> · <code>https://github.com/vuejs/core</code> · <code>async http client in rust</code><br>' +
+      'جست‌وجو واژگانی + امتیازدهی AI است؛ نتیجه را می‌توانی مستقیم به مخزن باز کنی.',
+      '<input id="q" inputmode="search" placeholder="نام مخزن، لینک یا موضوع…" value="' + esc(S.query) + '">' +
+      '<button class="btn" id="go">🔍 جست‌وجو</button>') +
+
+    section('trending', '🔥', 'داغ‌ترین‌ها',
+      'تابلوی ترند بر پایه اسنپ‌شات ستاره‌ها ساخته می‌شود (نه فقط تعداد کل).',
+      'روزانه: بیشترین رشد ستاره در ۲۴ ساعت · هفتگی/ماهانه: رشد تجمعی از اسنپ‌شات‌های ذخیره‌شده در D1 · همیشه: محبوب‌ترین‌های کل تاریخ.<br>' +
+      'اگر تازه راه افتاده باشی و چند روز داده نداشته باشیم، جای خالی را با محبوب‌ترین‌های همان بازه پر می‌کنم و زیر فهرست می‌نویسم.',
+      '<div class="chips" id="periods">' +
+        [['daily', '🔥 امروز'], ['weekly', '📅 هفته'], ['monthly', '🗓 ماه'], ['all', '🏆 همیشه']]
+          .map(([k, l]) => '<div class="chip ' + (S.period === k ? 'on' : '') + '" data-period="' + k + '">' + l + '</div>').join('') +
+      '</div><div id="feed">' + skeleton(5) + '</div>' +
+      '<button class="btn" id="more" style="margin-top:8px">➕ ۱۰ مورد بیشتر</button>') +
+
+    section('gems', '✨', 'گنج‌های پنهان',
+      'مخزن‌های باکیفیت اما کم‌شهرت — قبل از انفجار ستاره‌ای.',
+      'امتیاز «نگین» از کیفیت کد، تازگی کامیت، مجوز، نسبت مشارکت‌کننده به ستاره و زنده‌بودن پروژه ساخته می‌شود.' + '<div id="gems" style="margin-top:8px"></div>',
+      '<button class="btn" id="gemsBtn">✨ نمایش گنج‌ها</button>') +
+
+    section('quick', '🧰', 'بخش‌های دیگر',
+      'همه‌ی قابلیت‌های ربات در همین مینی‌اپ خلاصه شده‌اند.',
+      'جعبه‌ابزار: CIDR، کرون، JWT، Base64، هش، IP/DNS/TLS · حساب من: اتصال گیت‌هاب، علاقه‌مندی‌ها، اشتراک‌ها · راهنما: فهرست دستورهای ربات.',
+      '<div class="chips" style="flex-wrap:wrap">' +
+        '<div class="chip" data-go="tools">🧰 جعبه‌ابزار</div>' +
+        '<div class="chip" data-go="me">👤 حساب من</div>' +
+        '<div class="chip" data-go="about">📚 راهنما</div>' +
+      '</div>');
+
+  bind(v);
+  loadFeed();
+  document.getElementById('gemsBtn')?.addEventListener('click', loadGems);
+}
+
+function bind(root) {
+  root.querySelectorAll('[data-key]').forEach((el) =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.key;
+      S.hints[id] = !S.hints[id];
+      try { localStorage.setItem('hints', JSON.stringify(S.hints)); } catch (e) {}
+      const h = root.querySelector('[data-hint="' + id + '"]');
+      h?.classList.toggle('open', !!S.hints[id]);
+      el.setAttribute('aria-expanded', String(!!S.hints[id]));
+      haptic();
+    }));
+  root.querySelectorAll('[data-go]').forEach((el) => el.addEventListener('click', () => go(el.dataset.go)));
+  root.querySelectorAll('[data-period]').forEach((el) =>
+    el.addEventListener('click', () => { S.period = el.dataset.period; S.cache = {}; home(document.getElementById('view')); }));
+  root.querySelectorAll('[data-repo]').forEach((el) =>
+    el.addEventListener('click', (e) => { e.preventDefault(); go('repo', { repo: el.dataset.repo }); }));
+  root.querySelector('#go')?.addEventListener('click', submitSearch);
+  root.querySelector('#q')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitSearch(); });
+  root.querySelector('#more')?.addEventListener('click', () => loadFeed(true));
+}
+
+function parseTarget(raw) {
+  const t = String(raw || '').trim();
+  const url = t.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/?/i);
+  if (url) return { kind: 'repo', full: url[1] + '/' + url[2].replace(/\.git$/, '') };
+  const slug = t.match(/^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/);
+  if (slug) return { kind: 'repo', full: slug[1] + '/' + slug[2].replace(/\.git$/, '') };
+  const user = t.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/?$/i);
+  if (user) return { kind: 'user', login: user[1] };
+  return { kind: 'query', q: t };
+}
+
+function submitSearch() {
+  const raw = document.getElementById('q')?.value || S.query;
+  S.query = raw;
+  const t = parseTarget(raw);
+  if (!raw.trim()) return toast('چیزی بنویس 🙂');
+  if (t.kind === 'repo') return go('repo', { repo: t.full });
+  go('results', { query: raw });
+}
+
+async function results(v) {
+  v.innerHTML =
+    section('results', '🔎', 'نتایج',
+      'برای هر کوئری، بهترین مخزن‌ها بر پایه ارتباط + کیفیت مرتب می‌شوند.',
+      'می‌توانی از اینجا مستقیم به کاوش عمیق، دانلود یا ترجمه README بروی.',
+      '<div id="qline" class="repo" style="cursor:default"><span class="n">…</span></div><div id="list">' + skeleton(4) + '</div>');
+  document.getElementById('back').hidden = false;
+  const t = parseTarget(S.query);
+  if (t.kind === 'repo') return go('repo', { repo: t.full });
+  try {
+    const d = await api('/api/search?q=' + encodeURIComponent(t.q ?? S.query));
+    const items = d.items || [];
+    v.querySelector('#qline').innerHTML = '<span class="n">' + esc(S.query) + '</span><div class="d">' +
+      (items.length ? items.length + ' نتیجه' : 'نتیجه‌ای نبود') + '</div>';
+    v.querySelector('#list').innerHTML = items.length ? items.map(repoCard).join('') : emptyState('🫥', 'چیزی پیدا نشد', 'املای متفاوتی را امتحان کن یا لینک مخزن را مستقیم بچسبان.');
+    bind(v);
+  } catch (e) {
+    v.querySelector('#list').innerHTML = emptyState('⚠️', 'خطا در جست‌وجو', esc(e.message));
+  }
+}
+
+async function repo(v) {
+  const full = S.repo;
+  v.innerHTML =
+    section('repo', '📦', full,
+      'همه‌چیز این مخزن در یک نگاه: آمار، زبان‌ها، ریلیزها، ایشوها و سلامت پروژه.',
+      'این داده‌ها از GraphQL گیت‌هاب می‌آید و ۱۰ دقیقه کش می‌شود؛ دکمه‌ی ⟳ گوشه‌ی بالا تازه‌اش می‌کند.',
+      '<div id="rbody">' + skeleton(3) + '</div>');
+  document.getElementById('back').hidden = false;
+  try {
+    const [d, card] = await Promise.all([
+      api('/api/repo?full=' + encodeURIComponent(full)),
+      api('/api/card?repo=' + encodeURIComponent(full), 0).catch(() => null),
+    ]);
+    const r = d.error ? null : d;
+    if (!r) throw new Error(d.error || 'not found');
+    const langs = (r.languages || []).slice(0, 6);
+    v.querySelector('#rbody').innerHTML =
+      '<div class="repo" style="cursor:default">' +
+        '<span class="n">' + esc(r.full_name) + '</span>' +
+        '<div class="d">' + esc(r.description || '—') + '</div>' +
+        '<div class="m">⭐ ' + num(r.stars) + ' · 🍴 ' + num(r.forks) + ' · 🐞 ' + num(r.open_issues) +
+        ' · 🕒 ' + ago(r.pushed_at) + (r.license ? ' · ⚖️ ' + esc(r.license) : '') +
+        (r.language ? ' · ' + esc(r.language) : '') + '</div>' +
+        (r.homepage ? '<div class="tagline">' + esc(r.homepage) + '</div>' : '') +
+      '</div>' +
+      (langs.length ? '<div class="chips" style="flex-wrap:wrap">' + langs.map((l) =>
+        '<div class="chip" style="cursor:default">' + esc(l.name || l) + ' ' + (l.pct ? l.pct + '%' : '') + '</div>').join('') + '</div>' : '') +
+      '<div class="chips" style="flex-wrap:wrap;margin-top:6px">' +
+        '<div class="chip" data-open="https://github.com/' + esc(full) + '">🐙 گیت‌هاب</div>' +
+        (r.health_score ? '<div class="chip" style="cursor:default">❤️ سلامت ' + esc(r.health_score) + '/100</div>' : '') +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('s_' + full) + '">🛰 کاوش عمیق ۱۲ تب</div>' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('d_' + full) + '">📥 دانلود</div>' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('t_' + full) + '">📝 ترجمه README</div>' +
+      '</div>';
+    v.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => {
+      const url = el.dataset.open; haptic();
+      try { TG?.openLink ? TG.openLink(url) : window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
+    }));
+  } catch (e) {
+    v.querySelector('#rbody').innerHTML = emptyState('🚫', 'مخزن باز نشد', esc(e.message) + ' — لینک را دوباره بچسبان یا در ربات /scout بزن.');
+  }
+}
+
+function tools(v) {
+  v.innerHTML =
+    section('tools', '🧰', 'جعبه‌ابزار',
+      'ابزارهای فنی که همه سمت سرور و بدون سرویس بیرونی اجرا می‌شوند.',
+      'CIDR را برای محاسبه شبکه، کرون را برای ترجمه زمان‌بندی، JWT را برای رمزگشایی توکن، و Base64/هش را برای تبدیل سریع استفاده کن.',
+      '<div class="chips" style="flex-wrap:wrap">' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=tools">🧮 CIDR · 🕐 کرون · 🔐 JWT · 🔤 Base64</div>' +
+      '</div>' +
+      '<p style="color:var(--mut);font-size:13px;line-height:1.9">این ابزارها در ربات با گفت‌وگوی ساده کار می‌کنند: مثلاً <code>/dev</code> را بزن و بعد ورودی را بفرست.</p>');
+  bind(v);
+  v.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => {
+    const url = el.dataset.open; try { TG?.openLink ? TG.openLink(url) : window.open(url, '_blank'); } catch (e) {}
+  }));
+}
+
+function about(v) {
+  v.innerHTML =
+    section('about', '📚', 'راهنمای سریع',
+      'ربات ۷۷ دستور دارد؛ اینها پرکاربردترین‌ها هستند.',
+      'برای فهرست کامل در تلگرام <code>/help</code> را بزن. هر دستور دکمه‌های بازگشت و منو دارد، پس گم نمی‌شوی.',
+      '<div class="repo" style="cursor:default;direction:ltr;text-align:left;font-size:13px;line-height:2">' +
+        ['/start — منوی اصلی', '/search — جست‌وجوی چندزبانه', '/trending — داغ‌ترین‌ها', '/scout owner/repo — کاوش ۱۲ تب',
+         '/compare a/b c/d — مقایسه', '/translate — README فارسی', '/dl — دانلود سورس', '/security — اسکن CVE',
+         '/login — اتصال حساب گیت‌هاب', '/profile — سطح و نشان‌ها'].map((l) => '<div>' + esc(l) + '</div>').join('') +
+      '</div>');
+}
+
+async function me(v) {
+  v.innerHTML =
+    section('me', '👤', 'حساب من',
+      'وضعیت اتصال گیت‌هاب و میان‌برهای پروفایل.',
+      'با اتصال حساب گیت‌هاب، سقف درخواست از ۶۰ به ۵٬۰۰۰ در ساعت می‌رسد و مخزن‌های خصوصی هم دیده می‌شوند. توکن رمزنگاری‌شده ذخیره می‌شود.',
+      '<div id="mebody">…</div>');
+  try {
+    const d = await api('/api/me');
+    v.querySelector('#mebody').innerHTML = d.linked
+      ? '<div class="repo" style="cursor:default"><span class="n">🐙 ' + esc(d.login || 'linked') + '</span><div class="d">حساب گیت‌هاب وصل است' +
+        (d.linked_at ? ' · ' + ago(d.linked_at) : '') + '</div></div>'
+      : '<div class="repo" style="cursor:default"><span class="n">🐙 اتصال برقرار نیست</span><div class="d">در ربات <code>/login</code> را بزن و توکن یا OAuth را انتخاب کن.</div></div>';
+  } catch (e) {
+    v.querySelector('#mebody').innerHTML = '<div class="repo err" style="cursor:default">در دسترس نیست</div>';
+  }
+}
+
+async function loadFeed(append = false) {
+  const box = document.getElementById('feed');
+  if (!box) return;
+  if (!append) box.innerHTML = skeleton(5);
+  else box.innerHTML += skeleton(2);
+  try {
+    const d = await api('/api/miniapp?period=' + S.period);
+    const items = d.items || [];
+    const note = d.note ? '<div class="tagline" style="text-align:right">' + esc(d.note) + '</div>' : '';
+    if (!items.length) { box.innerHTML = emptyState('🕳', 'فعلاً چیزی نیست', 'کمی بعد دوباره سر بزن.'); return; }
+    box.innerHTML = (append ? box.querySelectorAll('.repo').length ? box.innerHTML : '' : '') + items.map(repoCard).join('') + note;
+    bind(document.getElementById('view'));
+    if (append) box.innerHTML = box.innerHTML; // keep
+    haptic();
+  } catch (e) {
+    box.innerHTML = emptyState('⚠️', 'ترند در دسترس نیست', esc(e.message));
+  }
+}
+
+async function loadGems() {
+  const box = document.getElementById('gems');
+  box.innerHTML = skeleton(3);
+  try {
+    const d = await api('/api/gems');
+    box.innerHTML = (d.items || []).length ? d.items.map(repoCard).join('') : emptyState('✨', 'چیزی پیدا نشد', 'دوباره بزن.');
+    bind(document.getElementById('view'));
+  } catch (e) {
+    box.innerHTML = emptyState('⚠️', 'در دسترس نیست', esc(e.message));
+  }
+}
+
+document.getElementById('back').addEventListener('click', back);
+document.getElementById('refresh').addEventListener('click', () => { S.cache = {}; toast('تازه شد ⟳'); render(); });
+document.getElementById('searchBtn').addEventListener('click', () => { go('home'); setTimeout(() => document.getElementById('q')?.focus(), 120); });
+window.addEventListener('popstate', () => { if (S.stack.length) back(); });
+document.addEventListener('click', (e) => { if (e.target.closest('[data-key],[data-repo],.chip,.btn')) haptic(); });
+
+S.stack.push({ screen: 'home', snapshot: {} });
+S.stack = [];
+render();
+</script>
+</body>
+</html>
