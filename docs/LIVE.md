@@ -151,6 +151,43 @@ node scripts/audit.mjs --json /tmp/a.json
 - چرخش توکن‌ها (بات، کلادفلر، PAT) و بازسازی `.secrets.local.sh`.
 - بازهٔ هفتگی/ماهانه: رشد واقعی از اسنپ‌شات‌ها می‌آید و با پر شدن داده دقیق‌تر می‌شود.
 
+## ۷.۶ هوش مصنوعی — چه چیزی خراب بود و چه شد
+
+با یک پروب تازه (`GET /health?ai=probe&deep=…`) معلوم شد دلیل «جواب ندادن» هوش مصنوعی
+دو چیز بود، نه یکی:
+
+1. **شناسه‌های منقضی در زنجیرهٔ مدل‌ها** — `@cf/meta/llama-3.1-8b-instruct` را کلادفلر
+   در ۲۰۲۶-۰۵-۳۰ بازنشسته کرده و `@cf/mistral/mistral-7b-instruct-v0.2` هرگز وجود نداشت؛
+   پس زنجیرهٔ fallback عملاً به مدل‌های مرده وصل بود.
+2. **تمام‌شدن سهمیهٔ روزانهٔ رایگان** — `4006: you have used up your daily free allocation
+   of 10,000 neurons`.
+
+پس از اصلاح:
+
+- زنجیره‌ها فقط شامل مدل‌هایی است که پروب زنده تأییدشان کرده
+  (`llama-3.2-3b` / `llama-3.1-8b-fp8` / `llama-3.3-70b-fast` / `gpt-oss-120b` /
+  `qwen2.5-coder-32b` / `qwen3-30b` / `llama-4-scout` / `deepseek-r1` / `gemma-4` /
+  `mistral-small-3.1`)، به ترتیب کوچک → بزرگ تا هر درخواست ساده سهمیه را نسوزاند.
+- مدل‌های مخصوص پلن پولی و بدنه‌های ممنوع (`kimi-k2.*`, `gemma-3-12b`) از فهرست حذف شدند.
+- **کلید مداری سهمیه**: بعد از اولین خطای ۴۰۰۶، تا نیمه‌شب UTC هیچ درخواست دیگری به
+  مدل‌ها زده نمی‌شود؛ کرون هم بخش‌های AI را رد می‌کند و دیجست را با دادهٔ خالص می‌فرستد.
+- **مسیر جایگزین رایگان**: اگر `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_KEY` ست شوند،
+  همهٔ قابلیت‌های AI از آن‌جا می‌روند و سهمیهٔ کلادفلر اصلاً مصرف نمی‌شود.
+- پیام‌ها دیگر «پاسخی تولید نشد» نیستند: علت و راه‌حل گفته می‌شود
+  (`aiDownNotice`)، ترجمهٔ خالی هرگز کش نمی‌شود، و پادکست از مدل کوچک استفاده می‌کند.
+
+### راه‌های برگرداندن AI (هر کدام کافی است)
+
+```bash
+# ۱) مسیر رایگان: یک کلید سازگار با OpenAI (Groq / OpenRouter / Gemini)
+npx wrangler secret put OPENAI_COMPAT_BASE_URL   # مثل https://api.groq.com/openai/v1
+npx wrangler secret put OPENAI_COMPAT_KEY
+# ۲) یا پلن Workers Paid (سهمیهٔ نورون بالاتر)
+# ۳) یا فقط صبر: سهمیهٔ رایگان در ۰۰:۰۰ UTC خودکار برمی‌گردد
+curl -s "https://ghlens-ultra.gitguts.workers.dev/health?deep=$TG_HOOK_SECRET" | jq .checks.ai_text
+curl -s "https://ghlens-ultra.gitguts.workers.dev/health?ai=reset&deep=$TG_HOOK_SECRET"   # پاک‌کردن کلید مداری
+```
+
 ## ۸. دستورهای عملیاتی
 
 ```bash

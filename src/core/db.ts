@@ -274,6 +274,8 @@ export class Store {
 export interface UserRow {
   id: number; username: string | null; first_name: string | null; locale: string;
   github_login: string | null; plan: string; xp: number; level: number;
+  /** AES-GCM ciphertext + timestamp of the user's linked GitHub token (never plaintext). */
+  github_token_enc: string | null; github_token_at: number | null;
   badges: string; interests: string; skills: string;
   daily_queries: number; daily_reset_at: number; banned: number;
   referral_by: number | null; referral_code: string | null;

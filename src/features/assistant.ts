@@ -1,6 +1,7 @@
 import type { H } from "../core/handler";
 import { GithubRest } from "../github/rest";
 import { RepoRag } from "../ai/vector";
+import { aiDownNotice } from "../ai/brain";
 import { hash } from "../ai/brain";
 import { fmt, truncate } from "./cards";
 import { code, i, pre, tgEscape } from "../tg/types";
@@ -98,7 +99,7 @@ export class Assistant {
     }
 
     await h.reply(
-      (answer || (fa ? "پاسخی تولید نشد؛ دوباره تلاش کن." : "No answer generated.")).slice(0, 3900),
+      (answer || (await aiDownNotice(h.env, h.loc))).slice(0, 3900),
       kb(
         [
           { text: "🔁 " + (fa ? "بپرس ادامه‌اش" : "Follow up"), cb: "a:cont" },
@@ -267,8 +268,20 @@ export class Assistant {
       const parts = splitMd(md, 14000);
       const out: string[] = [];
       for (const p of parts.slice(0, 3)) out.push(await h.ai.translate(p, h.loc === "fa" ? "fa" : "en", "README"));
-      translated = out.join("\n\n");
-      await h.env.STATE.put(cacheKey, translated, { expirationTtl: 2592000 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      translated = out.filter(Boolean).join("\n\n");
+      // never cache an empty translation — that silently poisons the feature
+      if (translated) {
+        await h.env.STATE.put(cacheKey, translated, { expirationTtl: 2592000 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      }
+    }
+
+    if (!translated) {
+      const notice = await aiDownNotice(h.env, h.loc);
+      return h.reply(
+        `${notice}\n\n📄 ${fa ? "متن اصلی README" : "original README"}: <a href="${raw.html_url}">GitHub</a>\n` +
+          `<i>${fa ? "بعد از برگشتن سهمیه، همین دکمه ترجمهٔ کامل را می‌دهد." : "the same button will translate once the quota is back."}</i>`,
+        kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }]), true,
+      );
     }
 
     await h.store.event(h.u.id, "translate", full);

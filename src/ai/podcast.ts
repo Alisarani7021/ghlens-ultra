@@ -23,7 +23,9 @@ export class Podcast {
         `Structure: warm greeting → what happened in open-source ${scope === "daily" ? "today" : "this week"} → ` +
         `walk through 4 of these repos one by one (why they matter, who should care, one practical tip) → a closing thought.\n` +
         `Numbers must be read naturally in Persian (مثلاً «دوازده هزار و چهارصد ستاره»).\n\nDATA:\n${JSON.stringify(brief)}`,
-      { tier: "smart", max_tokens: 1100, temperature: 0.6, cacheKey: `pod:${scope}:${new Date().toISOString().slice(0, 10)}`, cacheTtl: 43200 },
+      // spoken text: the small model is indistinguishable to the ear and keeps
+      // the daily neuron budget for the features users actually read
+      { tier: "fast", max_tokens: 700, temperature: 0.6, cacheKey: `pod:${scope}:${new Date().toISOString().slice(0, 10)}`, cacheTtl: 43200 },
     );
     return out;
   }

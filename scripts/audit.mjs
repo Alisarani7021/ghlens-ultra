@@ -138,7 +138,10 @@ if (!withAdmin) {
 }
 
 // ── run them ──────────────────────────────────────────────────────────────
-const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /Error:/, /\bNaN\b/, /undefined/];
+// "پاسخی تولید نشد" / the quota notice mean the AI path is degraded, not that
+// the button works — earlier audits called those rows green.
+const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /Error:/, /\bNaN\b/, /undefined/,
+  /پاسخی تولید نشد/, /سهمیهٔ رایگان هوش مصنوعی/, /No answer generated/];
 const report = [];
 let pass = 0, fail = 0, empty = 0;
 

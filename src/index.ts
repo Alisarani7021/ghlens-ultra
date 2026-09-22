@@ -34,6 +34,7 @@ import { handleApi } from "./core/api";
 import { audioBytes, describe } from "./ai/brain";
 import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
+import { aiDownNotice } from "./ai/brain";
 
 export { UserSession } from "./core/session";
 
@@ -212,6 +213,43 @@ export default {
       }
 
       // ── health & metrics ───────────────────────────────────────────────
+      if (url.pathname === "/health" && url.searchParams.get("ai") === "reset") {
+        const secret = url.searchParams.get("deep");
+        if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        await env.CACHE.delete("ai:halt").catch(() => null);
+        await env.CACHE.delete("ai:last-failure").catch(() => null);
+        return Response.json({ ok: true, cleared: ["ai:halt", "ai:last-failure"] }, { headers: { "cache-control": "no-store" } });
+      }
+
+      // ── Workers AI probe: which model answers, and exactly why not ────
+      if (url.pathname === "/health" && url.searchParams.get("ai") === "probe") {
+        const secret = url.searchParams.get("deep");
+        if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        const asked = url.searchParams.get("models");
+        const models = asked
+          ? asked.split(",").map((m) => m.trim()).filter(Boolean)
+          : [
+              "@cf/meta/llama-3.1-8b-instruct-fp8",
+              "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+              "@cf/meta/llama-3.2-3b-instruct",
+              "@cf/qwen/qwen2.5-coder-32b-instruct",
+              "@cf/openai/gpt-oss-120b",
+            ];
+        const out: Record<string, string> = {};
+        for (const m of models) {
+          try {
+            const r: any = await env.AI.run(m as any, { messages: [{ role: "user", content: "ping" }], max_tokens: 8 } as any);
+            const t = (r?.response ?? "").toString().trim();
+            out[m] = t ? `✅ ${t.slice(0, 40)}` : `shape ${describe(r)}`;
+          } catch (e: any) {
+            const msg = String(e?.message ?? e);
+            // 4006 = valid model, free daily neurons spent · 5007/deprecated = gone
+            out[m] = msg.includes("4006") || /neuron/i.test(msg) ? "⛔ quota" : "❌ " + msg.slice(0, 140);
+          }
+        }
+        return Response.json({ probe: "ai", results: out }, { headers: { "cache-control": "no-store" } });
+      }
+
       if (url.pathname === "/health" && url.searchParams.get("tts") === "probe") {
         const secret = url.searchParams.get("deep");
         if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
@@ -988,12 +1026,15 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           if (!isAdmin(env, h.u.id)) return h.toast(fa ? "فقط ادمین" : "admins only", true);
           await h.reply(fa ? "🎙 در حال ساخت پادکست…" : "🎙 building the podcast…", undefined, !!h.cbId);
           const rows = await h.store.board("daily", "all", 10);
-          const pod = new Podcast_(env);
+          const pod = new Podcast_(env, ai, tg);
           const out = await pod.publish(rows, "daily").catch((e: any) => {
             console.error("podcast-build", String(e?.message ?? e));
             return null;
           });
-          if (!out) return h.reply("❌", undefined, true);
+          if (!out) {
+            const notice = await aiDownNotice(env, h.loc);
+            return h.reply(`${notice}\n\n<i>${fa ? "پادکست فردا دوباره خودکار ساخته می‌شود." : "tomorrow's podcast builds automatically."}</i>`, undefined, true);
+          }
           const key = (out as any).key as string | null;
           if (!key) return h.reply(fa ? "🎙 متن پادکست آماده شد (صدا در دسترس نبود) — /podcast" : "🎙 script ready (no audio available)", undefined, true);
           const blobs = new BlobStore(env);
@@ -1254,7 +1295,14 @@ async function showIds(h: H) {
  * Deep self-test — proves every subsystem really works, on the live account.
  * Gated behind the webhook secret because it spends AI neurons.
  */
+function safeJsonField(raw: string, key: string): string | null {
+  try { return (JSON.parse(raw) as any)?.[key] ?? null; } catch { return null; }
+}
+
 async function deepHealth(env: Env) {
+  // surface the AI circuit breaker: "ai: true" only means the binding exists
+  const aiHalt = await env.CACHE.get("ai:halt").catch(() => null);
+  const aiFailure = await env.CACHE.get("ai:last-failure").catch(() => null);
   const t0 = Date.now();
   const out: Record<string, any> = { version: "1.0.0", at: new Date().toISOString(), checks: {} as any };
   const C = out.checks as Record<string, any>;
@@ -1314,6 +1362,11 @@ async function deepHealth(env: Env) {
     const t = Date.now();
     const answer = await ai.chat("Reply with exactly: LENS-OK", { tier: "fast", max_tokens: 12, cacheKey: `health:${Date.now()}` });
     C.ai_text = { ok: /LENS-OK|LENS/i.test(answer), ms: Date.now() - t, sample: answer.slice(0, 40) };
+    if (!C.ai_text.ok) {
+      C.ai_text.halted = !!aiHalt;
+      C.ai_text.reason = aiFailure ? safeJsonField(aiFailure, "reason") : null;
+      if (aiHalt) C.ai_text.hint = "free neurons spent — clears at 00:00 UTC, or set OPENAI_COMPAT_KEY, or POST /health?ai=reset";
+    }
   } catch (e: any) { C.ai_text = { ok: false, error: String(e.message).slice(0, 140) }; }
 
   // 6. Embeddings + Vectorize

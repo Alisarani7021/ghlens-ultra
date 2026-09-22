@@ -10,17 +10,36 @@ import type { Env } from "../env";
  *  • strict JSON mode helper for structured extraction
  */
 export type AiModel =
+  | "@cf/meta/llama-3.1-8b-instruct-fp8"
   | "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-  | "@cf/meta/llama-3.1-8b-instruct"
+  | "@cf/meta/llama-3.2-3b-instruct"
+  | "@cf/meta/llama-4-scout-17b-16e-instruct"
   | "@cf/qwen/qwen2.5-coder-32b-instruct"
-  | "@cf/mistral/mistral-7b-instruct-v0.2"
-  | "@cf/meta/llama-3.2-3b-instruct";
+  | "@cf/qwen/qwen3-30b-a3b-fp8"
+  | "@cf/openai/gpt-oss-120b"
+  | "@cf/openai/gpt-oss-20b"
+  | "@cf/google/gemma-4-26b-a4b-it"
+  | "@cf/mistralai/mistral-small-3.1-24b-instruct"
+  | "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b";
 
+/**
+ * Fallback chains, ordered small → large so a burst of easy requests never
+ * burns the daily neuron budget on a 70B model.
+ *
+ * Every id below answered "quota" (i.e. exists and is allowed on the Workers
+ * Free plan) in `/health?ai=probe`; the previous list pointed at
+ * `@cf/meta/llama-3.1-8b-instruct`, which Cloudflare deprecated on
+ * 2026-05-30, and at a mistral id that never existed — which is why AI silently
+ * produced nothing. Re-run the probe before editing this list.
+ */
 const FALLBACK: Record<string, AiModel[]> = {
-  fast: ["@cf/meta/llama-3.1-8b-instruct", "@cf/meta/llama-3.2-3b-instruct"],
-  smart: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct", "@cf/meta/llama-3.2-3b-instruct"],
-  code: ["@cf/qwen/qwen2.5-coder-32b-instruct", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"],
+  fast: ["@cf/meta/llama-3.2-3b-instruct", "@cf/meta/llama-3.1-8b-instruct-fp8", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
+  smart: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/openai/gpt-oss-120b", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/meta/llama-3.1-8b-instruct-fp8"],
+  code: ["@cf/qwen/qwen2.5-coder-32b-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", "@cf/meta/llama-3.1-8b-instruct-fp8"],
 };
+
+/** Why the last call produced nothing — surfaced to users instead of a shrug. */
+export type AiFailure = "quota" | "missing" | "unconfigured" | null;
 export type Tier = keyof typeof FALLBACK;
 
 export interface ChatOpts {
@@ -37,6 +56,8 @@ export interface ChatOpts {
 
 export class AiBrain {
   private static memo = new Map<string, { until: number; text: string }>();
+  /** Set by the last chat() call: null when it produced text. */
+  failure: AiFailure = null;
 
   constructor(private env: Env) {}
 
@@ -63,6 +84,34 @@ export class AiBrain {
 
     let text = "";
     const chain = FALLBACK[tier] ?? FALLBACK.fast;
+
+    /* Circuit breaker: after the day's neurons are spent every further call
+     * would just fail (and cost latency), so we short-circuit until UTC
+     * midnight — unless a gateway with its own quota is configured. */
+    const compatReady = !!(this.env.OPENAI_COMPAT_BASE_URL && this.env.OPENAI_COMPAT_KEY);
+    if (!compatReady && (await this.env.CACHE.get("ai:halt").catch(() => null))) {
+      this.failure = "quota";
+      return "";
+    }
+
+    /* A configured OpenAI-compatible gateway is preferred over Workers AI:
+     * its quota is separate from the account's neuron budget, so open-source
+     * AI keeps working even after the free neurons are spent. */
+    if (this.env.OPENAI_COMPAT_BASE_URL && this.env.OPENAI_COMPAT_KEY) {
+      text = await this.openaiCompat(messages, opts).catch((e: any) => {
+        console.error("ai-compat-failed", String(e?.message ?? e));
+        return "";
+      });
+      if (text) {
+        this.failure = null;
+        if (cacheKey) await this.env.CACHE.put(cacheKey, text, { expirationTtl: opts.cacheTtl ?? 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+        return text;
+      }
+    }
+    /* Every failure is recorded. Silently swallowing them hid a deployment-wide
+     * Workers AI outage (auth/limit) behind a friendly "no answer" message, so
+     * keep the last error and surface it when the whole chain misses. */
+    const failures: string[] = [];
     for (const model of chain) {
       try {
         const res: any = await this.env.AI.run(model as any, {
@@ -72,10 +121,26 @@ export class AiBrain {
         } as any);
         text = (res?.response ?? "").toString().trim();
         if (text) break;
-      } catch (e) {
-        // capacity/limits → try the next model
-        continue;
+        failures.push(`${model}: empty response`);
+      } catch (e: any) {
+        failures.push(`${model}: ${String(e?.message ?? e).slice(0, 120)}`);
+        continue; // capacity/limits → try the next model
       }
+    }
+    if (!text) {
+      console.error("ai-chain-exhausted", failures.join(" | "));
+      this.failure = failures.some((f) => /4006|neuron/i.test(f)) ? "quota"
+        : failures.every((f) => /deprecat|no such model|not allowed|not available/i.test(f)) ? "missing"
+        : "unconfigured";
+      await this.env.CACHE.put("ai:last-failure", JSON.stringify({ at: Date.now(), reason: this.failure }), { expirationTtl: 3600 })
+        .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      if (this.failure === "quota") {
+        const left = secondsUntilUtcMidnight();
+        await this.env.CACHE.put("ai:halt", String(Date.now()), { expirationTtl: left })
+          .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      }
+    } else {
+      this.failure = null;
     }
     if (!text && this.env.OPENAI_COMPAT_BASE_URL && this.env.OPENAI_COMPAT_KEY) {
       text = await this.openaiCompat(messages, opts).catch(() => "");
@@ -350,4 +415,50 @@ export function describe(res: any): string {
   if (res instanceof Uint8Array) return `Uint8Array(${res.byteLength})`;
   if (typeof res === "object") return "keys:" + Object.keys(res).slice(0, 6).join("|");
   return typeof res;
+}
+
+
+/**
+ * Persian/English explanation for a dead AI path — used wherever a feature
+ * would otherwise answer with a shrug. Never invents an apology: it names the
+ * cause and the way out.
+ */
+export async function aiDownNotice(env: Env, loc: string): Promise<string> {
+  let reason: AiFailure = null;
+  try {
+    const raw = await env.CACHE.get("ai:last-failure");
+    reason = raw ? (JSON.parse(raw).reason as AiFailure) : null;
+  } catch {
+    reason = null;
+  }
+  const fa = loc === "fa";
+  if (reason === "quota") {
+    return fa
+      ? "⚠️ سهمیهٔ رایگان هوش مصنوعی این حساب برای امروز تمام شده (۱۰٬۰۰۰ نورون).\n" +
+        "• چند ساعت دیگر یا فردا خودش برمی‌گردد\n" +
+        "• یا اپراتور می‌تواند یک کلید سازگار با OpenAI (Groq / OpenRouter / Gemini) بسازد و با <code>OPENAI_COMPAT_KEY</code> وصل کند؛ آن سهمیه جداست.\n" +
+        "بقیهٔ ربات بدون AI کار می‌کند."
+      : "⚠️ The account's free Workers AI neurons are spent for today. It resets automatically, or add an OpenAI-compatible key (Groq / OpenRouter / Gemini) as OPENAI_COMPAT_KEY. Everything else keeps working.";
+  }
+  if (reason === "missing") {
+    return fa
+      ? "⚠️ مدل‌های هوش مصنوعی این حساب در دسترس نیستند (شناسهٔ مدل منقضی شده)."
+      : "⚠️ No available model on this account (stale model ids).";
+  }
+  return fa
+    ? "⚠️ هوش مصنوعی الان پاسخ نداد؛ چند لحظه بعد دوباره تلاش کن."
+    : "⚠️ The AI backend did not answer; try again in a moment.";
+}
+
+
+/** Seconds until the Workers AI free-neuron counter resets (UTC midnight). */
+function secondsUntilUtcMidnight(): number {
+  const now = new Date();
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(900, Math.min(86400, Math.floor((next - now.getTime()) / 1000)));
+}
+
+/** True while the AI circuit breaker is open (free neurons spent). */
+export async function aiHalted(env: Env): Promise<boolean> {
+  return !!(await env.CACHE.get("ai:halt").catch(() => null));
 }

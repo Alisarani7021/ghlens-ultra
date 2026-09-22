@@ -2,7 +2,7 @@ import type { Ctx, Env } from "../env";
 import { Telegram } from "../tg/api";
 import { Store } from "./db";
 import { TrendingEngine } from "../github/trending";
-import { AiBrain } from "../ai/brain";
+import { AiBrain, aiHalted } from "../ai/brain";
 import { Podcast } from "../ai/podcast";
 import { GithubRest } from "../github/rest";
 import { SecurityEngine } from "../github/osv";
@@ -164,6 +164,9 @@ async function hourly(env: Env, store: Store, ctx: Ctx) {
 async function daily(env: Env, store: Store, ctx: Ctx) {
   const ai = new AiBrain(env);
   const tg = new Telegram(env);
+  // the free neuron budget is finite: when it is spent, send the digest with
+  // pure data instead of throwing AI calls at a wall
+  const halted = await aiHalted(env);
   const engine = new TrendingEngine(env);
 
   const board = await engine.rank("daily", "all", 25).catch(() => []);
@@ -171,15 +174,17 @@ async function daily(env: Env, store: Store, ctx: Ctx) {
 
   // two AI articles for the digest: hottest + best newcomer
   const rows = board.slice(0, 8).map((r: any) => ({ full_name: r.full_name, description: r.description, stars: r.stars, gained: r.gained, lang: r.language, topics: (r.topics ?? []).slice(0, 3) }));
-  const narrative = await ai.chat(
+  const narrative = halted ? "" : await ai.chat(
     `Write a short Persian morning brief (max 180 words) about today's GitHub trends using ONLY this data. ` +
       `Mention 3 repos with their star counts and why developers care. No fluff, no emojis.\n\n${JSON.stringify(rows)}`,
     { tier: "smart", max_tokens: 500, cacheKey: `digest:${new Date().toISOString().slice(0, 10)}`, cacheTtl: 43200 },
   );
 
   // podcast generation (audio cached in R2)
-  const podcast = new Podcast(env, ai, tg);
-  await podcast.publish(rows, "daily").catch((e) => console.error("podcast", e));
+  if (!halted) {
+    const podcast = new Podcast(env, ai, tg);
+    await podcast.publish(rows, "daily").catch((e) => console.error("podcast", e));
+  }
 
   const digestText =
     `☀️ <b>خلاصه صبحگاهی گیت‌هاب</b> — ${new Date().toISOString().slice(0, 10)}\n\n` +
@@ -204,7 +209,7 @@ async function daily(env: Env, store: Store, ctx: Ctx) {
   for (const u of users ?? []) {
     const interests: string[] = safeJson(u.interests) ?? [];
     let text = digestText;
-    if (interests.length) {
+    if (interests.length && !halted) {
       const rows2 = await ai.json<{ picks: { full_name: string; why_fa: string }[] }>(
         `Pick 3 repositories (real, from the list) relevant to a developer interested in: ${interests.join(", ")}. ` +
           `For each write one Persian sentence about why they'd care. JSON: {"picks":[{"full_name":"...","why_fa":"..."}]}\n\nLIST:\n${JSON.stringify(rows)}`,
