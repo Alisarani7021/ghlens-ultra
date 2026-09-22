@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { armMode } from "../core/modes";
 import { GithubRest } from "../github/rest";
 import { RepoRag } from "../ai/vector";
 import { aiDownNotice } from "../ai/brain";
@@ -119,6 +120,7 @@ export class Assistant {
   async repoChat(h: H, full: string, question?: string) {
     const fa = h.loc === "fa";
     if (!question) {
+      await armMode(h, "repochat");
       await h.session.set("repochat", full);
       return h.reply(
         `🧠 <b>${fa ? "چت با مخزن" : "Chat with repo"}</b>\n\n` + (fa
@@ -318,7 +320,7 @@ export class Assistant {
   async workflow(h: H, description?: string) {
     const fa = h.loc === "fa";
     if (!description) {
-      await h.session.set("wf", true);
+      await armMode(h, "wf");
       return h.reply(
         `⚙️ <b>GitHub Actions</b>\n\n${fa ? "توضیح بده چه ورک‌فلویی می‌خواهی:\nمثال: «CI برای نود با تست و کش روی هر PR»" : "Describe the workflow you need."}`,
         kb([
@@ -350,9 +352,9 @@ export class Assistant {
       kb(
         [
           { text: "🔁 " + (fa ? "بازسازی" : "Regenerate"), cb: `a:wf:${description.slice(0, 120)}` },
-          { text: "🧪 " + (fa ? "تست رجکس" : "Regex lab"), cb: "u:regex" },
+          { text: "📋 " + (fa ? "کپی مسیر فایل" : "Copy file path"), cb: `a:wfpath:${description.slice(0, 90)}` },
         ],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:workflow" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }],
       ),
       !!h.cbId,
     );
@@ -362,7 +364,7 @@ export class Assistant {
   async code(h: H, snippet?: string) {
     const fa = h.loc === "fa";
     if (!snippet) {
-      await h.session.set("code", true);
+      await armMode(h, "code");
       return h.reply(
         `🧑‍💻 <b>${fa ? "توضیح کد" : "Code explainer"}</b>\n\n${fa ? "کد را بفرست (در یک پیام یا به‌صورت بلوک کد) تا توضیح بدهم: هدف، جریان، نکات ظریف، پیچیدگی و دو پیشنهاد بهبود." : "Send code and I'll explain it."}`,
         kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
@@ -380,7 +382,7 @@ export class Assistant {
   async review(h: H, target?: string) {
     const fa = h.loc === "fa";
     if (!target) {
-      await h.session.set("review", true);
+      await armMode(h, "review");
       return h.reply(
         `🔍 <b>${fa ? "بازبینی PR" : "PR review"}</b>\n\n${fa ? "فرمت: <code>/review owner/repo#123</code>\nمن دیف را می‌گیرم و مثل یک مهندس ارشد بازبینی می‌کنم." : "Format: <code>/review owner/repo#123</code>"}`,
         kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
@@ -451,7 +453,7 @@ function chunkMd(md: string, size: number) { return splitMd(md, size).slice(0, 6
 function safeParseArr(s: string | null | undefined): any[] {
   try { const v = JSON.parse(s ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
 }
-function guessName(desc: string) {
+export function guessName(desc: string) {
   const d = desc.toLowerCase();
   if (/python|pytest/.test(d)) return "ci";
   if (/docker/.test(d)) return "docker";

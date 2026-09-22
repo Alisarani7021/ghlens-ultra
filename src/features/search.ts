@@ -146,13 +146,14 @@ export class SearchFeature {
       // honest escape hatch: when we could only offer "close" results, the fix
       // is one key away — put it right there instead of hiding it in a menu
       ...(precise ? [] : [aiOn
-        ? [{ text: "✏️ " + (fa ? "دقیق‌تر بگو" : "Refine query"), cb: `n:search` }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]
-        : [{ text: "🤝 " + (fa ? "اهدا کلید برای دقت بیشتر" : "Donate a key for precision"), cb: "keys:home" }, { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` }]]),
+        ? [{ text: "✏️ " + (fa ? "دقیق‌تر بگو" : "Refine query"), cb: `n:search` }]
+        : [{ text: "🤝 " + (fa ? "اهدا کلید برای دقت بیشتر" : "Donate a key for precision"), cb: "keys:home" }]]),
       [
         { text: "🎯 " + (fa ? "فیلترها" : "Filters"), cb: `n:filters:${enc(rawQuery)}` },
         { text: "🔔 " + (fa ? "ذخیره جست‌وجو" : "Save search"), cb: `n:save:${enc(rawQuery)}` },
       ],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+      // one navigation key only: back to the search screen, not the whole menu
+      [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "s:home" }],
     );
 
     await h.store.event(h.u.id, "search", rawQuery.slice(0, 60), { mode, count: merged.length });
@@ -232,11 +233,7 @@ export class SearchFeature {
       kb(
         ...chunk(cats, 2).map((row) => row.map(([label, q]) => ({ text: label, cb: `n:advanced:${enc(q)}` }))),
         [{ text: "🎯 " + (fa ? "جست‌وجوی پیشرفته" : "Advanced filters"), cb: "n:filters:" }],
-        [
-          { text: "🗂 " + (fa ? "مرور دسته‌ها" : "Browse"), cb: "b:menu" },
-          { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" },
-        ],
-        [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }],
       ),
     );
   }

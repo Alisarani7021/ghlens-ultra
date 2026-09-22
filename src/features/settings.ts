@@ -41,11 +41,13 @@ export class Settings {
    * are a compact list, not a wall of emoji, and the onboarding card shows the
    * real state (linked or not).
    */
-  async home(h: H, loc?: Loc) {
+  async home(h: H, loc?: Loc, opts: { force?: boolean } = {}) {
     const lang = loc ?? h.loc;
     const fa = lang === "fa";
     const u = await h.store.user(h.u.id);
-    const linked = !!(u as any)?.github_login;
+    // «force» = the user explicitly asked for the menu (the skip button on the
+    // onboarding card) — then the menu shows even before GitHub is linked
+    const linked = !!(u as any)?.github_login || !!opts.force;
     const aiState = await aiEngineState(h.env);
 
     const capabilities = fa
@@ -271,7 +273,7 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: L(loc, "subs"), cb: "sub:list" },
     ],
     [
-      { text: L(loc, "profile"), cb: "me:home" },
+      { text: L(loc, "profile"), cb: "pf:home" },
       { text: L(loc, "dashboard"), cb: "me:dash" },
     ],
     [
@@ -336,7 +338,7 @@ export function githubSetupKb(fa: boolean) {
     [{ text: "🔑 " + (fa ? "ساخت توکن در گیت‌هاب" : "Create the token"), url: createUrl }],
     [{ text: "📥 " + (fa ? "توکن را گرفتم، بفرستم" : "I have the token — paste it"), cb: "me:token" }],
     [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }],
-    [{ text: "⏭ " + (fa ? "فعلاً نه، منو را نشانم بده" : "Skip — show me the menu"), cb: "m:home" }],
+    [{ text: "⏭ " + (fa ? "فعلاً نه، منو را نشانم بده" : "Skip — show me the menu"), cb: "m:menu" }],
   );
 }
 

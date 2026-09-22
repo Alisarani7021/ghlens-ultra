@@ -53,7 +53,7 @@ export async function podcastRoutes(h: H, scope: "daily" | "weekly" = "daily") {
     await h.tg.sendAudio(h.chatId, buf, `🎙 ${fa ? "پادکست تازه" : "fresh podcast"} — ${day}`, {
       reply_markup: kb(
         [{ text: "📜 " + (fa ? "متن" : "Transcript"), cb: `p:text:${scope}` }],
-        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:b:0,daily,all" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "t:menu" }],
       ),
     });
   }

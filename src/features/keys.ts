@@ -2,6 +2,7 @@ import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
 import { PROVIDERS, KeyPool, providerPreset } from "../ai/keypool";
+import { armModeWith } from "../core/modes";
 
 /**
  * «اهدای کلید» — the donated-key panel.
@@ -57,7 +58,8 @@ export const keys = {
     const fa = h.loc === "fa";
     const p = providerPreset(providerId);
     if (!p) return this.add(h);
-    await h.session.set("keys:pending", JSON.stringify({ provider: p.id, baseUrl: p.baseUrl, model: p.model, stage: p.baseUrl ? "key" : "url" }));
+    // arming also drops any other armed mode: one input at a time
+    await armModeWith(h, "keys:pending", JSON.stringify({ provider: p.id, baseUrl: p.baseUrl, model: p.model, stage: p.baseUrl ? "key" : "url" }));
     if (!p.baseUrl) {
       await h.reply(
         fa ? `🛠 <b>سفارشی</b>\n\nآدرس پایه را بفرست (مثال: <code>https://api.example.com/v1</code>)، بعد کلید و نام مدل.`
@@ -81,13 +83,14 @@ export const keys = {
   /** One place that turns a failed test into a sentence a human understands. */
   explain(fa: boolean, test: { errorKind?: string; error?: string }): string {
     return test.errorKind === "auth" ? (fa ? "کلید رد شد (۴۰۱/۴۰۳). کلید تازه بساز یا مطمئن شو کامل کپی شده." : "the key was rejected (401/403).")
-      : test.errorKind === "quota" ? (fa ? "این کلید سهمیه‌اش تمام شده یا محدود شده (۴۰۲/۴۲۹). یک کلید دیگر اهدا کن." : "this key is out of quota (402/429).")
+      : test.errorKind === "quota" ? (fa ? "سهمیهٔ این حساب تمام شده (۴۰۲). یک کلید دیگر اهدا کن." : "this account is out of credit (402).")
+      : test.errorKind === "rate" ? (fa ? "ارائه‌دهنده همین حالا تعداد درخواست‌ها را محدود کرده (۴۲۹)؛ کلید سالم است. چند دقیقه بعد دوباره بفرست." : "the provider is rate-limiting right now (429) — the key itself looks fine.")
       : test.errorKind === "url" ? (fa ? "آدرس پایه درست نیست. فقط تا <code>/v1</code> لازم است؛ مسیر <code>/chat/completions</code> را ننویس." : "the base URL looks wrong — stop at /v1.")
       : test.errorKind === "model" ? (fa ? "کلید سالم است ولی هیچ مدل چتی از این آدرس جواب نداد. یک مدل درست را از فهرست ارائه‌دهنده بفرست." : "the key works but no chat model answered.")
       : (fa ? "ارتباط برقرار نشد (شبکه یا آدرس)." : "could not reach the endpoint.");
   },
 
-  async accept(h: H, pending: any, keyText: string) {
+  async accept(h: H, pending: any, keyText: string, soft?: "rate") {
     const fa = h.loc === "fa";
     const pool = new KeyPool(h.env);
     const raw = keyText.trim();
@@ -100,7 +103,9 @@ export const keys = {
 
     await h.loading(fa ? "🧪 در حال تست کلید…" : "🧪 testing the key…");
     const test = await KeyPool.test(baseUrl, key, pending.model || "");
-    if (!test.ok) {
+    // کلید سالمی که فقط الان محدود شده هرگز «اشتباه» اعلام نمی‌شود: ذخیره می‌شود
+    const rateOnly = !test.ok && test.errorKind === "rate" && soft === "rate";
+    if (!test.ok && !rateOnly) {
       await h.session.clear(["keys:pending"]);
       const why = keys.explain(fa, test);
       return h.reply(
@@ -114,12 +119,35 @@ export const keys = {
     }
 
     const model = test.model || pending.model || test.models?.[0] || "";
-    const id = await pool.add({ ownerId: h.u.id, label: providerPreset(pending.provider)?.label ?? pending.provider, provider: pending.provider, baseUrl, model, key });
+    const id = await pool.add({
+      ownerId: h.u.id,
+      label: providerPreset(pending.provider)?.label ?? pending.provider,
+      provider: pending.provider, baseUrl, model, key,
+      status: rateOnly ? "warn" : "ok",
+      lastFailAt: rateOnly ? Date.now() : undefined,
+    });
     await h.session.clear(["keys:pending"]);
     const { total, ok } = await pool.stats().catch(() => ({ total: 0, ok: 0 }));
     // a working key means the whole bot's AI is back: lift the quota breaker
     await h.env.CACHE.delete("ai:halt").catch(() => null);
     await h.env.CACHE.delete("ai:last-failure").catch(() => null);
+
+    if (rateOnly) {
+      await h.reply(
+        (fa
+          ? `✅ <b>کلید ذخیره شد</b> (فعلاً محدود)\n\n` +
+            `ارائه‌دهنده همین حالا جواب ۴۲۹ می‌دهد — یعنی سهمیهٔ حساب سر جایش است، فقط تعداد درخواست‌ها زیاد شده.\n` +
+            `کلید را پشتیبان نگه داشتم؛ خودم هر چند دقیقه امتحانش می‌کنم و تا برگردد کنار بقیه می‌رود.\n\n` +
+            `🏷 ارائه‌دهنده: <b>${tgEscape(providerPreset(pending.provider)?.label ?? pending.provider)}</b>\n` +
+            `🔑 استخر: <b>${ok}</b> کلید سالم از <b>${total}</b>`
+          : `✅ Key stored (currently rate-limited). It will rejoin the pool automatically.`),
+        kb(
+          [{ text: "📊 " + (fa ? "کلیدهای من" : "My keys"), cb: "keys:mine" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "keys:home" }],
+        ),
+        !!h.cbId,
+      );
+      return;
+    }
 
     await h.reply(
       (fa

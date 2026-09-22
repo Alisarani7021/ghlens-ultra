@@ -21,6 +21,17 @@ export interface SessionState {
 }
 
 export class UserSession extends DurableObject<Env> {
+  /** How long an armed text-input mode stays valid without being used. */
+  static readonly MODE_TTL_MS = 15 * 60_000;
+
+  /** Keys that mean "the very next message belongs to this feature". */
+  static readonly INPUT_MODES = [
+    "keys:pending", "me:token", "repochat", "wf", "code", "review", "cmp",
+    "adm:broadcast", "sec:scan", "sec:secrets", "u:ip", "u:asn",
+    "dvu:cron", "dvu:regex", "dvu:cidr", "dvu:jwt", "dvu:b64", "dvu:hash",
+    "dvu:time", "dvu:json", "dvu:semver", "dvu:color",
+  ];
+
   private state!: SessionState;
 
   async ensure() {
@@ -43,14 +54,62 @@ export class UserSession extends DurableObject<Env> {
   async set(key: string, value: unknown) {
     const s = await this.ensure();
     s.ctx[key] = value;
+    /* Text-input modes get a stamp as well. Without it a flag armed in one
+       section (e.g. «ورک‌فلو») ate every later message, so typing a normal
+       question answered with a GitHub Actions YAML. */
+    if (UserSession.INPUT_MODES.includes(key)) s.ctx[`__at:${key}`] = Date.now();
     await this.persist();
     await this.ctx.storage.setAlarm(Date.now() + 30 * 60_000); // auto-expire context
   }
   async clear(keys?: string[]) {
     const s = await this.ensure();
-    if (keys) for (const k of keys) delete s.ctx[k];
+    if (keys) for (const k of keys) { delete s.ctx[k]; delete s.ctx[`__at:${k}`]; }
     else s.ctx = {};
     await this.persist();
+  }
+
+  /**
+   * Read a text-input mode and consume it.
+   *
+   * Returns the stored value only if it was armed within the last MODE_TTL_MS;
+   * an old flag is dropped instead of hijacking the message the user is sending
+   * right now. Consuming means the next message is normal again.
+   */
+  async mode(key: string) {
+    const s = await this.ensure();
+    if (!(key in s.ctx)) return undefined;
+    const at = Number(s.ctx[`__at:${key}`] ?? 0);
+    const fresh = !at || Date.now() - at <= UserSession.MODE_TTL_MS;
+    const value = s.ctx[key];
+    if (!fresh) {
+      delete s.ctx[key];
+      delete s.ctx[`__at:${key}`];
+      await this.persist();
+      return undefined;
+    }
+    return value;
+  }
+
+  /** Forget every armed input mode — called when the user moves to another section. */
+  async clearModes() {
+    const s = await this.ensure();
+    let touched = false;
+    for (const key of UserSession.INPUT_MODES) {
+      if (key in s.ctx) { delete s.ctx[key]; delete s.ctx[`__at:${key}`]; touched = true; }
+    }
+    if (touched) await this.persist();
+  }
+
+  /** Which section the user is standing in («search», «assistant», … or none). */
+  async section(sec?: string | null) {
+    const s = await this.ensure();
+    if (sec !== undefined) {
+      if (sec === null) delete s.ctx.sec;
+      else s.ctx.sec = sec;
+      await this.persist();
+      return sec;
+    }
+    return typeof s.ctx.sec === "string" ? s.ctx.sec : null;
   }
 
   async cardType(t?: "auto" | "full" | "compact") {

@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { armMode } from "../core/modes";
 import { GithubRest } from "../github/rest";
 import { SecurityEngine } from "../github/osv";
 import { fmt, truncate } from "./cards";

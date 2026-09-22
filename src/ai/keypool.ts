@@ -65,7 +65,22 @@ export class KeyPool {
   private static readonly CACHE_KEY = "aipool:keys:v1";
 
   /** How long a merely-failed key (429, timeout, provider hiccup) stays out. */
-  static readonly COOLDOWN_MS = 10 * 60_000;
+  /**
+   * How long a rate-limited key rests before it is tried again.
+   *
+   * Free tiers answer 429 for bursts, not for the day: ten minutes of silence
+   * for a one-second burst was why a single donated key looked "dead" while the
+   * account quota banner came back. A minute is enough for the window to reset,
+   * and the key earns a longer rest only if it keeps refusing.
+   */
+  static readonly COOLDOWN_MS = 60_000;
+  static readonly COOLDOWN_MAX_MS = 10 * 60_000;
+
+  /** Rest window for one key: grows with its failure streak, capped. */
+  static cooldownFor(failCount: number): number {
+    const steps = Math.max(0, Math.min(4, Number(failCount ?? 0) - 1));
+    return Math.min(KeyPool.COOLDOWN_MS * Math.pow(2, steps), KeyPool.COOLDOWN_MAX_MS);
+  }
 
   /** Pool ordered for use: healthiest first, least-recently-used first. */
   async candidates(limit = 8): Promise<LiveKey[]> {
@@ -76,8 +91,8 @@ export class KeyPool {
 
     const usable = rows
       .filter((r) => r.status === "ok" || r.status === "new" ||
-        // a rate-limited provider is not a dead key: try it again after the cooldown
-        (r.status === "warn" && Date.now() - Number(r.last_fail_at ?? 0) > KeyPool.COOLDOWN_MS))
+        // a rate-limited provider is not a dead key: it rests, then comes back
+        (r.status === "warn" && Date.now() - Number(r.last_fail_at ?? 0) > KeyPool.cooldownFor(Number(r.fail_count ?? 1))))
       .sort((a, b) => (a.last_ok_at ?? 0) - (b.last_ok_at ?? 0))   // round-robin by age
       .slice(0, limit);
 
@@ -106,12 +121,16 @@ export class KeyPool {
     return { total: r?.total ?? 0, ok: r?.ok ?? 0 };
   }
 
-  async add(opts: { ownerId: number | null; label: string; provider: string; baseUrl: string; model: string; key: string }) {
+  async add(opts: { ownerId: number | null; label: string; provider: string; baseUrl: string; model: string; key: string; status?: string; lastFailAt?: number }) {
     const enc = await encryptSecret(this.env, opts.key, "ai-key");
+    const status = opts.status ?? "ok";
     const res = await this.env.DB.prepare(
-      `INSERT INTO ai_keys (owner_id, label, provider, base_url, model, enc_key, status, ok_count, fail_count, created_at)
-       VALUES (?,?,?,?,?,?, 'ok', 0, 0, ?)`,
-    ).bind(opts.ownerId, opts.label.slice(0, 40), opts.provider, opts.baseUrl, opts.model, enc, Date.now()).run();
+      `INSERT INTO ai_keys (owner_id, label, provider, base_url, model, enc_key, status, ok_count, fail_count, last_ok_at, last_fail_at, created_at)
+       VALUES (?,?,?,?,?,?,?, 0, 0, ?, ?, ?)`,
+    ).bind(
+      opts.ownerId, opts.label.slice(0, 40), opts.provider, opts.baseUrl, opts.model, enc, status,
+      status === "ok" ? Date.now() : null, opts.lastFailAt ?? null, Date.now(),
+    ).run();
     await this.invalidate();
     return Number((res as any)?.meta?.last_row_id ?? 0);
   }
@@ -192,7 +211,8 @@ export class KeyPool {
   private static readonly GUESSES = ["gpt-4o-mini", "openai", "llama-3.3-70b-versatile", "mistral-small-latest"];
 
   /** Model names that are almost always wrong for a chat call. */
-  private static readonly NOT_CHAT = /(embed|embedding|whisper|tts|audio|image|dall|moderation|rerank|clip|stable|flux|guard|vision-encoder)/i;
+  private static readonly NOT_CHAT =
+    /(embed|embedding|whisper|tts|audio|speech|voice|orpheus|transcribe|image|dall|moderation|rerank|clip|stable|flux|guard|vision|safety)/i;
 
   /**
    * Ask the provider which models it has, best-first for chat.
@@ -208,12 +228,25 @@ export class KeyPool {
       if (!res.ok) return { ok: false, models: [], error: `${res.status} ${(await res.text()).slice(0, 160)}` };
       const j: any = await res.json().catch(() => ({}));
       const ids: string[] = (j?.data ?? j?.models ?? []).map((m: any) => String(m?.id ?? m?.name ?? "")).filter(Boolean);
+      /* Ranking that actually picks a good model.
+         The old one scored «7b» as merely -1 and missed «gpt-oss-120b» entirely,
+         so a donor's Groq key got answered by allam-2-7b (an Arabic-specific
+         small model) while gpt-oss-120b sat unused — and the JSON tasks the bot
+         needs failed. Families that are good at instruction + JSON come first,
+         bigger parameter counts beat smaller, and audio/vision models are out. */
+      const size = (id: string) => {
+        const m = id.match(/(\d{1,3})\s*b\b/i);
+        return m ? Math.min(120, Number(m[1])) : 0;
+      };
       const rank = (id: string) => {
         let s = 0;
-        if (KeyPool.NOT_CHAT.test(id)) s += 100;                        // never a chat model
-        if (/free/i.test(id)) s -= 3;                                   // free tiers first
-        if (/70b|72b|large|pro|sonnet|gpt-4|gpt-5|o[13]|command-r|mixtral/i.test(id)) s -= 2;
-        if (/8b|7b|mini|flash|lite|small|instant|haiku/i.test(id)) s -= 1;
+        if (KeyPool.NOT_CHAT.test(id)) s += 1000;                        // never a chat model
+        if (/(gpt-oss-120b|gpt-5|gpt-4o|llama-3\.3-70b|llama-4|qwen3|qwen-3|deepseek|mistral-large|kimi|glm|gemini|claude|command-r|mixtral)/i.test(id)) s -= 40;
+        if (/(instruct|chat|-it\b)/i.test(id)) s -= 10;
+        s -= size(id);                                                    // 120b beats 20b beats 7b
+        if (/free/i.test(id)) s -= 5;
+        if (/(mini|tiny|lite|small|instant|haiku|flash|nano)/i.test(id)) s += 15;
+        if (/(base$|preview|experimental|deprecated)/i.test(id)) s += 10;
         return s;
       };
       return { ok: true, models: [...new Set(ids)].sort((a, b) => rank(a) - rank(b)) };
@@ -251,13 +284,17 @@ export class KeyPool {
    * be stored.
    */
   static async test(baseUrl: string, key: string, model: string): Promise<{
-    ok: boolean; error?: string; errorKind?: "auth" | "quota" | "url" | "model" | "net";
+    ok: boolean; error?: string; errorKind?: "auth" | "quota" | "rate" | "url" | "model" | "net";
     models?: string[]; reply?: string; model?: string;
   }> {
     const url = KeyPool.normalizeBase(baseUrl);
-    const kindOf = (status: number, body: string): "auth" | "quota" | "url" | "model" | "net" => {
+    const kindOf = (status: number, body: string): "auth" | "quota" | "rate" | "url" | "model" | "net" => {
       if (status === 401 || status === 403 || /invalid api key|unauthorized|no auth|invalid_api_key/i.test(body)) return "auth";
-      if (status === 402 || status === 429 || /quota|credit|rate limit|insufficient/i.test(body)) return "quota";
+      // 402 = this account is out of credit (the key is useless), 429 = the provider is
+      // rate-limiting right now (the key is usually fine) — different verdicts, so at
+      // a minimum a healthy key is never called broken.
+      if (status === 402 || /quota|credit|insufficient/i.test(body)) return "quota";
+      if (status === 429 || /rate limit|too many requests|queue full/i.test(body)) return "rate";
       if (status === 404 && /model/i.test(body)) return "model";
       if (status === 404 || /invalid url|not found/i.test(body)) return "url";
       if (/model.*(not|does not).*(exist|found)|unknown model|no such model|model_not_found/i.test(body)) return "model";
@@ -270,7 +307,7 @@ export class KeyPool {
         const r = await KeyPool.ping(url, key, model);
         if (r.ok) return { ok: true, reply: r.reply.slice(0, 40), model, models: [model] };
         const kind = kindOf(r.status, r.error);
-        if (kind === "auth" || kind === "quota") return { ok: false, error: `${r.status} ${r.error}`, errorKind: kind };
+        if (kind === "auth" || kind === "quota" || kind === "rate") return { ok: false, error: `${r.status} ${r.error}`, errorKind: kind };
         // model/url problems fall through to discovery
       } catch (e: any) {
         return { ok: false, error: String(e?.message ?? e).slice(0, 160), errorKind: "net" };
@@ -288,7 +325,7 @@ export class KeyPool {
        than reject a key that works, try the handful of model ids those servers
        actually use. */
     // a rejected key must be reported as such — not as "no usable model"
-    let refusals: { kind: "auth" | "quota"; error: string } | null = null;
+    let refusals: { kind: "auth" | "quota" | "rate"; error: string } | null = null;
     let lastError = "";
     const attempt = async (candidate: string) => {
       try {
@@ -296,7 +333,7 @@ export class KeyPool {
         if (r.ok) return { ok: true as const, reply: r.reply.slice(0, 40), model: candidate, models: list.models?.length ? list.models : [candidate] };
         const kind = kindOf(r.status, r.error);
         lastError = `${r.status} ${r.error}`;
-        if (kind === "auth" || kind === "quota") refusals = refusals ?? { kind, error: lastError };
+        if (kind === "auth" || kind === "quota" || kind === "rate") refusals = refusals ?? { kind, error: lastError };
       } catch (e: any) {
         lastError = String(e?.message ?? e).slice(0, 160);
       }

@@ -39,6 +39,12 @@ export interface UserSessionStub {
   get(k: string): Promise<any>;
   set(k: string, v: unknown): Promise<void>;
   clear(keys?: string[]): Promise<void>;
+  /** read-and-consume a text-input mode; stale ones return undefined */
+  mode(k: string): Promise<any>;
+  /** drop every armed input mode (used when the user changes section) */
+  clearModes(): Promise<void>;
+  /** the section the user is standing in, so text goes to the right feature */
+  section(sec?: string | null): Promise<string | null>;
   cardType(t?: "auto" | "full" | "compact"): Promise<any>;
   rememberCard(full: string, text: string): Promise<string>;
   lastCard(full: string): Promise<{ full: string; text: string; at: number } | null>;

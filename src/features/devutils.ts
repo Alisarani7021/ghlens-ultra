@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { armMode } from "../core/modes";
 import { code, pre, tgEscape } from "../tg/types";
 import { kb } from "../tg/keyboards";
 

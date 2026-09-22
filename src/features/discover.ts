@@ -327,7 +327,7 @@ export class Discover {
         `</pre>`,
       kb(
         ...top.slice(0, 6).map(([t]) => [{ text: `#${t}`, cb: `b:s:${encodeURIComponent(`topic:${t} stars:>300`).replace(/%/g, "_")}` }]),
-        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "x:map" }],
       ),
       !!h.cbId,
     );

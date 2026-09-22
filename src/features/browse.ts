@@ -123,7 +123,7 @@ export class BrowseFeature {
           { text: "🕰 " + (fa ? "سفر در زمان" : "Time travel"), cb: "b:time" },
           { text: "🏅 " + (fa ? "لیست‌های Awesome" : "Awesome lists"), cb: "b:awesome" },
         ],
-        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }],
       ),
       !!h.cbId,
     );
@@ -222,7 +222,7 @@ export class BrowseFeature {
           { text: "🎯 " + (fa ? "علاقه‌مندی‌هایم" : "My interests"), cb: "me:interests" },
           { text: "🔁 " + (fa ? "صفحه بعد" : "Next"), cb: `b:users:${page + 1}` },
         ],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }, { text: "🏠", cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "b:menu" }],
       ),
       !!h.cbId,
     );

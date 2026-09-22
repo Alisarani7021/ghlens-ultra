@@ -253,9 +253,23 @@ export class AiBrain {
   }
 
   /** Structured extraction: prompt → parsed JSON (with a lenient repair pass). */
+  /**
+   * Structured output with a self-healing cache.
+   *
+   * chat() caches whatever text the model produced, including malformed JSON
+   * from a weak model. That entry then lives for the whole TTL and every call
+   * keeps answering null — which is how a perfectly healthy key still reported
+   * "the AI is not available" in search for 24 hours. If parsing fails, drop
+   * the entry so the next call asks again.
+   */
   async json<T = any>(prompt: string, opts: ChatOpts = {}): Promise<T | null> {
     const raw = await this.chat(prompt, { ...opts, json: true });
-    return safeJson<T>(raw);
+    const out = safeJson<T>(raw);
+    if (out === null && opts.cacheKey) {
+      const cacheKey = `ai:${opts.tier ?? "fast"}:${opts.cacheKey}`;
+      await this.env.CACHE.delete(cacheKey).catch(() => null);
+    }
+    return out;
   }
 
   /**

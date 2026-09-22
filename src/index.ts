@@ -35,6 +35,9 @@ import { audioBytes, describe } from "./ai/brain";
 import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
 import { aiDownNotice, aiHalted } from "./ai/brain";
+import { armMode, enterSection, leaveMode, sectionOf, SECTION_HOME } from "./core/modes";
+/* the workflow filename helper lives with the workflow generator */
+import { guessName } from "./features/assistant";
 import { decryptSecret, encryptSecret } from "./core/crypto";
 import { keys as keysFeature } from "./features/keys";
 import { account as accountFeature } from "./features/account";
@@ -465,7 +468,7 @@ async function githubOverview(h: H) {
 /** Where the user pastes the token: we arm the wizard and explain the steps. */
 async function githubTokenPrompt(h: H) {
   const fa = h.loc === "fa";
-  await h.session.set("me:token", true);
+  await h.session.set("me:token", Date.now());
   const createUrl =
     "https://github.com/settings/tokens/new?scopes=repo,read:user,user:email,read:org&description=" +
     encodeURIComponent("GitHub Lens Ultra");
@@ -582,7 +585,8 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   if (/^(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(text) || /^[A-Za-z0-9_]{36,}$/.test(text)) {
     const h0 = await buildH(msg, env, ctx, tg, store, ai, card, opts({ text }));
     const armed = await h0.session?.get("me:token").catch(() => null);
-    if (armed) {
+    // a token prompt older than half an hour is not waiting for this message
+    if (armed && Date.now() - Number(armed) < 30 * 60_000) {
       if (/^(gh[pousr]_|github_pat_)/.test(text) || text.length >= 36) return completeLink(h0, text.trim());
     }
   }
@@ -592,30 +596,73 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   const sessionCtx = await inputContext(h);
   if (sessionCtx) return sessionCtx(text);
 
+  /* The bottom keyboard sends its label as a plain message, and nothing used to
+     catch it: tapping «🏠 منوی اصلی» ran a GitHub search for that very string.
+     Map every label back to the screen it names. */
+  const replyAction = replyKeyAction(text, h.loc);
+  if (replyAction) return replyAction(h);
+
   // heuristics: repo name → card ; question → assistant ; else search
   const repoMatch = text.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/?$/) ?? text.match(/^([\w.-]+)\/([\w.-]+)$/);
   if (repoMatch && repoMatch[1] && repoMatch[2] && !repoMatch[1].includes(",")) {
     const full = `${repoMatch[1]}/${repoMatch[2]}`.replace(/\.git$/, "");
     return scout.open(h, full, 0);
   }
-  /* The persistent bottom keyboard sends its label as plain text and nothing
-     used to handle it, so tapping «🏠 منوی اصلی» ran a GitHub search for that
-     very string. Map the labels back to their actions. */
-  const kbAction = replyKeyAction(text, h.loc);
-  if (kbAction) return kbAction(h);
-
   /* A greeting is not a search query. Handing "سلام" to GitHub search answers
      «چیزی پیدا نشد», which reads as a broken bot. Greet back instead, with the
      menu and an honest word about the AI engine when it is off. */
   if (isGreeting(text)) return greetBack(h);
-  if (text.length < 60 && /^(find|search|جست|پیدا|دنبال|چی|چه|recommend|پیشنهاد)/i.test(text)) {
-    return search.run(h, text);
+
+  /* ── FREE TEXT: the section decides, never a leftover mode ─────────────
+     Standing in the search section → search. In the assistant → ask the AI.
+     Inside a repo chat → talk about that repo. Anywhere else the bot refuses
+     to guess: it shows a small chooser instead of running someone else's flow
+     (workflow YAML for a plain question was the bug this replaces). */
+  const sec = await h.session.section();
+  if (sec === "search") return search.run(h, text);
+  if (sec === "assistant") return assistant.ask(h, text);
+  if (sec?.startsWith("repochat:")) return assistant.repoChat(h, sec.slice("repochat:".length), text);
+  if (text.length < 40 && /^(find|search|جست|جست‌وجو|پیدا|دنبال|recommend|پیشنهاد)/i.test(text)) {
+    await h.session.clearModes();
+    await h.session.section("search");
+    return search.run(h, text.replace(/^(find|search|جست‌وجو|جست|پیدا کردن|پیدا|دنبال|recommend|پیشنهاد)\s*/i, "") || text);
   }
-  if (text.endsWith("?") || text.endsWith("؟") || text.length > 60 || /\b(how|why|what|چطور|چگونه|چرا|آیا)\b/i.test(text)) {
-    return assistant.ask(h, text);
-  }
-  return search.run(h, text);
+  return textChooser(h, text);
 }
+
+
+/** Text that smells like an API key or a provider base URL — offered as a key, not a search. */
+function looksLikeKey(text: string): boolean {
+  const t = text.trim();
+  return /^(sk-|gsk_|xai-|AIza|hf_|pplx-)/i.test(t) || /^https?:\/\/\S{4,}$/i.test(t);
+}
+
+/**
+ * Nothing in normal mode should ever surprise the user. A bare sentence gets a
+ * small chooser (search it, ask the AI about it, or just go to the menu) instead
+ * of being piped into whatever flow was active last.
+ */
+async function textChooser(h: H, text: string): Promise<void> {
+  const fa = h.loc === "fa";
+  const peek = text.replace(/\s+/g, " ").slice(0, 60);
+  await h.reply(
+    `💬 <b>${fa ? "این را کجا ببرم؟" : "Where should this go?"}</b>\n\n` +
+      `<i>${tgEscape(peek)}</i>\n\n` +
+      (fa
+        ? "من در حالت عادی کاری با متن تو نمی‌کنم تا خودت بگویی؛ یکی از این دو را بزن:"
+        : "In normal mode I do nothing with your text until you say so — pick one:"),
+    kb(
+      [
+        { text: "🔍 " + (fa ? "در گیت‌هاب جست‌وجو کن" : "Search GitHub"), cb: `n:q:${enc(text)}` },
+        { text: "🤖 " + (fa ? "از هوش مصنوعی بپرس" : "Ask the AI"), cb: `a:ask:${enc(text)}` },
+      ],
+      // پرسیدنِ کلید یا آدرس سرور در حالت عادی هم نباید بن‌بست بشه
+      ...(looksLikeKey(text) ? [[{ text: "🔑 " + (fa ? "این را به کلیدها اضافه کن" : "Add this to my keys"), cb: "keys:home" }]] : []),
+      [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+    ),
+  );
+}
+
 
 /**
  * Small-talk detector — Persian and English, tolerant of punctuation and the
@@ -647,6 +694,7 @@ const REPLY_LABELS: { keys: string[]; action: string }[] = [
   { keys: ["اهدای کلید", "اهدا کلید", "donate key", "donate", "کلید هوش مصنوعی"], action: "keys" },
   { keys: ["کاوش عمیق", "scout"], action: "scout" },
   { keys: ["راهنما", "help"], action: "help" },
+  { keys: ["تغییر زبان", "زبان", "language", "lang"], action: "language" },
 ];
 
 export function replyKeyAction(text: string, loc: string):
@@ -669,6 +717,7 @@ export function replyKeyAction(text: string, loc: string):
     case "keys": return (h) => keysFeature.home(h);
     case "scout": return (h) => scout.home(h);
     case "help": return (h) => settings.help(h);
+    case "language": return (h) => settings.lang(h);
     default: return null;
   }
 }
@@ -698,11 +747,7 @@ async function greetBack(h: H) {
       : `👋 <b>Hi ${tgEscape(name)}!</b>\n\nI'm Lens Ultra — search, translate and download GitHub projects, all on Cloudflare.\n\n`) +
       engine +
       (fa ? "\n\n<b>مثال:</b> «یک کتابخانه سبک برای صف در Go» یا <code>vuejs/core</code>" : "\n\n<b>Try:</b> “a lightweight queue library in Go” or <code>vuejs/core</code>"),
-    kb(
-      [{ text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }, { text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }],
-      [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }, { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" }],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
-    ),
+    kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]),
     !!h.cbId,
   );
 }
@@ -710,7 +755,10 @@ async function greetBack(h: H) {
 /** Detects whether the user is mid-wizard, and returns the handler for their next message. */
 async function inputContext(h: H): Promise<((text: string) => Promise<void>) | null> {
   const s = h.session;
-  const pendingKeys = await s.get("keys:pending");
+  /* One mode at a time, and only a fresh one (session.mode() drops stale flags).
+     A mode armed in another section an hour ago must never eat the message the
+     user is typing now. */
+  const pendingKeys = await s.mode("keys:pending");
   if (pendingKeys) {
     let state: any = {};
     try { state = typeof pendingKeys === "string" ? JSON.parse(pendingKeys) : pendingKeys; } catch { state = {}; }
@@ -756,6 +804,13 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         || (/404|400|unsupported|unknown|does not exist/i.test(test.error ?? "")
             && !/(401|402|403|429|quota|credit|invalid api key|unauthorized)/i.test(test.error ?? ""))
       );
+      if (!test.ok && test.errorKind === "rate") {
+        // 429 = provider busy, not a bad key: store it as a backup instead of
+        // telling someone their working key is wrong (their #1 complaint).
+        state.model = state.model || (test.models?.[0] ?? "");
+        const { keys: keysFeature } = await import("./features/keys");
+        return keysFeature.accept(h, state, text, "rate");
+      }
       if (!test.ok && (modelProblem || state.model || test.errorKind === "model")) {
         // the key itself may be fine — the model name is what the server refused
         state.savedKey = text;
@@ -818,86 +873,86 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       await keysFeature.accept(h, state, text);
     };
   }
-  if (await s.get("repochat")) {
+  if (await s.mode("repochat")) {
     const full = await s.get("repochat");
-    await s.clear(["repochat"]);
+    await leaveMode(h);
     return (t) => assistant.repoChat(h, full, t);
   }
-  if (await s.get("wf")) {
-    await s.clear(["wf"]);
+  if (await s.mode("wf")) {
+    await leaveMode(h);
     return (t) => assistant.workflow(h, t);
   }
-  if (await s.get("code")) {
-    await s.clear(["code"]);
+  if (await s.mode("code")) {
+    await leaveMode(h);
     return (t) => assistant.code(h, t);
   }
-  if (await s.get("review")) {
-    await s.clear(["review"]);
+  if (await s.mode("review")) {
+    await leaveMode(h);
     return (t) => assistant.review(h, t);
   }
-  if (await s.get("sec:scan")) {
-    await s.clear(["sec:scan"]);
+  if (await s.mode("sec:scan")) {
+    await leaveMode(h);
     return (t) => security.scan(h, t.trim());
   }
-  if (await s.get("sec:secrets")) {
-    await s.clear(["sec:secrets"]);
+  if (await s.mode("sec:secrets")) {
+    await leaveMode(h);
     return (t) => security.secrets(h, t.trim());
   }
-  if (await s.get("adm:broadcast")) {
-    await s.clear(["adm:broadcast"]);
+  if (await s.mode("adm:broadcast")) {
+    await leaveMode(h);
     return (t) => admin.broadcast(h, t);
   }
-  if (await s.get("cmp")) {
+  if (await s.mode("cmp")) {
     const state: any = await s.get("cmp");
-    await s.clear(["cmp"]);
+    await leaveMode(h);
     return (t) => scout.compare(h, state?.a ?? "", t.trim());
   }
-  if (await s.get("dvu:cron")) {
-    await s.clear(["dvu:cron"]);
+  if (await s.mode("dvu:cron")) {
+    await leaveMode(h);
     return (t) => devutils.cron(h, t.trim());
   }
-  if (await s.get("dvu:regex")) {
-    await s.clear(["dvu:regex"]);
+  if (await s.mode("dvu:regex")) {
+    await leaveMode(h);
     return (t) => devutils.runRegex(h, t.trim());
   }
-  if (await s.get("dvu:cidr")) {
-    await s.clear(["dvu:cidr"]);
+  if (await s.mode("dvu:cidr")) {
+    await leaveMode(h);
     return (t) => devutils.cidr(h, t.trim());
   }
-  if (await s.get("dvu:jwt")) {
-    await s.clear(["dvu:jwt"]);
+  if (await s.mode("dvu:jwt")) {
+    await leaveMode(h);
     return (t) => devutils.jwt(h, t.trim());
   }
-  if (await s.get("dvu:b64")) {
-    await s.clear(["dvu:b64"]);
+  if (await s.mode("dvu:b64")) {
+    await leaveMode(h);
     return (t) => devutils.b64(h, t);
   }
-  if (await s.get("dvu:hash")) {
-    await s.clear(["dvu:hash"]);
+  if (await s.mode("dvu:hash")) {
+    await leaveMode(h);
     return (t) => devutils.hash(h, t);
   }
-  if (await s.get("dvu:time")) {
-    await s.clear(["dvu:time"]);
+  if (await s.mode("dvu:time")) {
+    await leaveMode(h);
     return (t) => devutils.time(h, t.trim());
   }
-  if (await s.get("dvu:json")) {
-    await s.clear(["dvu:json"]);
+  if (await s.mode("dvu:json")) {
+    await leaveMode(h);
     return (t) => devutils.json(h, t);
   }
-  if (await s.get("dvu:semver")) {
-    await s.clear(["dvu:semver"]);
+  if (await s.mode("dvu:semver")) {
+    await leaveMode(h);
     return (t) => devutils.semver(h, t.trim());
   }
-  if (await s.get("dvu:color")) {
-    await s.clear(["dvu:color"]);
+  if (await s.mode("dvu:color")) {
+    await leaveMode(h);
     return (t) => devutils.color(h, t.trim());
   }
-  if (await s.get("u:ip")) {
-    await s.clear(["u:ip"]);
+  if (await s.mode("u:ip")) {
+    await leaveMode(h);
     return (t) => tools.intel(h, t.trim());
   }
-  if (await s.get("u:asn")) {
-    await s.clear(["u:asn"]);
+  if (await s.mode("u:asn")) {
+    await leaveMode(h);
     return (t) => tools.asn(h, t.trim());
   }
   return null;
@@ -936,6 +991,12 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       }
       return settings.home(h);
     }
+    /* A command is an explicit "start over here" — never let a half-armed
+       text mode swallow the screen that follows. */
+    case "/start": case "/help": case "/menu": case "/search": case "/trending": case "/tools": {
+      await h.session.clearModes();
+      break;
+    }
     case "/reset": case "/cancel": case "/esc": {
       // any user can escape a half-finished wizard or a stale step: nothing the
       // bot asked for is more important than getting back to a known state
@@ -944,7 +1005,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         fa
           ? "🧹 <b>حالت پاک شد</b>\nهر پرسش نیمه‌تمام (جست‌وجو، اهدای کلید، بازبینی، ورک‌فلو…) کنار گذاشته شد. از صفر شروع کن."
           : "🧹 <b>Reset</b> — any half-finished step was dropped. Start fresh.",
-        kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "s:home" }]),
+        kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]),
         !!h.cbId,
       );
     }
@@ -955,6 +1016,8 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/search": case "/s":
       if (!arg) return search.hub(h);
       if (!(await h.store.quota(h.u.id)).ok) return quotaBlocked(h);
+      await h.session.clearModes();
+      await h.session.section("search");
       return search.run(h, arg);
 
     case "/trending": case "/t": return trendingMenuOrBoard(h, arg);
@@ -987,7 +1050,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         : h.reply(
             "📂 <b>فایل‌های مخزن</b>\nفرمت: <code>/files owner/repo</code> · مثلاً <code>/files facebook/react</code>\n" +
               "<i>درخت فایل‌ها را با پوشه‌بندی نشان می‌دهم؛ روی پوشه بزن تا داخلش را ببینی.</i>",
-            kb([{ text: "🛰 کاوش مخزن", cb: "dis:home" }, { text: "🏠 منو", cb: "m:home" }]),
+            kb([{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]),
           );
     case "/card": case "/share":
       return arg.trim()
@@ -995,7 +1058,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         : h.reply(
             "🖼 <b>کارت اشتراک‌گذاری مخزن</b>\nفرمت: <code>/card owner/repo</code> · مثلاً <code>/card vuejs/core</code>\n" +
               "<i>یک کارت تصویری آمادهٔ فرستادن در چت می‌سازم.</i>",
-            kb([{ text: "🔎 جست‌وجو", cb: "s:home" }, { text: "🏠 منو", cb: "m:home" }]),
+            kb([{ text: "🏠 منو", cb: "m:home" }]),
           );
     case "/similar": return discover.similar(h, normRepo(arg));
 
@@ -1136,6 +1199,36 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
   const fa = h.loc === "fa";
   await store.event(q.from.id, "callback", `${ns}:${action}`);
 
+  /* SECTION DISCIPLINE — the owner's rule: every key works inside its own
+     section, and nothing leaks. Opening any section drops text-input modes that
+     were armed elsewhere (the reason a stale «ورک‌فلو» turned plain questions
+     into YAML), and remembers where the user is standing so their next message
+     goes to that section and only that section. */
+  const ENTRY: Record<string, string> = {
+    "m:home": "menu", "m:start": "menu",
+    "n:search": "search", "n:advanced": "search",
+    "a:home": "assistant", "a:new": "assistant", "a:cont": "assistant",
+    "u:home": "tools", "s:home": "scout", "t:menu": "trending", "b:menu": "browse",
+    "x:gems": "discover", "d:home": "download", "keys:home": "keys",
+    "me:home": "account", "pf:home": "profile", "c:home": "contribute",
+    "sec:home": "security", "dvu:home": "devutils", "h:main": "help",
+  };
+  const entry = ENTRY[`${ns}:${action}`];
+  if (entry) {
+    if (entry === "menu") { await h.session.clearModes(); await h.session.section(null); }
+    else if (entry !== "search" && entry !== "assistant") {
+      // a section with its own buttons: any armed text mode belongs to the past
+      await h.session.clearModes();
+      await h.session.section(entry);
+    } else {
+      await h.session.section(entry);
+    }
+  }
+
+  /* Opening a section home is a navigation act: whatever text-input mode was
+     armed somewhere else stops here. Sections own their keys, nothing else. */
+  if (SECTION_HOME.has(`${ns}:${action}`)) await enterSection(h, sectionOf(`${ns}:${action}`));
+
   const trending = new TrendingFeature(new TrendingEngine(env));
   const dl = downloader(h);
 
@@ -1146,6 +1239,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── global navigation ──
       case "m":
         if (action === "home" || action === "start") return settings.home(h);
+        // the skip button: the full menu, even without a linked account
+        if (action === "menu") return settings.home(h, undefined, { force: true });
         break;
       case "h":
         if (action === "main") return settings.help(h);
@@ -1232,12 +1327,22 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           await h.store.addMessage(`u${h.u.id}`, "system", "[conversation cleared]");
           return h.reply(fa ? "🧹 حافظه پاک شد." : "🧹 memory cleared", kb([[{ text: "🏠", cb: "m:home" }]]));
         }
-        if (action === "repochat") return assistant.repoChat(h, args[0] ?? "");
+        if (action === "repochat") {
+          await h.session.section(`repochat:${args[0] ?? ""}`);
+          return assistant.repoChat(h, args[0] ?? "");
+        }
         if (action === "workflow") return assistant.workflow(h);
         if (action === "wf") return assistant.workflow(h, arg);
         if (action === "code") return assistant.code(h);
         if (action === "review") return assistant.review(h);
         if (action === "askv") return assistant.ask(h, arg, { voiceReply: true });
+        if (action === "ask") return assistant.ask(h, decode(arg));
+        if (action === "wfpath") {
+          // one honest helper instead of a tool the user did not ask for
+          const path = `.github/workflows/${guessName(decode(arg))}.yml`;
+          return h.reply(fa ? `📋 <code>${tgEscape(path)}</code>` : `📋 <code>${tgEscape(path)}</code>`,
+            kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]), true);
+        }
         if (action === "voice") return h.reply(fa ? "🎙 یک ویس بفرست تا تبدیل و پاسخ صوتی بگیرم." : "Send a voice note.", kb([[{ text: "◀️", cb: "a:home" }]]));
         if (action === "tts") return ttsLast(h, arg);
         break;
@@ -1265,11 +1370,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "pkg") return tools.pkg(h);
         if (action === "conv") return tools.convert(h, args[0] ?? "deb", args[1] ?? "rpm");
         if (action === "inspect" || action === "convactions") return tools.pkg(h);
-        if (action === "ip") { await h.session.set("u:ip", true); return h.reply(fa ? "📡 IP یا دامنه را بفرست." : "Send IP or domain.", kb([[{ text: "◀️", cb: "u:home" }]])); }
+        if (action === "ip") { await armMode(h, "u:ip"); return h.reply(fa ? "📡 IP یا دامنه را بفرست." : "Send IP or domain.", kb([[{ text: "◀️", cb: "u:home" }]])); }
         if (action === "geo") return tools.intel(h, "8.8.8.8");
-        if (action === "dns") { await h.session.set("u:ip", true); return h.reply(fa ? "🧭 دامنه را بفرست." : "Send domain."); }
-        if (action === "tls") { if (args[0]) return tools.tls(h, args[0]); await h.session.set("u:ip", true); return h.reply(fa ? "🔐 دامنه را بفرست." : "Send domain."); }
-        if (action === "asn") { if (args[0]) return tools.asn(h, args[0]); await h.session.set("u:asn", true); return h.reply(fa ? "🛰 شماره ASN را بفرست (مثل 13335)." : "Send ASN number."); }
+        if (action === "dns") { await armMode(h, "u:ip"); return h.reply(fa ? "🧭 دامنه را بفرست." : "Send domain."); }
+        if (action === "tls") { if (args[0]) return tools.tls(h, args[0]); await armMode(h, "u:ip"); return h.reply(fa ? "🔐 دامنه را بفرست." : "Send domain."); }
+        if (action === "asn") { if (args[0]) return tools.asn(h, args[0]); await armMode(h, "u:asn"); return h.reply(fa ? "🛰 شماره ASN را بفرست (مثل 13335)." : "Send ASN number."); }
         if (action === "dev") return devutils.home(h);
         if (action === "cidr") return devutils.cidr(h);
         if (action === "cron") return devutils.cron(h);
@@ -1279,24 +1384,24 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── dev utils ──
       case "dvu":
         if (action === "home") return devutils.home(h);
-        if (action === "cron") { if (arg) return devutils.cron(h, arg); await h.session.set("dvu:cron", true); return devutils.cron(h); }
-        if (action === "regex") { if (arg) return devutils.runRegex(h, arg); await h.session.set("dvu:regex", true); return devutils.regex(h); }
-        if (action === "cidr") { if (arg) return devutils.cidr(h, arg); await h.session.set("dvu:cidr", true); return devutils.cidr(h); }
-        if (action === "jwt") { if (arg) return devutils.jwt(h, arg); await h.session.set("dvu:jwt", true); return devutils.jwt(h); }
+        if (action === "cron") { if (arg) return devutils.cron(h, arg); await armMode(h, "dvu:cron"); return devutils.cron(h); }
+        if (action === "regex") { if (arg) return devutils.runRegex(h, arg); await armMode(h, "dvu:regex"); return devutils.regex(h); }
+        if (action === "cidr") { if (arg) return devutils.cidr(h, arg); await armMode(h, "dvu:cidr"); return devutils.cidr(h); }
+        if (action === "jwt") { if (arg) return devutils.jwt(h, arg); await armMode(h, "dvu:jwt"); return devutils.jwt(h); }
         if (action === "b64" || action === "b64d") {
           if (arg) return devutils.b64(h, arg);
-          await h.session.set("dvu:b64", true);
+          await armMode(h, "dvu:b64");
           return devutils.b64(h);
         }
-        if (action === "hash") { if (arg) return devutils.hash(h, arg); await h.session.set("dvu:hash", true); return devutils.hash(h, ""); }
+        if (action === "hash") { if (arg) return devutils.hash(h, arg); await armMode(h, "dvu:hash"); return devutils.hash(h, ""); }
         if (action === "id") return devutils.id(h);
-        if (action === "time") { if (arg) return devutils.time(h, arg); await h.session.set("dvu:time", true); return devutils.time(h); }
-        if (action === "json") { if (arg) return devutils.json(h, decode(arg)); await h.session.set("dvu:json", true); return devutils.json(h); }
+        if (action === "time") { if (arg) return devutils.time(h, arg); await armMode(h, "dvu:time"); return devutils.time(h); }
+        if (action === "json") { if (arg) return devutils.json(h, decode(arg)); await armMode(h, "dvu:json"); return devutils.json(h); }
         if (action === "gitignore") return devutils.gitignore(h);
         if (action === "gi") return devutils.gitignoreFor(h, arg);
-        if (action === "semver") { if (arg) return devutils.semver(h, arg); await h.session.set("dvu:semver", true); return devutils.semver(h); }
+        if (action === "semver") { if (arg) return devutils.semver(h, arg); await armMode(h, "dvu:semver"); return devutils.semver(h); }
         if (action === "sv") return devutils.semver(h, arg);
-        if (action === "color") { if (arg) return devutils.color(h, arg); await h.session.set("dvu:color", true); return devutils.color(h); }
+        if (action === "color") { if (arg) return devutils.color(h, arg); await armMode(h, "dvu:color"); return devutils.color(h); }
         break;
 
       // ── security ──
@@ -1334,8 +1439,14 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         break;
 
       // ── profile / gamification ──
-      case "me":
+      /* «حساب گیت‌هاب» is the linked-account screen (accountFeature), «پروفایل من»
+         is the user's own stats — two different screens, two different keys. */
+      case "pf":
         if (action === "home") return profile.home(h);
+        break;
+
+      case "me":
+        if (action === "home") return githubOverview(h);
         if (action === "dash") return profile.dash(h);
         if (action === "board") return profile.board(h);
         if (action === "ref") return profile.referral(h);
@@ -1451,7 +1562,10 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         }
         break;
     }
-    await h.toast("…");
+    /* Fell through every case: the button exists in some old keyboard but not
+       in this build. Send the user to a working screen instead of a spinner. */
+    await h.toast(fa ? "این دکمه در این نسخه نیست — منو را باز کردم" : "this key is not in this build — opening the menu");
+    return settings.home(h);
   } catch (e: any) {
     console.error("callback error", e?.stack ?? e);
     await h.toast("⚠️ " + String(e?.message ?? e).slice(0, 120), true);

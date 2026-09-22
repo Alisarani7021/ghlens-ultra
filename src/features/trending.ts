@@ -67,7 +67,7 @@ export class TrendingFeature {
         { text: "🌐 " + (fa ? "فیلتر زبان" : "Language"), cb: "t:lang:" + period },
         { text: "🎙 " + (fa ? "پادکست امروز" : "Today's podcast"), cb: "p:today" },
       ],
-      [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" }],
+      [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "t:menu" }],
     );
 
     await h.reply(head + body, keyboard, !!h.cbId);
@@ -118,7 +118,7 @@ export class TrendingFeature {
           { text: "🆕 " + (fa ? "تازه‌واردها" : "Newcomers"), cb: "t:new" },
           { text: "📈 " + (fa ? "نمودار هفتگی" : "Weekly chart"), cb: "t:chart" },
         ],
-        [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "t:menu" }],
       ),
       !!h.cbId,
     );

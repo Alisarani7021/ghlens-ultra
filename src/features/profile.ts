@@ -109,7 +109,7 @@ export class ProfileFeature {
           { text: "🔔 " + (fa ? "اشتراک‌ها" : "Subs"), cb: "sub:list" },
         ],
         [{ text: "🏆 " + (fa ? "لیدربورد" : "Leaderboard"), cb: "me:board" }],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );
@@ -133,7 +133,7 @@ export class ProfileFeature {
         ? "انتخاب‌هایت فید روزانه، پیشنهاد پروژه و هشدار ریلیز را شخصی‌سازی می‌کند."
         : "Choices personalise your daily feed and recommendations."}\n\n` +
         `${fa ? "انتخاب‌شده" : "selected"}: ${cur.map((t) => code(t)).join(" ") || "—"}`,
-      kb(...rows, [{ text: "✅ " + (fa ? "تمام" : "Done"), cb: "me:home" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]),
+      kb(...rows, [{ text: "✅ " + (fa ? "تمام" : "Done"), cb: "pf:home" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }]),
       !!h.cbId,
     );
   }
@@ -155,7 +155,7 @@ export class ProfileFeature {
     if (!rows.length) {
       return h.reply(
         `⭐ <b>${fa ? "علاقه‌مندی‌ها" : "Favourites"}</b>\n\n${fa ? "خالی است. روی هر مخزنی ⭐ را بزن تا اینجا جمع شود." : "Empty — star repos to collect them here."}`,
-        kb([[{ text: "🔥 " + (fa ? "کشف پروژه" : "Discover"), cb: "t:menu" }, { text: "🔎 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]]),
+        kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }]]),
         !!h.cbId,
       );
     }
@@ -177,7 +177,7 @@ export class ProfileFeature {
               { text: "📤 " + (fa ? "خروجی JSON" : "Export JSON"), cb: "f:export" },
             ]
           : [],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );
@@ -226,7 +226,7 @@ export class ProfileFeature {
         rows.length ? [{ text: "🔇 " + (fa ? "بی‌صدا کردن همه" : "Mute all"), cb: "sub:muteall" }, { text: "🗑 " + (fa ? "لغو همه" : "Unsubscribe all"), cb: "sub:clear" }] : [],
         [
           { text: "🧠 " + (fa ? "از علاقه‌مندی‌ها بساز" : "Build from interests"), cb: "me:interests" },
-          { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" },
+          { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" },
         ],
       ),
       !!h.cbId,
@@ -269,10 +269,10 @@ export class ProfileFeature {
         `<i>${fa ? "هر جست‌وجو، کاوش، ترجمه و دانلود امتیاز دارد. هفته‌ای ۵ برتر می‌توانند نشان طلایی بگیرند." : ""}</i>`,
       kb(
         [
-          { text: "⭐ " + (fa ? "امتیاز من" : "My XP"), cb: "me:home" },
+          { text: "⭐ " + (fa ? "امتیاز من" : "My XP"), cb: "pf:home" },
           { text: "🎁 " + (fa ? "دعوت دوستان" : "Invite"), cb: "me:ref" },
         ],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );
@@ -291,7 +291,7 @@ export class ProfileFeature {
       kb(
         [{ text: "🔗 " + (fa ? "کپی لینک" : "Copy link"), copy: link }],
         [{ text: "📤 " + (fa ? "اشتراک‌گذاری" : "Share"), url: `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(fa ? "ربات لنز — کشف هوشمند گیت‌هاب" : "GitHub Lens Ultra")}` }],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );
@@ -307,7 +307,7 @@ export class ProfileFeature {
         `<i>${fa ? "نسخه فعلی این ربات کاملاً رایگان و اوپن‌سورس است؛ پلن‌ها فقط برای مصارف سنگین (Actions و AI) تعریف شده‌اند." : ""}</i>`,
       kb(
         [{ text: "💎 " + (fa ? "درخواست Pro" : "Request Pro"), cb: "me:pro" }],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );
@@ -340,7 +340,7 @@ export class ProfileFeature {
           `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stargazers_count)} · 🕒 ${rel(r.pushed_at, fa)}\n   ${i((r.description ?? "").slice(0, 90))}`).join("\n\n") || "—"),
       kb(
         ...items.slice(0, 5).map((r: any) => [{ text: `📦 ${r.full_name}`, cb: `s:go:${r.full_name}` }]),
-        [{ text: "🧠 " + (fa ? "ویرایش علاقه‌مندی" : "Edit interests"), cb: "me:interests" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+        [{ text: "🧠 " + (fa ? "ویرایش علاقه‌مندی" : "Edit interests"), cb: "me:interests" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "pf:home" }],
       ),
       !!h.cbId,
     );

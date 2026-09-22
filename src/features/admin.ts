@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { armMode } from "../core/modes";
 import { GithubRest } from "../github/rest";
 import { fmt, meterBar } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
@@ -98,7 +99,7 @@ export class Admin {
     const fa = h.loc === "fa";
     if (!isAdmin(h.env, h.u.id)) return;
     if (!text) {
-      await h.session.set("adm:broadcast", true);
+      await armMode(h, "adm:broadcast");
       return h.reply(`📣 ${fa ? "متن پیام همگانی را بفرست (HTML مجاز است)." : "Send broadcast text."}`,
         kb([[{ text: "◀️ " + (fa ? "لغو" : "Cancel"), cb: "adm:home" }]]));
     }
