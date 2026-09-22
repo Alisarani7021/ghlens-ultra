@@ -2,6 +2,7 @@ import type { H } from "../core/handler";
 import { GithubRest } from "../github/rest";
 import type { Env } from "../env";
 import { VectorIndex } from "../ai/vector";
+import { extractKeywords, searchLadder } from "../search/keywords";
 import { fmt } from "./cards";
 import { b, code, i, link, tgEscape } from "../tg/types";
 import { kb, pager, type Loc } from "../tg/keyboards";
@@ -17,37 +18,56 @@ export class SearchFeature {
   private rest(env: Env) { return new GithubRest(env); }
 
   /** Turn a free-text query into GitHub qualifiers (cached per query hash by AiBrain). */
+  /**
+   * Free text → GitHub query.
+   *
+   * The AI plan is a bonus, never a dependency: if the model is unavailable
+   * (spent neurons, gateway down) the offline keyword layer still produces a
+   * real query, so a Persian sentence can no longer be sent to GitHub verbatim
+   * and come back empty. `ladder` is the relaxation chain the caller walks.
+   */
   private async buildQuery(h: H, raw: string) {
     const q = raw.trim();
-    let ghQuery = q;
     let plan: any = null;
 
     // explicit "owner/repo" → direct
-    if (/^[\w.-]+\/[\w.-]+$/.test(q)) return { direct: q, plan: null };
+    if (/^[\w.-]+\/[\w.-]+$/.test(q)) return { direct: q, plan: null, ladder: [] as string[] };
 
     const hasQualifiers = /(language:|stars:|topic:|created:|pushed:|license:|user:|org:)/i.test(q);
-    if (!hasQualifiers) {
-      plan = await h.ai.plan_search(q, h.loc);
-      if (plan?.github_query) ghQuery = plan.github_query;
-    }
-    return { direct: null, ghQuery, plan };
+    if (!hasQualifiers) plan = await h.ai.plan_search(q, h.loc).catch(() => null);
+
+    const keywords = extractKeywords(q, 8);
+    const ladder = hasQualifiers
+      ? [q]
+      : searchLadder(q, { aiQuery: plan?.github_query ?? null, language: plan?.language ?? null });
+
+    return { direct: null, ghQuery: ladder[0] ?? q, plan, ladder, keywords };
   }
 
   async run(h: H, rawQuery: string, page = 0, mode: "hybrid" | "semantic" | "lexical" = "hybrid") {
-    const { direct, ghQuery, plan } = await this.buildQuery(h, rawQuery);
+    const { direct, plan, ladder, keywords } = await this.buildQuery(h, rawQuery);
 
     if (direct) return this.showRepo(h, direct);
 
-    // ── lexical ──
+    // ── lexical: walk the relaxation ladder until GitHub answers ──
     let lexical: any[] = [];
+    let usedQuery = ladder[0] ?? rawQuery;
     if (mode !== "semantic") {
-      const res = await this.rest(h.env).searchRepos(ghQuery || rawQuery, "stars", "desc", 20, page + 1).catch(() => null);
-      lexical = (res?.items ?? []).map((r: any) => ({
-        id: r.full_name, full_name: r.full_name, description: r.description, stars: r.stargazers_count,
-        forks: r.forks_count, language: r.language, topics: r.topics ?? [], url: r.html_url,
-        license: r.license?.spdx_id ?? null, pushed_at: r.pushed_at, score: 0, source: "lexical",
-      }));
-      if (!lexical.length) return this.emptyState(h, rawQuery);
+      const chain = page > 0 ? [usedQuery] : ladder;
+      for (const q of chain) {
+        const res = await this.rest(h.env).searchRepos(q, "stars", "desc", 20, page + 1).catch(() => null);
+        const items = res?.items ?? [];
+        if (items.length) {
+          usedQuery = q;
+          lexical = items.map((r: any) => ({
+            id: r.full_name, full_name: r.full_name, description: r.description, stars: r.stargazers_count,
+            forks: r.forks_count, language: r.language, topics: r.topics ?? [], url: r.html_url,
+            license: r.license?.spdx_id ?? null, pushed_at: r.pushed_at, score: 0, source: "lexical",
+          }));
+          break;
+        }
+      }
+      if (!lexical.length) return this.emptyState(h, rawQuery, keywords);
     }
 
     // ── semantic ──
@@ -67,10 +87,17 @@ export class SearchFeature {
     if (!top.length) return this.emptyState(h, rawQuery);
 
     const fa = h.loc === "fa";
+    const explain = plan?.explain_fa && fa ? `\n<i>${tgEscape(plan.explain_fa)}</i>` : "";
+    const keywordLine = keywords?.length && fa
+      ? `\n🔤 کلیدواژه‌ها: <code>${tgEscape(keywords.slice(0, 6).join(" · "))}</code>`
+      : "";
     const header =
-      `🔎 <b>${fa ? "نتایج جست‌وجو" : "Search results"}</b>${plan?.explain_fa && fa ? `\n<i>${tgEscape(plan.explain_fa)}</i>` : ""}\n` +
-      (plan?.github_query ? `<code>${tgEscape(String(plan.github_query).slice(0, 120))}</code>\n` : "") +
-      (fa ? `\n🧠 حالت: <b>هیبرید (معنایی + متنی)</b>\n` : `\n🧠 mode: <b>hybrid</b>\n`);
+      `🔎 <b>${fa ? "نتایج جست‌وجو" : "Search results"}</b>${explain}\n` +
+      (usedQuery ? `<code>${tgEscape(String(usedQuery).slice(0, 120))}</code>\n` : "") +
+      keywordLine + "\n" +
+      (plan?.github_query
+        ? (fa ? `\n🧠 حالت: <b>هیبرید (معنایی + متنی)</b>\n` : `\n🧠 mode: <b>hybrid</b>\n`)
+        : (fa ? `\n🔤 حالت: <b>واژگانی (بدون AI)</b> — با کلیدواژه‌های بالا گشتم\n` : `\nLexical mode (no AI)\n`));
 
     const body = top
       .map((r, idx) => {
@@ -115,21 +142,37 @@ export class SearchFeature {
     await h.reply(rendered.text, rendered.keyboard, !!h.cbId);
   }
 
-  private async emptyState(h: H, q: string) {
+  /**
+   * Nothing matched — but say *why* and hand over the next step. When the
+   * keyword layer produced terms, those become the one-tap retries; when the
+   * words were all noise, we say so instead of blaming the user's phrasing.
+   */
+  private async emptyState(h: H, q: string, keywords: string[] = []) {
     const fa = h.loc === "fa";
-    const suggestions = await h.ai.chat(
-      `The GitHub search for "${q}" returned nothing. Suggest 3 alternative GitHub search queries in JSON array of strings.`,
-      { tier: "fast", max_tokens: 200, cacheKey: `alt:${enc(q)}`, cacheTtl: 86400 },
-    );
-    let alts: string[] = [];
-    try { alts = JSON.parse(suggestions.replace(/```json|```/g, "").trim()).slice(0, 3); } catch { /* ignore */ }
+    const alts = keywords.length
+      ? keywords.slice(0, 4)
+      : await h.ai
+          .chat(`Suggest 3 GitHub search keywords for: "${q}". Return a JSON array of strings only.`, {
+            tier: "fast", max_tokens: 120, cacheKey: `alt:${enc(q)}`, cacheTtl: 86400,
+          })
+          .then((raw) => {
+            try { return (JSON.parse(raw.replace(/```json|```/g, "").trim()) as string[]).slice(0, 3); } catch { return ["react", "vpn", "telegram bot"]; }
+          });
+
     await h.reply(
       `🫙 <b>${fa ? "چیزی پیدا نشد" : "Nothing found"}</b>\n\n` +
-        (fa ? `برای «${tgEscape(q)}» نتیجه‌ای نبود. اما این‌ها را امتحان کن:\n` : `No results for “${tgEscape(q)}”. Try these:\n`) +
-        (alts.map((a) => `• ${code(a)}`).join("\n") || "• react\n• vpn\n• telegram bot"),
+        (fa
+          ? `برای «${tgEscape(q)}» نتیجه‌ای نبود.\n` +
+            (keywords.length
+              ? `با این کلیدواژه‌ها گشتم و چیزی نبود. یکی‌شان را جدا امتحان کن:\n`
+              : `کلمه‌های پرسشت عمومی بودند. با یک اسم دقیق‌تر امتحان کن:\n`)
+          : `No results for “${tgEscape(q)}”. Try one of these:\n`) +
+        alts.map((a) => `• ${code(a)}`).join("\n"),
       kb(
-        alts.slice(0, 3).map((a) => [{ text: `🔎 ${a.slice(0, 30)}`, cb: `n:q:${enc(a)}` }]),
-        [{ text: "🧠 " + (fa ? "جست‌وجوی معنایی" : "Semantic search"), cb: `n:mode:sem:${enc(q)}` }],
+        alts.slice(0, 4).map((a) => [{ text: `🔎 ${a.slice(0, 28)}`, cb: `n:q:${enc(a)}` }]),
+        [{ text: "🔥 " + (fa ? "داغ‌ترین‌های همین حالا" : "Trending now"), cb: "t:menu" },
+         { text: "✨ " + (fa ? "گنج‌ها" : "Gems"), cb: "x:gems" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "n:search" }],
       ),
       !!h.cbId,
     );

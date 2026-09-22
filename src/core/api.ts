@@ -2,6 +2,7 @@ import type { Ctx, Env } from "../env";
 import { Store } from "./db";
 import { GithubRest, healthScore } from "../github/rest";
 import { TrendingEngine } from "../github/trending";
+import { KeyPool } from "../ai/keypool";
 import { fmt } from "../features/cards";
 
 /**
@@ -95,6 +96,15 @@ async function miniapp(url: URL, env: Env, store: Store) {
   const period = (url.searchParams.get("period") ?? "daily") as "daily" | "weekly" | "monthly" | "all";
   const q = url.searchParams.get("q") ?? "";
 
+  if (kind === "ai") {
+    const halted = await env.CACHE.get("ai:halt").catch(() => null);
+    const stats = await new KeyPool(env).stats().catch(() => ({ total: 0, ok: 0 }));
+    return {
+      ai_state: stats.ok > 0 ? "on" : halted ? "quota" : "idle",
+      pooled_keys: stats.total, healthy_keys: stats.ok,
+      hint: stats.total === 0 ? "donate a key to light up translation, summaries, repo chat and the podcast" : undefined,
+    };
+  }
   if (kind === "trending" || period !== "daily") {
     const board = await boardFor(env, store, period);
     return board;

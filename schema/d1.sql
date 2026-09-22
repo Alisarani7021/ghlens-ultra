@@ -250,3 +250,25 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   calls     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, user_id, feature)
 );
+
+
+-- ── donated AI keys (pooled OpenAI-compatible endpoints) ──────────────────
+-- Anyone can donate a key; the pool answers with whichever key is healthy, so
+-- several small free keys add up to one working AI backend. Only ciphertext is
+-- stored, and a key that returns 401/402/403/quota is deleted immediately.
+CREATE TABLE IF NOT EXISTS ai_keys (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id     INTEGER,                 -- telegram id of the donor
+  label        TEXT NOT NULL DEFAULT '',-- what the donor called it
+  provider     TEXT NOT NULL,           -- openrouter | groq | openai | xai | gemini | custom | local
+  base_url     TEXT NOT NULL,
+  model        TEXT NOT NULL DEFAULT '',
+  enc_key      TEXT NOT NULL,           -- AES-GCM ciphertext, purpose "ai-key"
+  status       TEXT NOT NULL DEFAULT 'ok',   -- ok | warn | new
+  ok_count     INTEGER NOT NULL DEFAULT 0,
+  fail_count   INTEGER NOT NULL DEFAULT 0,
+  last_ok_at   INTEGER,
+  last_err     TEXT,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_keys_status ON ai_keys(status, last_ok_at);

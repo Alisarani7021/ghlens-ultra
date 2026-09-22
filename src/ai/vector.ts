@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { extractKeywords } from "../search/keywords";
 import type { AiBrain } from "./brain";
 import { hash } from "./brain";
 
@@ -129,16 +130,84 @@ export class RepoRag {
     return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
   }
 
+  /**
+   * No-embedding retrieval: rank chunks by term overlap.
+   *
+   * Embeddings need Workers AI. When that is unavailable (spent neurons, no
+   * gateway, embeddings not bound) the old code returned an empty answer and
+   * the user saw "پیدا نشد" for a question the README answers verbatim. This
+   * path always returns the most relevant passages.
+   */
+  static lexicalRank(chunks: string[], question: string, topK = 4): { text: string; score: number }[] {
+    const terms = extractKeywords(question, 10);
+    const raw = question
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((w) => w.length > 2);
+    const needles = [...new Set([...terms, ...raw])];
+    const scored = chunks.map((text) => {
+      const hay = text.toLowerCase();
+      let score = 0;
+      for (const t of needles) {
+        if (!t) continue;
+        const hits = hay.split(t).length - 1;
+        if (hits) score += hits * (t.length > 4 ? 2 : 1);
+      }
+      // a heading match is a strong signal
+      for (const line of text.split("\n").slice(0, 6)) {
+        if (line.startsWith("#") && needles.some((t) => line.toLowerCase().includes(t))) score += 3;
+      }
+      return { text, score };
+    });
+    return scored.filter((c) => c.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /** Headings a README almost always has, used when term matching finds nothing. */
+  private static keySections(chunks: string[]): { text: string; score: number }[] {
+    const WANT = ["install", "getting started", "quick start", "quickstart", "usage", "setup",
+      "configuration", "options", "api", "example", "features", "requirement", "license", "faq"];
+    const picked: { text: string; score: number }[] = [];
+    const seen = new Set<string>();
+    for (const want of WANT) {
+      const hit = chunks.find((c) => {
+        const head = c.split("\n").slice(0, 8).join(" ").toLowerCase();
+        return head.includes(want) && !seen.has(c);
+      });
+      if (hit) { seen.add(hit); picked.push({ text: hit, score: 1 }); }
+      if (picked.length >= 3) break;
+    }
+    // the first chunk always carries the project's own summary
+    const first = chunks[0];
+    if (first && !seen.has(first)) picked.unshift({ text: first, score: 2 });
+    return picked.slice(0, 4);
+  }
+
+  /** Extractive answer: the passages that matched, quoted, with their headings. */
+  async askExtractive(full: string, question: string, readmeText: string) {
+    const chunks = RepoRag.chunk(readmeText).slice(0, 60);
+    // terms first; if the README is English and the question Persian, the
+    // keyword layer usually maps them, but a nil result must still be useful
+    const hits = RepoRag.lexicalRank(chunks, question, 4).length
+      ? RepoRag.lexicalRank(chunks, question, 4)
+      : RepoRag.keySections(chunks);
+    return {
+      answer: hits.map((h, i) => `[[${i + 1}]] ${h.text.trim()}`).join("\n\n---\n\n"),
+      sources: hits.map((h, i) => ({ n: i + 1, excerpt: h.text.slice(0, 160).replace(/\s+/g, " "), score: Math.round(h.score * 10) / 10 })),
+    };
+  }
+
   async ask(full: string, question: string, readmeText: string, locale = "fa") {
     const key = `rag:${full}:${hash(readmeText.slice(0, 6000))}`;
     let chunks: { text: string; vec: number[] }[] | null = (await this.env.CACHE.get<{ text: string; vec: number[] }[]>(key, "json").catch(() => null)) ?? null;
     if (!chunks) {
       const parts = RepoRag.chunk(readmeText).slice(0, 24);
-      const vecs = await this.ai.embed(parts);
+      const vecs = await this.ai.embed(parts).catch(() => [] as number[][]);
+      if (!vecs.length || !vecs[0]?.length) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
       chunks = parts.map((text, i) => ({ text, vec: vecs[i] ?? [] }));
       await this.env.CACHE.put(key, JSON.stringify(chunks), { expirationTtl: 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
     }
-    const qv = await this.ai.embedOne(question);
+    const qv = await this.ai.embedOne(question).catch(() => [] as number[]);
+    if (!qv.length) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
     const top = chunks
       .map((c) => ({ ...c, score: RepoRag.cos(qv, c.vec) }))
       .sort((a, b) => b.score - a.score)
@@ -152,6 +221,9 @@ export class RepoRag {
         `CONTEXT:\n${context.slice(0, 14000)}\n\nQUESTION: ${question}`,
       { tier: "smart", max_tokens: 1200, temperature: 0.25 },
     );
-    return { answer, sources: top.map((t, i) => ({ n: i + 1, excerpt: t.text.slice(0, 160).replace(/\s+/g, " "), score: Math.round(t.score * 100) / 100 })) };
+    // the model can still come back empty (spent neurons mid-request) — then the
+    // passages themselves are the answer, not an apology
+    if (!answer) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
+    return { answer, sources: top.map((t, i) => ({ n: i + 1, excerpt: t.text.slice(0, 160).replace(/\s+/g, " "), score: Math.round(t.score * 100) / 100 })), mode: "ai" as const };
   }
 }

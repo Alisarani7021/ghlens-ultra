@@ -419,17 +419,29 @@ function about(v) {
 }
 
 async function me(v) {
+  /* the AI engine's health is shown here: when the pool is empty the whole AI
+     half of the bot is dark, and the fix is one donated key away */
   v.innerHTML =
     section('me', '👤', 'حساب من',
       'وضعیت اتصال گیت‌هاب و میان‌برهای پروفایل.',
       'با اتصال حساب گیت‌هاب، سقف درخواست از ۶۰ به ۵٬۰۰۰ در ساعت می‌رسد و مخزن‌های خصوصی هم دیده می‌شوند. توکن رمزنگاری‌شده ذخیره می‌شود.',
       '<div id="mebody">…</div>');
+  const openInBot = (payload, label) =>
+    '<div class="chip" style="margin-top:8px" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent(payload) + '">' + label + '</div>';
   try {
-    const d = await api('/api/me');
-    v.querySelector('#mebody').innerHTML = d.linked
-      ? '<div class="repo" style="cursor:default"><span class="n">🐙 ' + esc(d.login || 'linked') + '</span><div class="d">حساب گیت‌هاب وصل است' +
-        (d.linked_at ? ' · ' + ago(d.linked_at) : '') + '</div></div>'
-      : '<div class="repo" style="cursor:default"><span class="n">🐙 اتصال برقرار نیست</span><div class="d">در ربات <code>/login</code> را بزن و توکن یا OAuth را انتخاب کن.</div></div>';
+    const [d, ai] = await Promise.all([api('/api/me'), api('/api/miniapp?kind=ai').catch(() => ({}))]);
+    v.querySelector('#mebody').innerHTML =
+      (d.linked
+        ? '<div class="repo" style="cursor:default"><span class="n">🐙 ' + esc(d.login || 'linked') + '</span><div class="d">حساب گیت‌هاب وصل است' +
+          (d.linked_at ? ' · ' + ago(d.linked_at) : '') + '</div></div>' +
+          '<div class="chips"><div class="chip">📦 مخزن‌ها، خصوصی و عمومی</div><div class="chip">📊 زبان‌ها و ستاره‌ها</div><div class="chip">🏢 سازمان‌ها</div></div>'
+        : '<div class="repo err" style="cursor:default"><span class="n">🐙 اتصال برقرار نیست</span><div class="d">در ربات <code>/login</code> را بزن و توکن یا OAuth را انتخاب کن.</div></div>') +
+      '<div class="repo" style="cursor:default;margin-top:10px"><span class="n">🤝 موتور هوش مصنوعی</span><div class="d">' +
+        esc(ai.ai_state === 'on' ? 'روشن — از استخر کلیدهای اهدایی کار می‌کند'
+          : ai.ai_state === 'quota' ? 'سهمیهٔ رایگان تمام شده؛ با اهدای یک کلید فوراً روشن می‌شود'
+          : 'روشن') +
+      '</div>' + openInBot('k_keys', '➕ اهدای کلید هوش مصنوعی') +
+      '<div class="chips">' + openInBot('s_home', '🛰 کاوش عمیق') + '<div class="chip" data-open="https://t.me/' + esc(BOT) + '">🤖 خود ربات</div></div></div>';
   } catch (e) {
     v.querySelector('#mebody').innerHTML = '<div class="repo err" style="cursor:default">در دسترس نیست</div>';
   }

@@ -141,7 +141,18 @@ if (!withAdmin) {
 // "پاسخی تولید نشد" / the quota notice mean the AI path is degraded, not that
 // the button works — earlier audits called those rows green.
 const FAIL_PATTERNS = [/^❌/m, /پیدا نشد یا دسترسی ندارم/, /Repo not found/, /Error:/, /\bNaN\b/, /undefined/,
-  /پاسخی تولید نشد/, /سهمیهٔ رایگان هوش مصنوعی/, /No answer generated/];
+  /پاسخی تولید نشد/, /سهمیهٔ رایگان هوش مصنوعی/, /No answer generated/, /این بخش پاسخ نداد/];
+
+/**
+ * A reply that is only "در حال …" means the flow never finished — the user
+ * stares at a spinner. That is a failure, not content.
+ */
+const LOADING_ONLY = /^\s*(🔎|⚙️|🧠|📚|📊|🛰|🌍|🔬|🧪)?\s*(در حال|دارم|چند لحظه|Searching|Loading|Analyzing)/;
+const isLoaderOnly = (text) => {
+  const plain = String(text ?? "").replace(/<[^>]+>/g, "").trim();
+  return plain.length > 0 && LOADING_ONLY.test(plain);
+};
+
 const report = [];
 let pass = 0, fail = 0, empty = 0;
 
@@ -158,14 +169,22 @@ for (const cb of targets) {
     const content = replies.filter((r) => r.m === "sendMessage" || r.m === "editMessageText" || r.m === "sendDocument")
       .filter((r) => (r.text ?? "").trim() || (r.kb ?? 0) > 0 || (r.doc ?? 0) > 0);
     const toast = (d.replies ?? []).some((r) => (r.cb_text ?? "").trim());
-    const status = !d.ok ? "error" : bad.length ? "bad-text" : content.length ? "ok" : toast ? "toast" : "silent";
+    const visible = (d.replies ?? []).filter((r) => (r.text ?? "").trim() || (r.kb ?? 0) > 0 || (r.doc ?? 0) > 0);
+    const last = visible[visible.length - 1];
+    const stuck = visible.length > 0 && isLoaderOnly(last?.text ?? "");
+    const status = !d.ok ? "error"
+      : bad.length ? "bad-text"
+      : stuck ? "stuck"
+      : content.length ? "ok"
+      : toast ? "toast" : "silent";
     row = { cb, ms: d.ms, status, error: d.error, bad, logs: d.logs, replies: replies.map((r) => r.text.slice(0, 160)) };
   } catch (e) {
     row = { cb, status: "threw", error: String(e.message) };
   }
   report.push(row);
-  const icon = row.status === "ok" ? "✅" : row.status === "toast" ? "🔔" : row.status === "silent" ? "⚪" : "❌";
+  const icon = row.status === "ok" ? "✅" : row.status === "toast" ? "🔔" : row.status === "stuck" ? "⏳" : row.status === "silent" ? "⚪" : "❌";
   const detail = row.status === "ok" ? (row.replies[0] ?? "").replace(/\s+/g, " ").slice(0, 70)
+    : row.status === "stuck" ? "⏳ never finished (loader left behind)"
     : row.status === "toast" ? "(toast only)"
     : row.status === "silent" ? "(no visible reply)"
     : (row.error ?? row.bad?.join(",") ?? "").slice(0, 90);

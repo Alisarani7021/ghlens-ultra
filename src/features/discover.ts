@@ -4,6 +4,7 @@ import { TrendingEngine } from "../github/trending";
 import { fmt, normalise, rel, truncate } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
 import { kb } from "../tg/keyboards";
+import { extractKeywords } from "../search/keywords";
 
 /**
  * DISCOVERY ENGINE — the "you didn't know you needed this" part of the bot.
@@ -106,35 +107,61 @@ export class Discover {
   }
 
   /** Similar repos: co-star graph first, then topic/language overlap from GitHub. */
+  /**
+   * «مشابه» — co-star graph first, then a real search ladder.
+   *
+   * The old fallback built `topic:a OR topic:b OR language:x stars:>500`, which
+   * GitHub answers with nothing (qualifiers are ANDed, not ORed), so the card
+   * rendered as a bare dash. Now each attempt is a query GitHub actually
+   * accepts, and the source of the list is stated honestly.
+   */
   async similar(h: H, full: string) {
     const fa = h.loc === "fa";
-    const coStar = await h.store.similar(full, 8);
+    const coStar = await h.store.similar(full, 8).catch(() => [] as any[]);
     let rows: any[] = coStar.map((c: any) => ({ full_name: c.full_name, weight: c.weight }));
+    let source = fa ? "گراف «کسانی که این را ستاره کردند»" : "co-star graph";
 
     if (rows.length < 4) {
-      const meta = await h.store.repoFresh(full, 86400);
-      const topics = safeJson(meta?.topics) ?? [];
-      const lang = meta?.language;
-      const q = [
-        ...topics.slice(0, 3).map((t: string) => `topic:${t}`),
-        ...(lang ? [`language:${lang}`] : []),
-        "stars:>500",
-      ].join(" OR ");
-      const res = await h.gh().searchRepos(q || `stars:>1000`, "stars", "desc", 12).catch(() => null);
-      rows = (res?.items ?? [])
-        .filter((r: any) => r.full_name !== full)
-        .map((r: any) => ({ full_name: r.full_name, stars: r.stargazers_count, description: r.description, language: r.language }));
-    }
+      // the repo itself, live if we have no local copy
+      const meta: any = (await h.store.repoFresh(full, 86400).catch(() => null)) ?? (await h.gh().repo(full, 600).catch(() => null));
+      const topics: string[] = safeJson(meta?.topics) ?? [];
+      const lang: string | null = meta?.language ?? null;
+      const words = extractKeywords(String(meta?.description ?? ""), 4);
+      const seen = new Set(rows.map((r) => r.full_name));
+      const ladder = [
+        topics[0] && lang ? `topic:${topics[0]} language:${lang}` : "",
+        topics[0] ? `topic:${topics[0]}` : "",
+        topics[0] ? `topic:${topics[0]} stars:>50` : "",
+        lang ? `language:${lang} stars:>2000` : "",
+        words.length >= 2 ? `${words.slice(0, 2).join(" ")}` : "",
+        words[0] ? `${words[0]}` : "",
+        "stars:>5000",
+      ].filter(Boolean) as string[];
 
-    const body = rows.slice(0, 10).map((r: any, i2: number) =>
+      for (const q of ladder) {
+        const res = await h.gh().searchRepos(q, "stars", "desc", 12).catch(() => null);
+        const items = (res?.items ?? []).filter((r: any) => r.full_name !== full);
+        if (items.length) {
+          rows = items.map((r: any) => ({ full_name: r.full_name, stars: r.stargazers_count, description: r.description, language: r.language }));
+          source = words.length && q.includes(words[0])
+            ? (fa ? `هم‌موضوعی بر پایهٔ «${words.slice(0, 2).join("، ")}»` : `same topic: ${words.slice(0, 2).join(", ")}`)
+            : lang && q.includes("language:") ? (fa ? `هم‌زبانی (${lang})` : `same language (${lang})`)
+            : (fa ? "محبوب‌های گیت‌هاب (نمونهٔ گسترده‌تر)" : "popular on GitHub (broader list)");
+          break;
+        }
+      }
+    }
+    const unique = rows.filter((r, i) => rows.findIndex((x) => x.full_name === r.full_name) === i).slice(0, 10);
+
+    const body = unique.map((r: any, i2: number) =>
       `${i2 + 1}. <b>${tgEscape(r.full_name)}</b>${r.stars ? ` — ⭐ ${fmt(r.stars)}` : ""}${r.language ? ` · ${tgEscape(r.language)}` : ""}\n` +
       (r.description ? `   ${i(tgEscape(truncate(r.description, 90)))}` : "")).join("\n");
 
     await h.reply(
-      `✨ <b>${fa ? "مشابه" : "Similar to"} ${tgEscape(full)}</b>\n` +
-        `<i>${fa ? "بر پایه گراف «کسانی که این را ستاره کردند» و همپوشانی موضوع" : "based on the co-star graph + topic overlap"}</i>\n\n${body || "—"}`,
+      `✨ <b>${fa ? "مشابه" : "Similar to"} ${tgEscape(full)}</b>\n<i>${source}</i>\n\n` +
+        (body || (fa ? "چیزی پیدا نشد — دوباره بزن." : "nothing found — try again.")),
       kb(
-        ...rows.slice(0, 6).map((r: any) => [{ text: `📦 ${r.full_name}`, cb: `s:go:${r.full_name}` }]),
+        ...unique.slice(0, 6).map((r: any) => [{ text: `📦 ${r.full_name}`.slice(0, 42), cb: `s:go:${r.full_name}` }]),
         [
           { text: "🎲 " + (fa ? "تصادفی" : "Random"), cb: "x:random" },
           { text: "⚖️ " + (fa ? "مقایسه" : "Compare"), cb: `s:cmp:${full}` },

@@ -30,6 +30,7 @@ export class Assistant {
         [
           { text: "💬 " + (fa ? "گفت‌وگوی جدید" : "New chat"), cb: "a:new" },
           { text: "🧠 " + (fa ? "چت با مخزن" : "Chat with repo"), cb: "a:repochat" },
+          { text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
         ],
         [
           { text: "📝 " + (fa ? "ترجمه README" : "Translate README"), cb: "ai:tr:ask" },
@@ -145,11 +146,18 @@ export class Assistant {
     const corpus = readme + (extra ? `\n\n# ADDITIONAL DOCS\n${extra}` : "");
 
     const rag = new RepoRag(h.env, h.ai);
-    const { answer, sources } = await rag.ask(full, question, corpus, h.loc);
+    const { answer, sources, mode } = await rag.ask(full, question, corpus, h.loc);
 
     await h.store.addXp(h.u.id, 2, "repochat");
+    // When the model is unavailable the passages themselves answer the
+    // question — say so plainly and point at the original text, instead of
+    // showing an empty answer over the word "پیدا نشد".
+    const header = mode === "extractive"
+      ? `📑 <b>${tgEscape(full)}</b>\n<i>${fa ? "سؤال" : "Q"}: ${tgEscape(truncate(question, 140))}</i>\n` +
+        `<i>${fa ? "هوش مصنوعی در دسترس نبود؛ این‌ها مرتبط‌ترین بخش‌های مستندات خود مخزن‌اند (عین متن)." : "AI unavailable — these are the most relevant passages from the repo's own docs."}</i>\n\n`
+      : `🧠 <b>${tgEscape(full)}</b>\n<i>${fa ? "سؤال" : "Q"}: ${tgEscape(truncate(question, 140))}</i>\n\n`;
     await h.reply(
-      `🧠 <b>${tgEscape(full)}</b>\n<i>${fa ? "سؤال" : "Q"}: ${tgEscape(truncate(question, 140))}</i>\n\n` +
+      header +
         truncate(answer, 3300) +
         `\n\n──────────\n<b>${fa ? "منابع" : "Sources"}</b>\n` +
         sources.slice(0, 4).map((s) => `[${s.n}] ${i(tgEscape(truncate(s.excerpt, 120)))} (${s.score})`).join("\n"),
@@ -265,10 +273,11 @@ export class Assistant {
     let translated = await h.env.STATE.get(cacheKey);
     if (!translated) {
       // keep the structure: translate in two passes for very long READMEs
-      const parts = splitMd(md, 14000);
-      const out: string[] = [];
-      for (const p of parts.slice(0, 3)) out.push(await h.ai.translate(p, h.loc === "fa" ? "fa" : "en", "README"));
-      translated = out.filter(Boolean).join("\n\n");
+      // parts go out in parallel through *different* pooled keys, so several
+      // donated keys genuinely share one long translation
+      const parts = splitMd(md, 14000).slice(0, 3);
+      const out = await h.ai.translateMany(parts, h.loc === "fa" ? "fa" : "en", "README");
+      translated = out.join("\n\n");
       // never cache an empty translation — that silently poisons the feature
       if (translated) {
         await h.env.STATE.put(cacheKey, translated, { expirationTtl: 2592000 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
@@ -327,6 +336,14 @@ export class Assistant {
     }
     await h.loading(fa ? "⚙️ در حال ساخت ورک‌فلو…" : "⚙️ building workflow…");
     const yaml = await h.ai.workflow(description);
+    if (!yaml) {
+      return h.reply(
+        (await aiDownNotice(h.env, h.loc)) + "\n\n" +
+          (fa ? "تا آن موقع می‌توانی از قالب‌های آماده استفاده کنی:" : "Mean time, use a ready template:"),
+        kb([[{ text: "▶️ " + (fa ? "ورک‌فلوی نمونه CI" : "Sample CI"), cb: "dvu:gitignore" }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:workflow" }]]),
+        true,
+      );
+    }
     await h.reply(
       pre("yaml", yaml.slice(0, 3400)) +
         `\n\n📁 ${fa ? "مسیر پیشنهادی" : "suggested path"}: <code>.github/workflows/${guessName(description)}.yml</code>`,
@@ -353,7 +370,11 @@ export class Assistant {
     }
     await h.loading(fa ? "🧠 در حال خواندن کد…" : "🧠 reading…");
     const out = await h.ai.explainCode(snippet, h.loc);
-    await h.reply(out.slice(0, 3800), kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }], [{ text: "🧪 " + (fa ? "دوباره" : "Again"), cb: "a:code" }]]), !!h.cbId);
+    await h.reply(
+      (out || (await aiDownNotice(h.env, h.loc))).slice(0, 3800),
+      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }], [{ text: "🧪 " + (fa ? "دوباره" : "Again"), cb: "a:code" }]]),
+      !!h.cbId,
+    );
   }
 
   async review(h: H, target?: string) {
@@ -369,11 +390,20 @@ export class Assistant {
     if (!m) return h.reply(fa ? "❌ قالب درست نیست. مثال: `owner/repo#12`" : "❌ bad format", kb([{ text: "◀️", cb: "a:home" }]), true);
     await h.loading(fa ? "🔍 در حال خواندن دیف…" : "🔍 fetching diff…");
     const diffRes = await fetch(`https://api.github.com/repos/${m[1]}/pulls/${m[2]}`, {
-      headers: { accept: "application/vnd.github.v3.diff", authorization: `Bearer ${h.env.GITHUB_TOKEN}`, "user-agent": "GitHubLensUltra" },
+      // the user's own token when linked: private repos and a 5k/h limit
+      headers: { accept: "application/vnd.github.v3.diff", authorization: `Bearer ${h.userToken ?? h.env.GITHUB_TOKEN}`, "user-agent": "GitHubLensUltra" },
     }).catch(() => null);
     if (!diffRes?.ok) return h.reply(fa ? "❌ دیف دریافت نشد." : "❌ diff unavailable", kb([{ text: "◀️", cb: "a:home" }]), true);
     const diff = (await diffRes.text()).slice(0, 14000);
     const out = await h.ai.reviewPR(diff, h.loc);
+    if (!out) {
+      return h.reply(
+        (await aiDownNotice(h.env, h.loc)) + "\n\n" +
+          `📏 ${fa ? "اندازهٔ دیف" : "diff size"}: <b>${diff.split("\n").length}</b> ${fa ? "خط" : "lines"}`,
+        kb([[{ text: "🌐 " + (fa ? "خودم می‌خوانم" : "Read it myself"), url: `https://github.com/${m[1]}/pull/${m[2]}` }], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
+        true,
+      );
+    }
     await h.reply(
       `🔍 <b>${tgEscape(m[1])}#${m[2]}</b>\n\n${out.slice(0, 3600)}`,
       kb(

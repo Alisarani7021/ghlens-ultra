@@ -34,7 +34,10 @@ import { handleApi } from "./core/api";
 import { audioBytes, describe } from "./ai/brain";
 import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
-import { aiDownNotice } from "./ai/brain";
+import { aiDownNotice, aiHalted } from "./ai/brain";
+import { decryptSecret, encryptSecret } from "./core/crypto";
+import { keys as keysFeature } from "./features/keys";
+import { account as accountFeature } from "./features/account";
 
 export { UserSession } from "./core/session";
 
@@ -312,15 +315,58 @@ export default {
 // ═══════════════════════════════════════════════════════════════════════════
 //  UPDATE HANDLING
 // ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Progress guard.
+ *
+ * A flow that shows "در حال جست‌وجو…" and then returns without replacing it
+ * leaves the user staring at a spinner forever — the single most common
+ * complaint about the bot. Every handler now reports whether it reached a
+ * conclusion; if it did not, the caller replaces the loader with a real answer
+ * and a way forward instead of silence.
+ */
+interface ProgressGuard {
+  chatId: number;
+  msgId?: number;
+  loading: boolean;
+  settled: boolean;
+  lastLoader?: string;
+}
+
 async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
   const tg = new Telegram(env);
   const store = new Store(env);
   const ai = new AiBrain(env);
   const card = new RepoCard(env, store);
 
-  if (update.callback_query) return routeCallback(update.callback_query, env, ctx, tg, store, ai, card);
-  if (update.inline_query) return routeInline(update.inline_query, env, ctx, tg, store, ai);
-  if (update.message) return routeMessage(update.message, env, ctx, tg, store, ai, card);
+  const guard: ProgressGuard = { chatId: 0, loading: false, settled: true };
+  try {
+    if (update.callback_query) {
+      guard.chatId = update.callback_query.from.id;
+      guard.msgId = update.callback_query.message?.message_id;
+      return await routeCallback(update.callback_query, env, ctx, tg, store, ai, card, guard);
+    }
+    if (update.inline_query) return await routeInline(update.inline_query, env, ctx, tg, store, ai);
+    if (update.message) {
+      guard.chatId = update.message.chat.id;
+      return await routeMessage(update.message, env, ctx, tg, store, ai, card, guard);
+    }
+  } finally {
+    if (guard.loading && !guard.settled && guard.chatId) {
+      console.error("stuck-flow", guard.lastLoader ?? "?");
+      const aiOff = await aiHalted(env);
+      const text = aiOff
+        ? "⚠️ این بخش به هوش مصنوعی نیاز دارد و سهمیه‌اش امروز تمام شده.\n" +
+          "تا برگشتنش می‌توانی از کارت مخزن، داغ‌ترین‌ها، کاوش عمیق، ابزارها و جست‌وجوی واژگانی استفاده کنی."
+        : "⚠️ این بخش پاسخ نداد. یک بار دیگر بزن؛ اگر تکرار شد از منوی اصلی ادامه بده.";
+      const keyboard = { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }, { text: "🔎 جست‌وجو", callback_data: "n:search" }]] };
+      try {
+        if (guard.msgId) await tg.editMessageText(guard.chatId, guard.msgId, text, { parse_mode: "HTML", reply_markup: keyboard as any });
+        else await tg.sendMessage(guard.chatId, text, { parse_mode: "HTML", reply_markup: keyboard as any });
+      } catch (e: any) {
+        console.error("lens-swallowed", String(e?.message ?? e));
+      }
+    }
+  }
 }
 
 /**
@@ -384,8 +430,9 @@ async function githubUnlink(h: H) {
 async function buildH(
   m: { from?: User; chat: { id: number }; message_id?: number },
   env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard,
-  opts: { cbId?: string; args?: string[]; text?: string; msg?: Message } = {},
+  opts: { cbId?: string; args?: string[]; text?: string; msg?: Message; guard?: ProgressGuard } = {},
 ): Promise<H> {
+  const guard = opts.guard;
   const u = m.from ?? { id: 0, is_bot: false, first_name: "?" } as User;
   await store.upsertUser(u);
   const user = await store.user(u.id);
@@ -406,6 +453,7 @@ async function buildH(
     session,
     gh: () => gh,
     async reply(body, keyboard, edit = false) {
+      if (guard) guard.settled = true;
       if (edit && h.cbId && msgId) {
         const res = await tg.editMessageText(chatId, msgId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
         if ((res as any).ok === false && /not modified/i.test((res as any).description ?? "")) return;
@@ -418,10 +466,12 @@ async function buildH(
       await tg.sendLong(chatId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
     },
     async toast(text, alert = false) {
+      if (guard) guard.settled = true;
       if (h.cbId) await tg.answerCallbackQuery(h.cbId, text.slice(0, 190), alert);
     },
     async loading(label) {
       const text = label ?? loadingText(loc);
+      if (guard) { guard.loading = true; guard.settled = false; guard.lastLoader = text; guard.chatId = chatId; guard.msgId = guard.msgId ?? msgId; }
       if (h.cbId && msgId) {
         await tg.editMessageText(chatId, msgId, text, { parse_mode: "HTML" }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
       } else {
@@ -433,18 +483,19 @@ async function buildH(
 }
 
 // ── messages ───────────────────────────────────────────────────────────────
-async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard) {
+async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard, guard?: ProgressGuard) {
+  const opts = (extra: { cbId?: string; args?: string[]; text?: string } = {}) => ({ ...extra, msg, guard });
   const text = (msg.text ?? msg.caption ?? "").trim();
 
   // voice notes → transcription pipeline
   if (msg.voice?.file_id) {
-    const h = await buildH(msg, env, ctx, tg, store, ai, card, { msg });
+    const h = await buildH(msg, env, ctx, tg, store, ai, card, opts({ }));
     return assistant.voice(h, msg.voice.file_id);
   }
 
   // documents (e.g. package files) → inspect
   if (msg.document?.file_name) {
-    const h = await buildH(msg, env, ctx, tg, store, ai, card, { msg });
+    const h = await buildH(msg, env, ctx, tg, store, ai, card, opts({ }));
     return tools.pkg(h);
   }
 
@@ -455,13 +506,13 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     const [cmdRaw, ...rest] = text.split(/\s+/);
     const cmd = cmdRaw.replace(/@[\w_]+$/, "").toLowerCase();
     const arg = rest.join(" ").trim();
-    const h = await buildH(msg, env, ctx, tg, store, ai, card, { args: rest, text: arg, msg });
+    const h = await buildH(msg, env, ctx, tg, store, ai, card, opts({ args: rest, text: arg }));
     return routeCommand(cmd, arg, h, env, ctx);
   }
 
   // GitHub token paste (armed by /login or the "personal token" button)
   if (/^(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(text) || /^[A-Za-z0-9_]{36,}$/.test(text)) {
-    const h0 = await buildH(msg, env, ctx, tg, store, ai, card, { text, msg });
+    const h0 = await buildH(msg, env, ctx, tg, store, ai, card, opts({ text }));
     const armed = await h0.session?.get("me:token").catch(() => null);
     if (armed) {
       if (/^(gh[pousr]_|github_pat_)/.test(text) || text.length >= 36) return completeLink(h0, text.trim());
@@ -469,7 +520,7 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   }
 
   // session-driven inputs (wizard steps) take priority over heuristics
-  const h = await buildH(msg, env, ctx, tg, store, ai, card, { text, msg });
+  const h = await buildH(msg, env, ctx, tg, store, ai, card, opts({ text }));
   const sessionCtx = await inputContext(h);
   if (sessionCtx) return sessionCtx(text);
 
@@ -491,6 +542,49 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
 /** Detects whether the user is mid-wizard, and returns the handler for their next message. */
 async function inputContext(h: H): Promise<((text: string) => Promise<void>) | null> {
   const s = h.session;
+  const pendingKeys = await s.get("keys:pending");
+  if (pendingKeys) {
+    let state: any = {};
+    try { state = typeof pendingKeys === "string" ? JSON.parse(pendingKeys) : pendingKeys; } catch { state = {}; }
+    return async (t: string) => {
+      const fa = h.loc === "fa";
+      const text = t.trim();
+      if (state.stage === "url") {
+        if (!/^https?:\/\//i.test(text)) return h.reply(fa ? "❌ آدرس باید با http یا https شروع شود." : "❌ the URL must start with http(s)");
+        state.baseUrl = text;
+        state.stage = "key";
+        await s.set("keys:pending", JSON.stringify(state));
+        return h.reply(fa ? `🔑 آدرس ثبت شد. حالا کلید را بفرست (برای سرور محلی بدون کلید، «-» بفرست).` : "🔑 now send the key (or “-” for a keyless local server)");
+      }
+      if (state.stage === "model") {
+        state.model = text === "-" ? "" : text;
+        await keysFeature.accept(h, state, state.savedKey ?? "");
+        return;
+      }
+      // the key itself
+      const test = await (async () => {
+        const { KeyPool } = await import("./ai/keypool");
+        await h.loading(fa ? "🧪 در حال تست کلید…" : "🧪 testing the key…");
+        return KeyPool.test(String(state.baseUrl ?? "").replace(/\/$/, ""), text === "-" ? "" : text, state.model || "");
+      })();
+      // a model-name problem is worth a retry; a dead key is not (401/402/403)
+      const modelProblem = !!test.error && /(404|400|model|not found|unsupported|does not exist)/i.test(test.error)
+        && !/(401|402|403|quota|credit|invalid api key|unauthorized)/i.test(test.error);
+      if (!test.ok && state.model && modelProblem) {
+        state.savedKey = text;
+        state.stage = "model";
+        state.lastError = test.error ?? "";
+        await s.set("keys:pending", JSON.stringify(state));
+        return h.reply(
+          (fa ? `⚠️ کلید جواب نداد با مدل <code>${state.model}</code>:\n<code>${String(test.error).slice(0, 200)}</code>\n\n` +
+                `اگر کلید سالم است، نام مدل را درست بفرست (یا «-» برای پیش‌فرض).` :
+                `⚠️ failed with model ${state.model}: ${String(test.error).slice(0, 160)}\nSend another model name, or “-”.`),
+          kb([[{ text: "◀️", cb: "keys:add" }]]),
+        );
+      }
+      await keysFeature.accept(h, state, text);
+    };
+  }
   if (await s.get("repochat")) {
     const full = await s.get("repochat");
     await s.clear(["repochat"]);
@@ -578,6 +672,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
 
 // ── commands ───────────────────────────────────────────────────────────────
 async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) {
+  if (cmd === "/keys" || cmd === "/api-keys") return keysFeature.home(h);
   if (cmd === "/login") return githubTokenPrompt(h);
   if (cmd === "/logout") return githubUnlink(h);
   const fa = h.loc === "fa";
@@ -586,6 +681,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
   switch (cmd) {
     case "/start": {
       // mini-app deep links: s_/d_/t_/c_ + owner/repo open the right screen
+      if (arg === "k_keys") return keysFeature.home(h);
       const deep = arg.match(/^([sdtc])_(.+)$/);
       if (deep) {
         const full = normRepo(deep[2]);
@@ -760,14 +856,14 @@ async function fetchScoutRaw(h: H, full: string) {
 }
 
 // ── callbacks ──────────────────────────────────────────────────────────────
-async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard) {
+async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard, guard?: ProgressGuard) {
   const data = String(q.data ?? "");
   if (!data) return;
   const [ns, action = "", rest = ""] = data.split(":");
   const arg = rest;
   const args = rest ? rest.split(",") : [];
   const h = await buildH({ from: q.from, chat: q.message?.chat ?? { id: q.from.id }, message_id: q.message?.message_id }, env, ctx, tg, store, ai, card, {
-    cbId: q.id, text: arg, args, msg: q.message ?? undefined,
+    cbId: q.id, text: arg, args, msg: q.message ?? undefined, guard,
   });
   const fa = h.loc === "fa";
   await store.event(q.from.id, "callback", `${ns}:${action}`);
@@ -1001,6 +1097,27 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "random") return discover.random(h);
         if (action === "sim") return discover.similar(h, arg);
         if (action === "map") return discover.map(h);
+        break;
+
+      // ── donated AI keys ──
+      case "keys":
+        if (action === "home") return keysFeature.home(h);
+        if (action === "add") return keysFeature.add(h);
+        if (action === "p") return keysFeature.ask(h, args[0] ?? "");
+        if (action === "mine") return keysFeature.mine(h);
+        if (action === "del") return keysFeature.del(h, Number(args[0] ?? 0));
+        if (action === "test") return keysFeature.test(h);
+        if (action === "clean") return keysFeature.clean(h);
+        break;
+
+      // ── my GitHub account (public + private, with the user's own token) ──
+      case "gh":
+        if (action === "home") return accountFeature.home(h);
+        if (action === "repos") return accountFeature.repos(h, Number(args[0] ?? 0));
+        if (action === "private") return accountFeature.privateRepos(h);
+        if (action === "orgs") return accountFeature.orgs(h);
+        if (action === "starred") return accountFeature.starred(h, Number(args[0] ?? 0));
+        if (action === "stats") return accountFeature.stats(h);
         break;
 
       // ── podcast ──
@@ -1503,38 +1620,6 @@ code{background:#0b1220;padding:2px 6px;border-radius:6px;color:var(--acc2);font
 // ─── GitHub token storage (AES-GCM, never plaintext in D1) ─────────────────
 
 /** Derive a 256-bit key from the deployment secret (HKDF-SHA256). */
-async function tokenKey(env: Env): Promise<CryptoKey> {
-  const secret = (env as any).TOKEN_ENCRYPTION_KEY || env.DOWNLOAD_SIGNING_KEY || env.TELEGRAM_WEBHOOK_SECRET;
-  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("ghlens-token-v1"), info: new TextEncoder().encode("github-token") },
-    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"],
-  );
-}
-
-export async function encryptToken(env: Env, plain: string): Promise<string> {
-  const key = await tokenKey(env);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plain));
-  const packed = new Uint8Array(iv.length + ct.byteLength);
-  packed.set(iv, 0);
-  packed.set(new Uint8Array(ct), iv.length);
-  return btoa(String.fromCharCode(...packed));
-}
-
-export async function decryptToken(env: Env, packedB64: string): Promise<string | null> {
-  try {
-    const packed = Uint8Array.from(atob(packedB64), (c) => c.charCodeAt(0));
-    const key = await tokenKey(env);
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: packed.slice(0, 12) }, key, packed.slice(12));
-    return new TextDecoder().decode(plain);
-  } catch (e: any) {
-    console.error("token-decrypt-failed", String(e?.message ?? e));
-    return null;
-  }
-}
-
-/** HMAC-signed OAuth state so a callback can only belong to its own chat. */
 export async function signState(env: Env, userId: number): Promise<string> {
   const payload = `${userId}.${Date.now()}`;
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.TELEGRAM_WEBHOOK_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -1585,3 +1670,7 @@ export async function completeLink(h: H, token: string): Promise<void> {
     kb([[{ text: "👤 " + (fa ? "پروفایل من" : "My profile"), cb: "me:home" }, { text: "🏠", cb: "m:home" }]]),
   );
 }
+
+/** Kept as named aliases so existing call sites keep working. */
+export const encryptToken = (env: Env, plain: string) => encryptSecret(env, plain, "github-token");
+export const decryptToken = (env: Env, packedB64: string) => decryptSecret(env, packedB64, "github-token");

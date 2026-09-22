@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { KeyPool } from "./keypool";
 
 /**
  * Workers AI gateway — one entry point for every model call.
@@ -89,9 +90,22 @@ export class AiBrain {
      * would just fail (and cost latency), so we short-circuit until UTC
      * midnight — unless a gateway with its own quota is configured. */
     const compatReady = !!(this.env.OPENAI_COMPAT_BASE_URL && this.env.OPENAI_COMPAT_KEY);
-    if (!compatReady && (await this.env.CACHE.get("ai:halt").catch(() => null))) {
+    const poolReady = compatReady ? true : !!(await this.env.CACHE.get("aipool:has").catch(() => null));
+    if (!compatReady && !poolReady && (await this.env.CACHE.get("ai:halt").catch(() => null))) {
       this.failure = "quota";
       return "";
+    }
+
+    /* Donated keys first: pooled, health-ordered, and independent of the
+     * account's neuron budget. A key that fails hard is dropped immediately. */
+    if (!text) {
+      text = await this.tryPool(messages, opts);
+      if (text) {
+        this.failure = null;
+        if (cacheKey) await this.env.CACHE.put(cacheKey, text, { expirationTtl: opts.cacheTtl ?? 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+        if (opts.userId) await this.meter(opts.userId, opts.feature ?? "chat", text.length);
+        return text;
+      }
     }
 
     /* A configured OpenAI-compatible gateway is preferred over Workers AI:
@@ -154,10 +168,159 @@ export class AiBrain {
     return text;
   }
 
+  /**
+   * Spread one job across the pool.
+   *
+   * The owner asked that donated keys *share* the work, not just queue behind
+   * each other: a long README is split into parts and each part is sent through
+   * a different key in parallel, so N keys finish the job in roughly 1/N of the
+   * time. Keys that fail are dropped mid-flight and their part is retried on the
+   * next healthy key (or on Workers AI when it is available).
+   */
+  async parallel(prompts: string[], opts: ChatOpts = {}): Promise<string[]> {
+    if (prompts.length === 0) return [];
+    if (prompts.length === 1) return [await this.chat(prompts[0]!, opts)];
+
+    const pool = new KeyPool(this.env);
+    let keys: { id: number; provider: string; baseUrl: string; model: string; key: string }[] = [];
+    try { keys = await pool.candidates(prompts.length); } catch { keys = []; }
+
+    // fewer keys than parts → reuse them round-robin; zero keys → plain chain
+    if (keys.length === 0) {
+      const out: string[] = [];
+      for (const p of prompts) out.push(await this.chat(p, opts));
+      return out;
+    }
+
+    const usedIds = new Set<number>();
+    const runOne = async (prompt: string, k: (typeof keys)[number] | null): Promise<string> => {
+      if (!k) return this.chat(prompt, opts);
+      try {
+        const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+          body: JSON.stringify({ model: k.model || "auto", messages: [{ role: "user", content: prompt }], max_tokens: opts.max_tokens ?? 2048, temperature: opts.temperature ?? 0.2 }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!res.ok) {
+          await pool.markFail(k.id, `${res.status} ${(await res.text()).slice(0, 160)}`);
+          return "";
+        }
+        const j: any = await res.json().catch(() => ({}));
+        const text = String(j?.choices?.[0]?.message?.content ?? "").trim();
+        if (text) { await pool.markOk(k.id, k.model); usedIds.add(k.id); }
+        return text;
+      } catch (e: any) {
+        await pool.markFail(k.id, String(e?.message ?? e).slice(0, 120)).catch(() => null);
+        return "";
+      }
+    };
+
+    const primary = prompts.map((_, i) => keys[i % keys.length]!);
+    const first = await Promise.all(prompts.map((p, i) => runOne(p, primary[i]!)));
+    // retry whatever failed, on a key that has not been used yet if possible
+    const spare = keys.find((k) => !usedIds.has(k.id)) ?? keys[0]!;
+    const out = [...first];
+    for (let i = 0; i < out.length; i++) {
+      if (!out[i]) out[i] = await runOne(prompts[i]!, spare);
+    }
+    return out;
+  }
+
+  /** Translate several chunks — one part per pooled key when the pool is big. */
+  async translateMany(texts: string[], to = "fa", kind = "readme") {
+    const prompts = texts.map((t) => this.translatePrompt(t, to, kind));
+    const parts = await this.parallel(prompts, { tier: "smart", max_tokens: 4000, temperature: 0.2, feature: "translate" });
+    return parts.map((p) => p ?? "").filter(Boolean);
+  }
+
+  /** The prompt used by translate(); split out so parallel() can reuse it. */
+  private translatePrompt(text: string, to = "fa", kind = "readme") {
+    const clipped = text.slice(0, 22000);
+    return `Translate the following GitHub ${kind} into ${to === "fa" ? "fluent Persian (فارسی)" : to}.\n` +
+      `Rules:\n• keep ALL code blocks, commands, file paths, URLs, badges and YAML untouched\n` +
+      `• keep markdown structure (headings, lists, tables)\n• translate UI-ish nouns naturally, keep library names in Latin script\n` +
+      `• do NOT add commentary, do NOT omit sections\n\n---\n${clipped}`;
+  }
+
   /** Structured extraction: prompt → parsed JSON (with a lenient repair pass). */
   async json<T = any>(prompt: string, opts: ChatOpts = {}): Promise<T | null> {
     const raw = await this.chat(prompt, { ...opts, json: true });
     return safeJson<T>(raw);
+  }
+
+  /**
+   * Try the donated-key pool. Each key is used with its own base URL and model;
+   * failures are accounted per key, and a dead key is deleted on the spot.
+   */
+  private async tryPool(messages: any[], opts: ChatOpts): Promise<string> {
+    let keys: { id: number; provider: string; baseUrl: string; model: string; key: string }[] = [];
+    try {
+      keys = await new KeyPool(this.env).candidates(6);
+    } catch (e: any) {
+      console.error("keypool-load-failed", String(e?.message ?? e));
+      return "";
+    }
+    if (!keys.length) {
+      await this.env.CACHE.delete("aipool:has").catch(() => null);
+      return "";
+    }
+    await this.env.CACHE.put("aipool:has", "1", { expirationTtl: 300 }).catch(() => null);
+
+    const pool = new KeyPool(this.env);
+    for (const k of keys) {
+      try {
+        const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${k.key}`, "content-type": "application/json" },
+          body: JSON.stringify({ model: k.model || "auto", messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
+          signal: AbortSignal.timeout(45000),
+        });
+        if (!res.ok) {
+          const body = (await res.text()).slice(0, 200);
+          const verdict = await pool.markFail(k.id, `${res.status} ${body}`);
+          console.error("pool-key-failed", k.id, res.status, verdict);
+          // tell the donor their key is gone (best effort, never blocks)
+          if (verdict === "deleted") await this.notifyDonor(k.id, res.status, body).catch(() => null);
+          continue;
+        }
+        const j: any = await res.json().catch(() => ({}));
+        const out = String(j?.choices?.[0]?.message?.content ?? "").trim();
+        if (out) {
+          await pool.markOk(k.id, k.model);
+          return out;
+        }
+        await pool.markFail(k.id, "empty response");
+      } catch (e: any) {
+        await pool.markFail(k.id, String(e?.message ?? e).slice(0, 120)).catch(() => null);
+      }
+    }
+    return "";
+  }
+
+  /** Warn the donor that their key left the pool, and why. */
+  private async notifyDonor(keyId: number, status: number, body: string) {
+    const row = await this.env.DB.prepare(`SELECT owner_id, label, provider FROM ai_keys WHERE id=?`)
+      .bind(keyId).first<{ owner_id: number | null; label: string; provider: string }>().catch(() => null);
+    const owner = row?.owner_id;
+    if (!owner) return;
+    let locale = "fa";
+    try {
+      const u = await this.env.DB.prepare(`SELECT locale FROM users WHERE id=?`).bind(owner).first<{ locale: string }>();
+      locale = u?.locale ?? "fa";
+    } catch { /* keep default */ }
+    const fa = locale === "fa";
+    const text = fa
+      ? `🔔 <b>کلیدت از استخر خارج شد</b>\n\n` +
+        `کلید «${row?.label ?? row?.provider ?? "—"}» جواب نداد (${status}) و چون سوخته/باطل بود همان لحظه حذف شد.\n` +
+        `<code>${String(body).slice(0, 160)}</code>\n\n` +
+        `اگر کلید تازه‌ای داری، با /keys اهدا کن — با هر کلید، موتور AI ربات برای همه روشن‌تر می‌شود.`
+      : `🔔 Your donated key was removed from the pool (HTTP ${status}).`;
+    await fetch(`https://api.telegram.org/bot${this.env.BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: owner, text, parse_mode: "HTML", disable_web_page_preview: true }),
+    });
   }
 
   private async openaiCompat(messages: any[], opts: ChatOpts) {
@@ -184,10 +347,7 @@ export class AiBrain {
   translate(text: string, to = "fa", kind = "readme") {
     const clipped = text.slice(0, 22000);
     return this.chat(
-      `Translate the following GitHub ${kind} into ${to === "fa" ? "fluent Persian (فارسی)" : to}.\n` +
-        `Rules:\n• keep ALL code blocks, commands, file paths, URLs, badges and YAML untouched\n` +
-        `• keep markdown structure (headings, lists, tables)\n• translate UI-ish nouns naturally, keep library names in Latin script\n` +
-        `• do NOT add commentary, do NOT omit sections\n\n---\n${clipped}`,
+      this.translatePrompt(clipped, to, kind),
       {
         tier: "smart",
         max_tokens: 4000,
@@ -225,8 +385,17 @@ export class AiBrain {
   }
 
   /** Semantic query understanding for search: Persian/English NL → GitHub search query. */
-  plan_search(query: string, locale = "fa") {
-    return this.json<{ github_query: string; keywords: string[]; language: string | null; topics: string[]; sort: string; explain_fa: string }>(
+  /**
+   * Search planner, with an output sanity gate.
+   *
+   * Small models sometimes answer in the wrong script entirely (a Vietnamese/
+   * Cyrillic mash was cached and every later search used it as its query). A
+   * plan is only accepted when the GitHub query is plain ASCII, short, and free
+   * of invented qualifiers; otherwise the cache entry is dropped and the
+   * offline keyword layer takes over.
+   */
+  async plan_search(query: string, locale = "fa") {
+    const plan = await this.json<{ github_query: string; keywords: string[]; language: string | null; topics: string[]; sort: string; explain_fa: string }>(
       `A user (language: ${locale}) asks: "${query}"\n` +
         `Convert it into a GitHub repository search. Return JSON: github_query (valid GitHub search qualifiers, ` +
         `e.g. "language:typescript stars:>500 topic:state-management"), keywords (array, English), ` +
@@ -234,6 +403,17 @@ export class AiBrain {
         `explaining how you understood the request).`,
       { tier: "fast", max_tokens: 500, cacheKey: `plan:${hash(query)}`, cacheTtl: 86400 },
     );
+    const cacheKey = `ai:fast:plan:${hash(query)}`;
+    if (!plan) return null;
+    const q = String(plan.github_query ?? "").trim();
+    const badQuery = !q || q.length > 200 || /[^\x20-\x7E]/.test(q) || /\bundefined\b/i.test(q);
+    const badExplain = !!plan.explain_fa && /[ăâêôơưđĐ]|[а-яА-Я]/i.test(String(plan.explain_fa));
+    if (badQuery || badExplain) {
+      console.error("ai-plan-rejected", badQuery ? `query:${q.slice(0, 60)}` : "explain");
+      await this.env.CACHE.delete(cacheKey).catch(() => null);
+      return null;
+    }
+    return { ...plan, github_query: q, keywords: Array.isArray(plan.keywords) ? plan.keywords.filter((k) => typeof k === "string" && /^[\x20-\x7E]+$/.test(k)).slice(0, 8) : [] };
   }
 
   /** Changelog writer: commits → human release notes (fa or en). */

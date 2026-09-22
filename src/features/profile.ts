@@ -46,8 +46,10 @@ export class ProfileFeature {
           { text: "🎁 " + (fa ? "دعوت دوستان" : "Refer friends"), cb: "me:ref" },
         ],
         github
-          ? [{ text: "🔗 " + (fa ? "جدا کردن گیت‌هاب" : "Unlink GitHub"), cb: "me:unlink" }]
-          : [{ text: "🐙 " + (fa ? "اتصال گیت‌هاب" : "Link GitHub"), cb: "me:link" }],
+          ? [{ text: "🐙 " + (fa ? "وضعیت حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
+             { text: "🔓 " + (fa ? "جدا کردن" : "Unlink"), cb: "me:unlink" }]
+          : [{ text: "🐙 " + (fa ? "اتصال گیت‌هاب" : "Link GitHub"), cb: "me:link" },
+             { text: "🤝 " + (fa ? "اهدای کلید AI" : "Donate AI key"), cb: "keys:home" }],
         [
           { text: "⚡ " + (fa ? "پلن‌ها" : "Plans"), cb: "me:plan" },
           { text: "📤 " + (fa ? "خروجی داده‌های من" : "Export my data"), cb: "me:export" },
