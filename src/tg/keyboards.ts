@@ -86,6 +86,16 @@ export const kb = (...rows: BtnArg[]): InlineKeyboardMarkup => {
     return { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }]] };
   }
 
+  /* Every screen gets a way out — exactly one, and never a duplicate of a key
+     that is already there. Removing the repeated «🏠 منوی اصلی» from 53 places
+     left some screens with no exit at all, so the rule lives here now. */
+  const flat = grid.flat();
+  const HOMEY = /بازگشت|◀|منو|خانه|✖|Menu|Back/i;
+  const isMainMenu = flat.some((b) => b.cb === "keys:home") && flat.some((b) => b.cb === "t:menu");
+  if (!isMainMenu && !flat.some((b) => HOMEY.test(b.text))) {
+    grid.push([{ text: "◀️ بازگشت", cb: "m:home" }]);
+  }
+
   return {
     inline_keyboard: grid.map((row) =>
       row.map((b) => ({
