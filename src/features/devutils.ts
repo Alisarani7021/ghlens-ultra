@@ -232,7 +232,7 @@ export class DevUtils {
     await h.reply(
       `#️⃣ <b>${fa ? "هش" : "Hash"}</b> <code>${tgEscape(input.slice(0, 60))}</code>\n\n${out.join("\n\n")}\n\n` +
         `<i>${fa ? "برای md5/bcrypt از ابزار محلی استفاده کن — WebCrypto پشتیبانی نمی‌کند." : "MD5 isn't in WebCrypto."}</i>`,
-      kb([[{ text: "🔁 " + (fa ? "ورودی دیگر" : "Another"), cb: "dvu:hash" }]]),
+      kb([[{ text: "🔁 " + (fa ? "ورودی دیگر" : "Another"), cb: "dvu:hash" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
       !!h.cbId,
     );
   }

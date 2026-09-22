@@ -146,7 +146,7 @@ export default {
             // every keyboard this reply carries, so the audit can assert things
             // like "every screen has a way back"
             buttons: (s.body?.reply_markup?.inline_keyboard ?? []).flat()
-              .map((b: any) => b.text ?? b.web_app?.url ?? b.url ?? "").slice(0, 24),
+              .map((b: any) => b.text ?? b.web_app?.url ?? b.url ?? "").slice(0, 80),
             home: !!(s.body?.reply_markup?.keyboard),
             kb: s.body?.reply_markup?.inline_keyboard?.length ?? 0,
             doc: s.body?.document ?? s.body?.photo ?? undefined,
@@ -735,8 +735,22 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       return h.reply(`📰 <b>${full}</b>\n\n${text.slice(0, 3600)}`);
     }
     case "/chart": return discover.chart(h, normRepo(arg));
-    case "/files": return discover.files(h, normRepo(arg));
-    case "/card": case "/share": return discover.shareCard(h, normRepo(arg));
+    case "/files":
+      return arg.trim()
+        ? discover.files(h, normRepo(arg))
+        : h.reply(
+            "📂 <b>فایل‌های مخزن</b>\nفرمت: <code>/files owner/repo</code> · مثلاً <code>/files facebook/react</code>\n" +
+              "<i>درخت فایل‌ها را با پوشه‌بندی نشان می‌دهم؛ روی پوشه بزن تا داخلش را ببینی.</i>",
+            kb([{ text: "🛰 کاوش مخزن", cb: "dis:home" }, { text: "🏠 منو", cb: "m:home" }]),
+          );
+    case "/card": case "/share":
+      return arg.trim()
+        ? discover.shareCard(h, normRepo(arg))
+        : h.reply(
+            "🖼 <b>کارت اشتراک‌گذاری مخزن</b>\nفرمت: <code>/card owner/repo</code> · مثلاً <code>/card vuejs/core</code>\n" +
+              "<i>یک کارت تصویری آمادهٔ فرستادن در چت می‌سازم.</i>",
+            kb([{ text: "🔎 جست‌وجو", cb: "s:home" }, { text: "🏠 منو", cb: "m:home" }]),
+          );
     case "/similar": return discover.similar(h, normRepo(arg));
 
     case "/dl": case "/download": {
@@ -794,19 +808,27 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       if (!isAdmin(h.env, h.u.id)) return security.home(h);
       return admin.home(h);
     case "/flag": {
-      if (!isAdmin(h.env, h.u.id)) return;
+      if (!isAdmin(h.env, h.u.id))
+        return h.reply("⛔ این دستور فقط برای مدیر ربات است.", kb([{ text: "🏠 منو", cb: "m:home" }]));
       const [k, v] = arg.split(/\s+/);
+      if (!k)
+        return h.reply(
+          "🚩 <b>پرچم‌های ربات</b> (فقط مدیر)\n<code>/flag &lt;نام&gt; on</code> · <code>/flag &lt;نام&gt; off</code>\n" +
+            "<i>برای دیدن فهرست پرچم‌ها: <code>/flags</code></i>",
+          kb([{ text: "🚩 پرچم‌ها", cb: "adm:flags" }, { text: "🏠 منو", cb: "m:home" }]),
+        );
       return admin.setFlag(h, k, v ?? "on");
     }
     case "/id": return showIds(h);
     case "/inline": {
       const username = h.env.BOT_USERNAME ?? "bot";
+
       return h.reply(
         fa
           ? `🔎 <b>حالت inline</b>\n\nدر هر چتی بنویس:\n<code>@${tgEscape(username)} react state</code>\n\n` +
             `اگر کار نکرد، از @BotFather → <code>/setinline</code> حالت inline را برای @${tgEscape(username)} فعال کن.`
           : `Inline mode: type <code>@${tgEscape(username)} react state</code> in any chat. Enable it via @BotFather → /setinline if needed.`,
-        kb([[{ text: "🐙 " + (fa ? "کارت مخزن" : "Repo card"), cb: "n:search" }]]),
+        kb([[{ text: "🐙 " + (fa ? "کارت مخزن" : "Repo card"), cb: "n:search" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]),
       );
     }
 

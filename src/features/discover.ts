@@ -101,6 +101,7 @@ export class Discover {
           { text: "✨ " + (fa ? "گنج‌های پنهان" : "Hidden gems"), cb: "x:gems" },
         ],
         ...card.keyboard.inline_keyboard.slice(2, 6),
+        [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
       ),
       !!h.cbId,
     );
@@ -326,7 +327,7 @@ export class Discover {
         `</pre>`,
       kb(
         ...top.slice(0, 6).map(([t]) => [{ text: `#${t}`, cb: `b:s:${encodeURIComponent(`topic:${t} stars:>300`).replace(/%/g, "_")}` }]),
-        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }],
+        [{ text: "🔥 " + (fa ? "داغ‌ترین‌ها" : "Trending"), cb: "t:menu" }, { text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }],
       ),
       !!h.cbId,
     );
