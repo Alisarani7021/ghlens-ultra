@@ -89,7 +89,11 @@ export class TrendingFeature {
   /** Trending hub shown from /start → 🔥. */
   async menu(h: H) {
     const fa = h.loc === "fa";
-    const daily = await h.store.board("daily", "all", 3);
+    let daily = await h.store.board("daily", "all", 3);
+    if (!daily.length) {
+      const live = await this.engine.rank("daily", "all", 3).catch(() => []);
+      if (live.length) daily = live;
+    }
     const preview = daily.length
       ? daily.map((r: any, i2: number) => `${["🥇", "🥈", "🥉"][i2]} <b>${tgEscape(r.full_name)}</b> — ⭐ ${fmt(r.stars)}${r.gained ? ` (+${fmt(r.gained)})` : ""}`).join("\n")
       : (fa ? "<i>در حال ساخت اولین اسنپ‌شات…</i>" : "<i>building the first snapshot…</i>");
@@ -110,7 +114,6 @@ export class TrendingFeature {
         ],
         [
           { text: "🌐 " + (fa ? "زبانِ تابلوی روزانه" : "Daily board language"), cb: "t:lang:daily" },
-          { text: "🎙 " + (fa ? "پادکست امروز" : "Today's podcast"), cb: "p:today" },
         ],
         [
           { text: "🆕 " + (fa ? "تازه‌واردها" : "Newcomers"), cb: "t:new" },

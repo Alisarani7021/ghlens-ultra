@@ -139,7 +139,6 @@ export const mainMenu = (loc: Loc, isAdmin = false, miniAppUrl?: string) =>
     ],
     [
       { text: L(loc, "contribute"), cb: "c:home" },
-      { text: L(loc, "podcast"), cb: "p:today" },
     ],
     [
       { text: L(loc, "fav"), cb: "f:list" },

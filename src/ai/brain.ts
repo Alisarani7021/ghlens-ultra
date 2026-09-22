@@ -271,7 +271,12 @@ export class AiBrain {
   /** The prompt used by translate(); split out so parallel() can reuse it. */
   private translatePrompt(text: string, to = "fa", kind = "readme") {
     const clipped = text.slice(0, 22000);
-    return `Translate the following GitHub ${kind} into ${to === "fa" ? "fluent Persian (فارسی)" : to}.\n` +
+    const langName = to === "fa" ? "fluent Persian (فارسی)" :
+                     to === "ar" ? "fluent Arabic (العربية)" :
+                     to === "ru" ? "fluent Russian (Русский)" :
+                     to === "zh" ? "fluent Simplified Chinese (中文)" :
+                     to === "en" ? "fluent English" : to;
+    return `Translate the following GitHub ${kind} into ${langName}.\n` +
       `Rules:\n• keep ALL code blocks, commands, file paths, URLs, badges and YAML untouched\n` +
       `• keep markdown structure (headings, lists, tables)\n• translate UI-ish nouns naturally, keep library names in Latin script\n` +
       `• do NOT add commentary, do NOT omit sections\n\n---\n${clipped}`;

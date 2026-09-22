@@ -1070,7 +1070,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/contribute": return contribute.home(h);
     case "/issues": return contribute.issues(h);
     case "/firstpr": return contribute.firstpr(h);
-    case "/podcast": case "/pod": return podcastRoutes(h);
+    case "/podcast": case "/pod": return h.reply(h.loc === "fa" ? "🎙 بخش صوتی و پادکست غیرفعال شده است." : "Podcast is disabled.");
 
     case "/admin":
       if (!isAdmin(h.env, h.u.id)) return security.home(h);
@@ -1268,7 +1268,13 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
             !!h.cbId,
           );
         }
-        if (action === "trmore") return translateMore(h, args[0] ?? "", Number(args[1] ?? 1));
+        if (action === "trmore") {
+          // Callback is ai:trmore:<full>:<page>
+          const parts = data.split(":");
+          const page = Number(parts[parts.length - 1] ?? 1);
+          const repo = parts.slice(2, parts.length - 1).join(":");
+          return translateMore(h, repo, page);
+        }
         if (action === "tre") return translateTo(h, args[0] ?? "", args[1] ?? "en");
         if (action === "trpdf") return translatePdf(h, args[0] ?? "");
         if (action === "cmp") return aiCompare(h, (args[0] ?? "").split("|")[0] ?? "", (args[0] ?? "").split("|")[1] ?? "");
@@ -1311,9 +1317,9 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "wf") return assistant.workflow(h, arg);
         if (action === "code") return assistant.code(h);
         if (action === "review") return assistant.review(h);
-        if (action === "askv") return assistant.ask(h, arg, { voiceReply: true });
-        if (action === "voice") return h.reply(fa ? "🎙 یک ویس بفرست تا تبدیل و پاسخ صوتی بگیرم." : "Send a voice note.", kb([[{ text: "◀️", cb: "a:home" }]]));
-        if (action === "tts") return ttsLast(h, arg);
+        if (action === "askv") return assistant.ask(h, arg);
+        if (action === "voice") return assistant.home(h);
+        if (action === "tts") return;
         break;
 
       // ── downloads ──
@@ -1556,10 +1562,20 @@ async function translateMore(h: H, full: string, page: number) {
   const source = text ?? (await h.env.STATE.get(`trl:${full}:${h.loc}`));
   if (!source) return h.toast(h.loc === "fa" ? "دوباره ترجمه کن" : "re-translate first", true);
   const chunks = splitSmart(source, 3800);
-  const idx = Math.min(page, chunks.length - 1);
+  const idx = Math.max(0, Math.min(page, chunks.length - 1));
+  const nav: any[] = [];
+  if (idx > 0) nav.push({ text: "⬅️ " + (h.loc === "fa" ? "قبلی" : "Prev"), cb: `ai:trmore:${full}:${idx - 1}` });
+  if (idx + 1 < chunks.length) nav.push({ text: (h.loc === "fa" ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:${idx + 1}` });
+
   return h.reply(
     chunks[idx] + `\n\n<i>…${idx + 1}/${chunks.length}</i>`,
-    kb(idx + 1 < chunks.length ? [{ text: "➡️", cb: `ai:trmore:${full}:${idx + 1}` }] : [], [{ text: "◀️ " + (h.loc === "fa" ? "بازگشت" : "Back"), cb: `s:card:${full}` }]),
+    kb(
+      nav,
+      [
+        { text: "🖨 PDF", cb: `ai:trpdf:${full}` },
+        { text: "◀️ " + (h.loc === "fa" ? "بازگشت" : "Back"), cb: `s:card:${full}` },
+      ]
+    ),
     true,
   );
 }

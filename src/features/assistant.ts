@@ -25,8 +25,8 @@ export class Assistant {
     const fa = h.loc === "fa";
     await h.reply(
       `🤖 <b>${fa ? "دستیار هوش مصنوعی لنز" : "Lens AI assistant"}</b>\n\n` + (fa
-        ? `می‌توانم:\n• پروژه مناسب برایت پیدا کنم («یک کتابخانه سبک برای صف در Go»)\n• هر مخزنی را تحلیل کنم و رقیب‌هایش را بگویم\n• با محتوای یک مخزن چت کنم و منبع بدم\n• README را فارسی کنم\n• ورک‌فلوی GitHub Actions بسازم\n• کد یا PR را بازبینی کنم\n\nفقط بنویس — یا با 🎤 ویس بفرست.`
-        : `Ask anything about open source, or send a voice note.`),
+        ? `می‌توانم:\n• پروژه مناسب برایت پیدا کنم («یک کتابخانه سبک برای صف در Go»)\n• هر مخزنی را تحلیل کنم و رقیب‌هایش را بگویم\n• با محتوای یک مخزن چت کنم و منبع بدم\n• README را فارسی کنم\n• ورک‌فلوی GitHub Actions بسازم\n• کد یا PR را بازبینی کنم\n\nفقط بنویس تا بلافاصله پاسخ دهم.`
+        : `Ask anything about open source.`),
       kb(
         /* «چت با مخزن» deliberately lives only with a repository (repo card and
            deep scout) — in the AI menu it was a dead end that asked for a repo
@@ -44,7 +44,6 @@ export class Assistant {
           { text: "🔍 " + (fa ? "بازبینی PR" : "Review PR"), cb: "a:review" },
         ],
         [
-          { text: "🎙 " + (fa ? "پاسخ صوتی" : "Voice answer"), cb: "a:voice" },
           { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" },
         ],
 
@@ -94,17 +93,13 @@ export class Assistant {
     await h.store.bumpLeaderboard(h.u.id, "queries");
     await h.store.addXp(h.u.id, 1, "ai_ask");
 
-    if (opts.voiceReply) {
-      const audio = await h.ai.speak(answer.slice(0, 600), h.loc);
-      if (audio) await h.tg.sendAudio(h.chatId, audio, "🎙 " + (fa ? "پاسخ صوتی لنز" : "Lens voice answer"), {});
-    }
+
 
     await h.reply(
       (answer || (await aiDownNotice(h.env, h.loc))).slice(0, 3900),
       kb(
         [
           { text: "🔁 " + (fa ? "بپرس ادامه‌اش" : "Follow up"), cb: "a:cont" },
-          { text: "🎙 " + (fa ? "صوتی بخوان" : "Read aloud"), cb: `a:tts:${hash(answer).slice(0, 24)}` },
         ],
         [
           { text: "🔎 " + (fa ? "جست‌وجوی این جمله" : "Search this"), cb: `n:q:${encodeURIComponent(question).replace(/%/g, "_").slice(0, 36)}` },
@@ -300,7 +295,7 @@ export class Assistant {
       // parts go out in parallel through *different* pooled keys, so several
       // donated keys genuinely share one long translation
       const parts = splitMd(md, 14000).slice(0, 3);
-      const out = await h.ai.translateMany(parts, h.loc === "fa" ? "fa" : "en", "README");
+      const out = await h.ai.translateMany(parts, h.loc, "README");
       translated = out.join("\n\n");
       // never cache an empty translation — that silently poisons the feature
       if (translated) {
@@ -328,7 +323,7 @@ export class Assistant {
 
     const chunks = chunkMd(translated.slice(0, 12000), 3800);
     await h.reply(chunks[0] + (chunks.length === 1 ? footer : `\n\n<i>…1/${chunks.length}</i>`), kb(
-      chunks.length > 1 ? [{ text: "➡️ " + (fa ? "ادامه" : "Continue"), cb: `ai:trmore:${full}:1` }] : [],
+      chunks.length > 1 ? [{ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:1` }] : [],
       [
         { text: "🇬🇧 English", cb: `ai:tre:${full}:en` },
         { text: "🖨 PDF", cb: `ai:trpdf:${full}` },
@@ -481,8 +476,9 @@ export class Assistant {
     if (!buf) return h.reply(fa ? "❌ دانلود صدا ناموفق." : "❌ download failed");
     const text = await h.ai.transcribe(buf, h.loc);
     if (!text) return h.reply(fa ? "🤷 چیزی نفهمیدم، دوباره بفرست." : "🤷 couldn't transcribe");
-    await h.reply(`🎧 <b>${fa ? "شنیدم" : "Heard"}</b>: <i>${tgEscape(text)}</i>`, kb([[{ text: "🎙 " + (fa ? "پاسخ صوتی" : "Voice answer"), cb: `a:askv:${text.slice(0, 120)}` }]]));
-    return this.ask(h, text, { voiceReply: true });
+    await h.reply(`🎧 <b>${fa ? "متن صدا" : "Voice transcript"}</b>:
+<i>${tgEscape(text)}</i>`);
+    return this.ask(h, text);
   }
 }
 

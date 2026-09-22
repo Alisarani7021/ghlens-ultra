@@ -28,7 +28,11 @@ export class Settings {
   async setLang(h: H, loc: Loc) {
     await h.store.setLocale(h.u.id, loc);
     h.loc = loc;
-    await h.toast(loc === "fa" ? "✅ زبان فا به پارسی تغییر کرد" : "✅ Language updated");
+    const toastMsg = loc === "fa" ? "✅ زبان به پارسی تغییر کرد" :
+                    loc === "ar" ? "✅ تم تغيير اللغة إلى العربية" :
+                    loc === "ru" ? "✅ Язык изменен на русский" :
+                    loc === "zh" ? "✅ 语言已更改为中文" : "✅ Language updated to English";
+    await h.toast(toastMsg);
     await this.home(h, loc);
   }
 
@@ -55,7 +59,7 @@ export class Settings {
           "🧠 <b>هوش مصنوعی</b> — ترجمهٔ README، خلاصه، چت با مخزن، ورک‌فلو، بازبینی PR",
           "📥 <b>دانلود</b> — زیپ، با تقسیم خودکار برای مخزن‌های بزرگ",
           "🧰 <b>جعبه‌ابزار</b> — تبدیل پکیج، IP/DNS/ASN، هش، JWT، کرون",
-          "⭐ <b>فید شخصی</b> — علاقه‌مندی‌ها، هشدار انتشار، پادکست روزانه، جدول امتیاز",
+          "⭐ <b>فید شخصی</b> — علاقه‌مندی‌ها، هشدار انتشار، جدول امتیاز",
         ].join("\n")
       : [
           "🔍 <b>Search</b> — type in any language, I find the exact repo",
@@ -63,7 +67,7 @@ export class Settings {
           "🧠 <b>AI</b> — README translation, summaries, repo chat, workflows, PR review",
           "📥 <b>Downloads</b> — zip, with automatic splitting for big repos",
           "🧰 <b>Toolbox</b> — package conversion, IP/DNS/ASN, hashes, JWT, cron",
-          "⭐ <b>Personal feed</b> — interests, release alerts, daily podcast, leaderboard",
+          "⭐ <b>Personal feed</b> — interests, release alerts, leaderboard",
         ].join("\n");
 
     // the persistent bottom keyboard was retired: the inline menu is enough and
@@ -224,7 +228,6 @@ All numbers come from GitHub's and OSV's real APIs; AI only summarises.`) +
       kb(
         [
           { text: "📚 " + (fa ? "راهنما" : "Help"), cb: "h:main" },
-          { text: "🎙 " + (fa ? "پادکست" : "Podcast"), cb: "p:today" },
         ],
         
       ),
@@ -264,7 +267,6 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
     ],
     [
       { text: L(loc, "contribute"), cb: "c:home" },
-      { text: L(loc, "podcast"), cb: "p:today" },
     ],
     [
       { text: L(loc, "fav"), cb: "f:list" },

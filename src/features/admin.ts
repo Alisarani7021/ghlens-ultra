@@ -63,7 +63,6 @@ export class Admin {
           { text: "🧹 " + (fa ? "پاکسازی" : "Cleanup"), cb: "adm:cleanup" },
         ],
         [
-          { text: "🎙 " + (fa ? "ساخت پادکست" : "Build podcast"), cb: "adm:podcast" },
           { text: "🧪 " + (fa ? "تست AI" : "AI self-test"), cb: "adm:aitest" },
         ],
         
