@@ -87,7 +87,11 @@ export class RepoCard {
       ],
       [
         { text: "📥 " + (loc === "fa" ? "دانلود سورس" : "Download source"), cb: `d:repo:${m.full_name}` },
+        { text: "🗺 " + (loc === "fa" ? "معماری پروژه" : "Architecture"), cb: `arch:view:${m.full_name}` },
+      ],
+      [
         { text: "🛡 " + (loc === "fa" ? "امنیت" : "Security"), cb: `sec:repo:${m.full_name}` },
+        { text: "🚀 " + (loc === "fa" ? "دانلود نسخه نصبی" : "Release Asset"), cb: `nr:app:${m.full_name}` },
       ],
       [
         { text: "📊 " + (loc === "fa" ? "نمودار رشد" : "Growth chart"), cb: `r:chart:${m.full_name}` },

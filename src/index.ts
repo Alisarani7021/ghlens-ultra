@@ -1,3 +1,6 @@
+import { NetRadar } from "./features/netradar";
+import { ArchitectureExplainer } from "./features/architecture";
+import { AppGen } from "./features/appgen";
 import type { Ctx, Env, Job } from "./env";
 import { isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
@@ -56,6 +59,9 @@ const discover = new Discover();
 const contribute = new Contribute();
 const settings = new Settings();
 const admin = new Admin();
+const netRadar = new NetRadar();
+const archExplainer = new ArchitectureExplainer();
+const appGen = new AppGen();
 
 export default {
   async fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> {
@@ -1067,6 +1073,9 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/refer": case "/invite": return profile.referral(h);
     case "/plan": return profile.plans(h);
 
+    case "/netradar": case "/vpn": case "/proxy": return netRadar.home(h);
+    case "/arch": case "/architecture": return archExplainer.explain(h, arg);
+    case "/appgen": case "/createapp": return appGen.prompt(h);
     case "/contribute": return contribute.home(h);
     case "/issues": return contribute.issues(h);
     case "/firstpr": return contribute.firstpr(h);
@@ -1491,6 +1500,38 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "show") return profile.feed(h);
         break;
 
+      // ── net radar ──
+      case "nr":
+        if (action === "home") return netRadar.home(h);
+        if (action === "subs") return netRadar.freeSubs(h);
+        if (action === "app") return netRadar.app(h, args[0] ? args.join(":") : arg);
+        if (action === "dl") {
+          const parts = data.split(":");
+          const assetId = Number(parts[parts.length - 1]);
+          const repo = parts.slice(2, parts.length - 1).join(":");
+          return netRadar.downloadAsset(h, repo, assetId);
+        }
+        break;
+
+      // ── architecture ──
+      case "arch":
+        if (action === "ask") {
+          await setMode(h.session, "arch");
+          return h.reply(fa ? "🗺 نام یا آدرس مخزن را بفرست تا معماری‌اش را تحلیل کنم:" : "Send repo for architecture analysis:", kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]));
+        }
+        if (action === "view") {
+          const repo = data.split(":").slice(2).join(":");
+          return archExplainer.explain(h, repo);
+        }
+        break;
+
+      // ── app generator ──
+      case "appgen":
+        if (action === "prompt") {
+          await setMode(h.session, "appgen");
+          return appGen.prompt(h);
+        }
+        break;
       // ── admin ──
       case "adm":
         if (action === "home") return admin.home(h);
@@ -1716,30 +1757,53 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     if (m) {
       results.push({
         type: "article", id: `repo:${m.full_name}`,
-        title: `${m.full_name} — ⭐ ${m.stargazers_count}`,
-        description: (m.description ?? "").slice(0, 100),
+        title: `📦 ${m.full_name} — ⭐ ${m.stargazers_count}`,
+        description: `${m.language ?? "—"} · ${(m.description ?? "No description").slice(0, 80)}`,
         thumbnail_url: m.owner?.avatar_url,
         input_message_content: {
-          message_text: `📦 <b>${m.full_name}</b>\n${m.description ? `<i>${m.description}</i>\n` : ""}⭐ ${m.stargazers_count} · 🍴 ${m.forks_count} · 🧩 ${m.language ?? "—"}\n🔗 https://github.com/${m.full_name}`,
+          message_text:
+            `📦 <b><a href="https://github.com/${m.full_name}">${m.full_name}</a></b>\n\n` +
+            `${m.description ? `<i>${m.description}</i>\n\n` : ""}` +
+            `⭐ <b>${m.stargazers_count.toLocaleString()}</b> ستاره · 🍴 <b>${m.forks_count.toLocaleString()}</b> فورک · 🧩 <b>${m.language ?? "نامشخص"}</b>\n\n` +
+            `🔍 کاوش عمیق، دانلود مستقیم سورس و ترجمه با @Gitguts_bot`,
           parse_mode: "HTML",
           disable_web_page_preview: false,
         },
-        reply_markup: kb([{ text: "🌐 GitHub", url: m.html_url }]).inline_keyboard ? { inline_keyboard: kb([{ text: "🌐 GitHub", url: m.html_url }]).inline_keyboard } : undefined,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🛰 باز کردن در ربات", url: `https://t.me/Gitguts_bot?start=repo_${m.full_name.replace("/", "_")}` },
+              { text: "🌐 مشاهده گیت‌هاب", url: m.html_url },
+            ]
+          ]
+        },
       } as any);
     }
   }
 
   // search results
-  const res = await gh.searchRepos(query, "stars", "desc", 8).catch(() => null);
+  const res = await gh.searchRepos(query, "stars", "desc", 10).catch(() => null);
   for (const r of res?.items ?? []) {
     results.push({
       type: "article", id: `r:${r.full_name}`,
-      title: `${r.full_name} — ⭐ ${r.stargazers_count}`,
-      description: `${r.language ?? ""} · ${(r.description ?? "").slice(0, 90)}`.trim(),
+      title: `⭐ ${r.stargazers_count.toLocaleString()} | ${r.full_name}`,
+      description: `${r.language ? `[${r.language}] ` : ""}${(r.description ?? "").slice(0, 90)}`.trim(),
       thumbnail_url: r.owner?.avatar_url,
       input_message_content: {
-        message_text: `📦 <b>${r.full_name}</b>\n${r.description ? `<i>${r.description}</i>\n` : ""}⭐ ${r.stargazers_count} · 🍴 ${r.forks_count} · 🧩 ${r.language ?? "—"}\n🔗 https://github.com/${r.full_name}`,
+        message_text:
+          `📦 <b><a href="https://github.com/${r.full_name}">${r.full_name}</a></b>\n\n` +
+          `${r.description ? `<i>${r.description}</i>\n\n` : ""}` +
+          `⭐ <b>${r.stargazers_count.toLocaleString()}</b> · 🍴 <b>${r.forks_count.toLocaleString()}</b> · 🧩 <b>${r.language ?? "—"}</b>\n\n` +
+          `🤖 تحلیل و دانلود در @Gitguts_bot`,
         parse_mode: "HTML",
+      },
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🛰 بررسی در لنز", url: `https://t.me/Gitguts_bot?start=repo_${r.full_name.replace("/", "_")}` },
+            { text: "🌐 گیت‌هاب", url: r.html_url },
+          ]
+        ]
       },
     } as any);
   }

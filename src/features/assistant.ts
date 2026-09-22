@@ -37,7 +37,11 @@ export class Assistant {
         ],
         [
           { text: "📝 " + (fa ? "ترجمه README" : "Translate README"), cb: "ai:tr:ask" },
+          { text: "🏗️ " + (fa ? "ساخت پروژه کامل" : "Text to App (ZIP)"), cb: "appgen:prompt" },
+        ],
+        [
           { text: "⚙️ " + (fa ? "ساخت ورک‌فلو" : "Build workflow"), cb: "a:workflow" },
+          { text: "🗺️ " + (fa ? "معماری مخزن" : "Architecture"), cb: "arch:ask" },
         ],
         [
           { text: "🧑‍💻 " + (fa ? "توضیح کد" : "Explain code"), cb: "a:code" },

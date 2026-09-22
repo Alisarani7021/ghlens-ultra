@@ -267,6 +267,7 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
     ],
     [
       { text: L(loc, "contribute"), cb: "c:home" },
+      { text: "📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), cb: "nr:home" },
     ],
     [
       { text: L(loc, "fav"), cb: "f:list" },
