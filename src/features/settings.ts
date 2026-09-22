@@ -2,7 +2,7 @@ import type { H } from "../core/handler";
 import type { Env } from "../env";
 import { fmt } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
-import { kb, L, replyKeyboard, type Loc } from "../tg/keyboards";
+import { kb, L, type Loc } from "../tg/keyboards";
 
 /** Language, help, about and inline-mode. */
 export class Settings {
@@ -50,12 +50,12 @@ export class Settings {
 
     const capabilities = fa
       ? [
-          "🔍 <b>جست‌وجو</b> — فارسی یا انگلیسی بنویس؛ دقیق‌ترین مخزن را پیدا می‌کنم",
-          "🛰 <b>کاوش عمیق</b> — ۱۲ تب: رشد ستاره، جامعه، ریلیز، امنیت، پول‌ریکوئست…",
-          "🧠 <b>هوش مصنوعی</b> — ترجمهٔ README، خلاصه، چت با مخزن، ساخت ورک‌فلو، بازبینی PR",
-          "📥 <b>دانلود سورس</b> — zip و تقسیم خودکار مخزن‌های بزرگ",
-          "🧰 <b>جعبه‌ابزار</b> — تبدیل پکیج لینوکس، IP/DNS/ASN، هش، JWT، کرون",
-          "⭐ <b>فید شخصی</b> — علاقه‌مندی‌ها، اشتراک ریلیز، پادکست روزانه، لیدربورد",
+          "🔍 <b>جست‌وجو</b> — فارسی یا انگلیسی بنویس، دقیق‌ترین مخزن را پیدا می‌کنم",
+          "🛰 <b>کاوش عمیق</b> — ۱۲ تب: رشد، جامعه، انتشارها، امنیت، PRها",
+          "🧠 <b>هوش مصنوعی</b> — ترجمهٔ README، خلاصه، چت با مخزن، ورک‌فلو، بازبینی PR",
+          "📥 <b>دانلود</b> — زیپ، با تقسیم خودکار برای مخزن‌های بزرگ",
+          "🧰 <b>جعبه‌ابزار</b> — تبدیل پکیج، IP/DNS/ASN، هش، JWT، کرون",
+          "⭐ <b>فید شخصی</b> — علاقه‌مندی‌ها، هشدار انتشار، پادکست روزانه، جدول امتیاز",
         ].join("\n")
       : [
           "🔍 <b>Search</b> — type in any language, I find the exact repo",
@@ -66,46 +66,38 @@ export class Settings {
           "⭐ <b>Personal feed</b> — interests, release alerts, daily podcast, leaderboard",
         ].join("\n");
 
-    const hello = fa
-      ? `👋 <b>سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
-        `من <b>GitHub Lens Ultra</b> هستم — دستیار کشف و تحلیل اوپن‌سورس، کاملاً روی کلودفلر.\n\n` +
-        `<b>چه کارهایی می‌کنم:</b>\n${capabilities}\n\n` +
-        `<i>هر وقت خواستی «منو» را بزن؛ هر بخش دکمهٔ راهنما و بازگشت دارد.</i>`
-      : `👋 <b>Hello${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
-        `<b>GitHub Lens Ultra</b> — open-source discovery and analysis, entirely on Cloudflare.\n\n` +
-        `<b>What I do:</b>\n${capabilities}`;
+    // the persistent bottom keyboard was retired: the inline menu is enough and
+    // the owner does not want two keyboards on screen
+    await stripReplyKeyboard(h);
 
-    await h.tg.sendMessage(h.chatId, hello, {
-      parse_mode: "HTML",
-      reply_markup: mainMenuKb(lang, u?.plan === "admin", `${h.env.WORKER_URL}/app`) as any,
-      disable_web_page_preview: true,
-    });
-
-    // the persistent bottom keyboard, so the menu is always one tap away
-    await h.tg.sendMessage(h.chatId, fa ? "👇 از دکمه‌های پایین هم می‌توانی استفاده کنی." : "👇 The keyboard below works too.", {
-      parse_mode: "HTML",
-      reply_markup: replyKeyboard(lang) as any,
-    }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
-
-    if (linked) {
-      const repos = (u as any)?.github_login;
-      await h.tg.sendMessage(
-        h.chatId,
-        fa
-          ? `✅ <b>حساب گیت‌هاب وصل است</b> — <code>${tgEscape(String(repos))}</code>\n` +
-            `همهٔ قابلیت‌ها باز است: مخزن‌های خصوصی، سقف ۵٬۰۰۰ درخواست در ساعت، پروفایل و اشتراک‌ها.\n\n` +
-            `وضعیت موتور AI: ${aiState}`
-          : `✅ GitHub linked: <code>${tgEscape(String(repos))}</code>\nAI engine: ${aiState}`,
-        { parse_mode: "HTML", reply_markup: kb([[{ text: "📊 " + (fa ? "وضعیت کامل حساب" : "Full account status"), cb: "gh:home" }, { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" }], [{ text: "🏠 " + (fa ? "منو" : "Menu"), cb: "m:home" }]]) as any },
-      );
-    } else {
-      // the one-tap onboarding: create a token on GitHub, paste it back, done
+    if (!linked) {
+      // step one, and only step one: link GitHub. Nothing else competes for
+      // attention, and the card ends by telling them to press /start again
       await h.tg.sendMessage(h.chatId, githubSetupCard(fa, aiState), {
         parse_mode: "HTML",
         reply_markup: githubSetupKb(fa) as any,
         disable_web_page_preview: true,
       });
+      return;
     }
+
+    const login = String((u as any)?.github_login ?? "");
+    const hello = fa
+      ? `👋 <b>سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
+        `من <b>GitHub Lens Ultra</b> هستم — دستیار کشف و تحلیل اوپن‌سورس، کاملاً روی کلودفلر.\n\n` +
+        `<b>چه کارهایی می‌کنم:</b>\n${capabilities}\n\n` +
+        `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}\n` +
+        `<i>هر بخش دکمهٔ راهنما و بازگشت دارد.</i>`
+      : `👋 <b>Hello${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
+        `<b>GitHub Lens Ultra</b> — open-source discovery and analysis, entirely on Cloudflare.\n\n` +
+        `<b>What I do:</b>\n${capabilities}\n\n` +
+        `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}`;
+
+    await h.tg.sendMessage(h.chatId, hello, {
+      parse_mode: "HTML",
+      reply_markup: mainMenuKb(lang, u?.plan === "admin") as any,
+      disable_web_page_preview: true,
+    });
   }
 
   /** /help — the honest, complete command reference. */
@@ -300,25 +292,39 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
  * to create, one paste to finish. Everything else stays the same: encrypted at
  * rest, removable with one button.
  */
+/**
+ * Retire the old bottom keyboard.
+ *
+ * A reply keyboard lives in the client until a message carries
+ * reply_markup.remove_keyboard — so we send one quietly and delete it right
+ * away, leaving the chat with a single clean message and no second keyboard.
+ */
+async function stripReplyKeyboard(h: H): Promise<void> {
+  try {
+    const m: any = await h.tg.sendMessage(h.chatId, "🧹", { reply_markup: { remove_keyboard: true } as any });
+    const id = m?.result?.message_id ?? m?.message_id;
+    if (id) await h.tg.deleteMessage(h.chatId, id).catch(() => null);
+  } catch (e: any) {
+    console.error("lens-swallowed", String(e?.message ?? e));
+  }
+}
+
 export function githubSetupCard(fa: boolean, aiState?: string): string {
   return (
-    (fa
-      ? `🐙 <b>یک قدم مانده: حساب گیت‌هاب را وصل کن</b>\n\n` +
-        `<b>چرا؟</b>\n` +
-        `• مخزن‌های خصوصی خودت هم دیده می‌شوند\n` +
-        `• سقف درخواست از ۶۰ به <b>۵٬۰۰۰ در ساعت</b> می‌رسد (بدون آن، ربات کند و محدود است)\n` +
-        `• پروفایل، ستاره‌ها، سازمان‌ها و آمار حساب خودت می‌آید\n\n` +
-        `<b>سه قدم ساده:</b>\n` +
-        `۱. دکمهٔ «ساخت توکن» را بزن (دسترسی‌ها از قبل تیک خورده‌اند)\n` +
-        `۲. پایین صفحه <b>Generate token</b> را بزن و توکن ساخته‌شده را کپی کن\n` +
-        `۳. همان‌جا در همین چت بفرستش — اتصال خودکار انجام می‌شود\n\n` +
-        `<b>امنیت:</b> توکن رمزنگاری‌شده (AES-GCM) ذخیره می‌شود، هیچ‌جا نمایش داده نمی‌شود و با یک دکمه پاک می‌شود.`
-      : `🐙 <b>One step left: connect your GitHub account</b>\n\n` +
-        `• see your private repositories\n• raise the API limit from 60 to <b>5,000/hour</b>\n• get your own account stats\n\n` +
-        `<b>Three steps:</b> tap “Create token” (scopes are pre-ticked), press Generate, paste the token here.\n` +
-        `<b>Security:</b> stored encrypted (AES-GCM), never displayed, removable any time.`) +
-    (aiState ? `\n\n${fa ? "موتور هوش مصنوعی" : "AI engine"}: ${aiState}` : "")
-  );
+    fa
+      ? `🐙 <b>اول حساب گیت‌هاب را وصل کن</b>\n\n` +
+        `تا وصل نشود بقیهٔ ربات نصفه کار می‌کند: مخزن‌های خصوصی دیده نمی‌شوند،\n` +
+        `سقف درخواست ۶۰ در ساعت است و پروفایل و آمار خودت نمی‌آید.\n\n` +
+        `<b>سه قدم:</b>\n` +
+        `۱. دکمهٔ «🔑 ساخت توکن» را بزن — دسترسی‌ها از قبل تیک خورده‌اند\n` +
+        `۲. پایین صفحه <b>Generate token</b> را بزن و توکن را کپی کن\n` +
+        `۳. همین‌جا در چت بفرستش — اتصال خودکار انجام می‌شود\n\n` +
+        `<i>توکن رمزنگاری‌شده (AES-GCM) ذخیره می‌شود و هیچ‌جا نمایش داده نمی‌شود.</i>`
+      : `🐙 <b>Connect your GitHub account first</b>\n\n` +
+        `Until you do, half of the bot stays limited: no private repos, a 60/hour API cap, no account stats.\n\n` +
+        `<b>Three steps:</b> tap “🔑 Create the token” (scopes pre-ticked), press Generate, paste the token here.\n` +
+        `<i>Stored encrypted (AES-GCM), never displayed.</i>`
+  ) + (aiState ? `\n\n${fa ? "موتور هوش مصنوعی" : "AI engine"}: ${aiState}` : "");
 }
 
 export function githubSetupKb(fa: boolean) {
@@ -330,7 +336,7 @@ export function githubSetupKb(fa: boolean) {
     [{ text: "🔑 " + (fa ? "ساخت توکن در گیت‌هاب" : "Create the token"), url: createUrl }],
     [{ text: "📥 " + (fa ? "توکن را گرفتم، بفرستم" : "I have the token — paste it"), cb: "me:token" }],
     [{ text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" }],
-    [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+    [{ text: "⏭ " + (fa ? "فعلاً نه، منو را نشانم بده" : "Skip — show me the menu"), cb: "m:home" }],
   );
 }
 

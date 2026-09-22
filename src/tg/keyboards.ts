@@ -133,16 +133,12 @@ export const mainMenu = (loc: Loc, isAdmin = false, miniAppUrl?: string) =>
     ...(isAdmin ? [[{ text: "🛡 پنل مدیریت", cb: "adm:home" }]] : []),
   );
 
-export const replyKeyboard = (loc: Loc, miniAppUrl?: string) => ({
-  keyboard: [
-    [{ text: L(loc, "home") }, { text: L(loc, "trending") }],
-    [{ text: L(loc, "search") }, { text: L(loc, "browse") }],
-    [{ text: L(loc, "profile") }, { text: "🤝 " + (loc === "fa" ? "اهدای کلید" : "Donate key") }],
-  ],
-  resize_keyboard: true,
-  is_persistent: true,
-  input_field_placeholder: loc === "fa" ? "نام مخزن، موضوع، یا سؤالت را بفرست…" : "Send a repo, topic or question…",
-});
+/**
+ * Retired on purpose (owner's request): the bot now shows a single inline menu.
+ * Kept as a comment-only marker — do not wire this back into any flow.
+ *
+ * export const replyKeyboard = (loc: Loc) => ({ keyboard: [...] });
+ */
 
 /** Pagination row helper. */
 export const pager = (ns: string, action: string, page: number, totalPages: number, extra: (string | number)[] = []) => {

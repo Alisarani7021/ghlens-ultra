@@ -1145,7 +1145,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
 
       // ── global navigation ──
       case "m":
-        if (action === "home") return settings.home(h);
+        if (action === "home" || action === "start") return settings.home(h);
         break;
       case "h":
         if (action === "main") return settings.help(h);
@@ -1940,12 +1940,24 @@ export async function completeLink(h: H, token: string): Promise<void> {
   // forget the wizard state and the user's message is theirs to delete
   await h.session?.set("me:token", false);
   await h.reply(
-    `✅ <b>${fa ? "اتصال برقرار شد" : "Linked"}</b> — <a href="https://github.com/${tgEscape(me.login)}">@${tgEscape(me.login)}</a>\n\n` +
+    `✅ <b>${fa ? "حساب گیت‌هاب وصل شد" : "GitHub linked"}</b> — <a href="https://github.com/${tgEscape(me.login)}">@${tgEscape(me.login)}</a>\n\n` +
       (fa
-        ? `سقف درخواست تو الان <b>${me.remaining ?? 5000}</b> در ساعت است. برای امنیت، پیام حاوی توکن را در تلگرام پاک کن (نگه‌دار → Delete).\n\nهر وقت خواستی: /logout`
-        : `Your limit is now ${me.remaining ?? 5000}/hour. Delete the message that contained the token.`),
-    kb([[{ text: "👤 " + (fa ? "پروفایل من" : "My profile"), cb: "me:home" }, { text: "🏠", cb: "m:home" }]]),
+        ? `سقف درخواست تو الان <b>${me.remaining ?? 5000}</b> در ساعت است و همهٔ قابلیت‌ها باز شد.\n\n` +
+          `👉 <b>حالا یک بار دیگر /start را بزن</b> تا همه‌چیز کامل بالا بیاید.\n` +
+          `<i>برای امنیت، پیام حاوی توکن را پاک کن (نگه‌دار → Delete). خروج: /logout</i>`
+        : `Your limit is now ${me.remaining ?? 5000}/hour and everything is unlocked.\n\n` +
+          `👉 <b>Press /start once more</b> so the whole thing comes up.\n` +
+          `<i>Delete the message with your token. /logout to disconnect.</i>`),
+    kb(
+      [{ text: "🚀 " + (fa ? "دوباره /start" : "Press /start again"), cb: "m:start" }],
+      [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+    ),
+    true,
   );
+  // the old bottom keyboard has no business surviving the new flow
+  const strip = await h.tg.sendMessage(h.chatId, "🧹", { reply_markup: { remove_keyboard: true } as any }).catch(() => null);
+  const stripId = (strip as any)?.result?.message_id ?? (strip as any)?.message_id;
+  if (stripId) await h.tg.deleteMessage(h.chatId, stripId).catch(() => null);
 }
 
 /** Kept as named aliases so existing call sites keep working. */
