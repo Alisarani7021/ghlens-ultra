@@ -467,7 +467,7 @@ async function githubOverview(h: H) {
 /** Where the user pastes the token: we arm the wizard and explain the steps. */
 async function githubTokenPrompt(h: H) {
   const fa = h.loc === "fa";
-  await h.session.set("me:token", true);
+  await h.session.set("me:token", Date.now());   // stamped: an old prompt must not eat a later message
   const createUrl =
     "https://github.com/settings/tokens/new?scopes=repo,read:user,user:email,read:org&description=" +
     encodeURIComponent("GitHub Lens Ultra");
@@ -584,7 +584,9 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   if (/^(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(text) || /^[A-Za-z0-9_]{36,}$/.test(text)) {
     const h0 = await buildH(msg, env, ctx, tg, store, ai, card, opts({ text }));
     const armed = await h0.session?.get("me:token").catch(() => null);
-    if (armed) {
+    // a prompt older than half an hour is not waiting for this message
+    const armedFresh = !!armed && (armed === true || Date.now() - Number(armed) < 30 * 60_000);
+    if (armedFresh) {
       if (/^(gh[pousr]_|github_pat_)/.test(text) || text.length >= 36) return completeLink(h0, text.trim());
     }
   }
@@ -606,6 +608,11 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   const kbAction = replyKeyAction(text, h.loc);
   if (kbAction) return kbAction(h);
 
+  /* A pasted API key or provider URL is not a search query either: handing it
+     to GitHub search is how a user ends up staring at "nothing found" while
+     their key is right there in the message. */
+  if (looksLikeKey(text)) return keyLooksLikeKey(h, text);
+
   /* A greeting is not a search query. Handing "سلام" to GitHub search answers
      «چیزی پیدا نشد», which reads as a broken bot. Greet back instead, with the
      menu and an honest word about the AI engine when it is off. */
@@ -618,6 +625,37 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
      results plus a one-tap «ask the AI» button, instead of the whole bot behaving
      like a chat window. */
   return search.run(h, text);
+}
+
+/** Text that smells like an API key or a provider base URL, not a query. */
+function looksLikeKey(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 20) return false;
+  if (/^(sk-|sk_|gsk_|xai-|AIza|hf_|pplx-|cfut_|gh[pousr]_|github_pat_)/.test(t)) return true;
+  if (/^https?:\/\/\S+\.\S{2,}(\/\S*)?$/i.test(t) && /\/v1\b|\/api\b|openai|completions/i.test(t)) return true;
+  return /^[A-Za-z0-9_\-]{40,}$/.test(t);
+}
+
+/**
+ * Someone dropped a key (or a provider URL) into the chat.
+ * Offer exactly two things: store it, or search it anyway.
+ */
+async function keyLooksLikeKey(h: H, text: string): Promise<void> {
+  const fa = h.loc === "fa";
+  const peek = text.replace(/\s+/g, " ").slice(0, 24) + "…";
+  await h.reply(
+    `🔑 <b>${fa ? "به‌نظر یک کلید یا آدرس سرور است" : "That looks like a key or a server URL"}</b>\n\n` +
+      `<i>${tgEscape(peek)}</i>\n\n` +
+      (fa
+        ? "اگر می‌خواهی موتور هوش مصنوعی ربات از آن استفاده کند، بزن «ذخیره در استخر» و همان‌جا تست می‌شود.\nاگر منظور دیگری داشتی، جست‌وجو کن."
+        : "Tap “Store it” and I will test it right away, or search it instead."),
+    kb(
+      [{ text: "🔑 " + (fa ? "ذخیره در استخر کلیدها" : "Store it for the AI pool"), cb: "keys:home" }],
+      [{ text: "🔎 " + (fa ? "نه، این را جست‌وجو کن" : "No, search it"), cb: `n:q:${encodeURIComponent(text).replace(/%/g, "_").slice(0, 60)}` }],
+      [{ text: "🏠 " + (fa ? "منوی اصلی" : "Main menu"), cb: "m:home" }],
+    ),
+    true,
+  );
 }
 
 /**
@@ -779,6 +817,12 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
           ),
         );
       }
+      if (!test.ok && test.errorKind === "rate") {
+        // 429 means "busy", not "wrong": keep the key as a warm backup instead
+        // of telling someone their working key is broken
+        state.model = state.model || (test.models?.[0] ?? "");
+        return keysFeature.accept(h, state, text, "rate");
+      }
       if (!test.ok) {
         // the wizard stays open: the next message is another key (or a new URL),
         // never a search query — that is how a working key used to get "lost"
@@ -861,7 +905,8 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
 
   /* Waiting for a pasted GitHub token: hand the text to the link flow, never
      to search. (Armed by /login or the «توکن را گرفتم» button.) */
-  if (await s.get("me:token").catch(() => null)) {
+  const armedToken = await s.get("me:token").catch(() => null);
+  if (armedToken && (armedToken === true || Date.now() - Number(armedToken) < 30 * 60_000)) {
     return (t) => completeLink(h, t.trim());
   }
 

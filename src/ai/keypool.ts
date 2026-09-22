@@ -125,12 +125,19 @@ export class KeyPool {
     return { total: r?.total ?? 0, ok: r?.ok ?? 0 };
   }
 
-  async add(opts: { ownerId: number | null; label: string; provider: string; baseUrl: string; model: string; key: string }) {
+  async add(opts: {
+    ownerId: number | null; label: string; provider: string; baseUrl: string;
+    model: string; key: string; status?: "ok" | "warn" | "new"; lastFailAt?: number;
+  }) {
     const enc = await encryptSecret(this.env, opts.key, "ai-key");
+    const status = opts.status ?? "ok";
     const res = await this.env.DB.prepare(
-      `INSERT INTO ai_keys (owner_id, label, provider, base_url, model, enc_key, status, ok_count, fail_count, created_at)
-       VALUES (?,?,?,?,?,?, 'ok', 0, 0, ?)`,
-    ).bind(opts.ownerId, opts.label.slice(0, 40), opts.provider, opts.baseUrl, opts.model, enc, Date.now()).run();
+      `INSERT INTO ai_keys (owner_id, label, provider, base_url, model, enc_key, status, ok_count, fail_count, last_ok_at, last_fail_at, created_at)
+       VALUES (?,?,?,?,?,?, ?, 0, 0, ?, ?, ?)`,
+    ).bind(
+      opts.ownerId, opts.label.slice(0, 40), opts.provider, opts.baseUrl, opts.model, enc, status,
+      status === "ok" ? Date.now() : null, opts.lastFailAt ?? null, Date.now(),
+    ).run();
     await this.invalidate();
     return Number((res as any)?.meta?.last_row_id ?? 0);
   }
@@ -281,13 +288,15 @@ export class KeyPool {
    * be stored.
    */
   static async test(baseUrl: string, key: string, model: string): Promise<{
-    ok: boolean; error?: string; errorKind?: "auth" | "quota" | "url" | "model" | "net";
+    ok: boolean; error?: string; errorKind?: "auth" | "quota" | "rate" | "url" | "model" | "net";
     models?: string[]; reply?: string; model?: string;
   }> {
     const url = KeyPool.normalizeBase(baseUrl);
-    const kindOf = (status: number, body: string): "auth" | "quota" | "url" | "model" | "net" => {
+    const kindOf = (status: number, body: string): "auth" | "quota" | "rate" | "url" | "model" | "net" => {
       if (status === 401 || status === 403 || /invalid api key|unauthorized|no auth|invalid_api_key/i.test(body)) return "auth";
-      if (status === 402 || status === 429 || /quota|credit|rate limit|insufficient/i.test(body)) return "quota";
+      // 402 = out of credit (the key is dead), 429 = busy right now (the key is fine)
+      if (status === 402 || /insufficient|out of credit|quota exceeded/i.test(body)) return "quota";
+      if (status === 429 || /rate limit|too many requests|tpm|rpm/i.test(body)) return "rate";
       if (status === 404 && /model/i.test(body)) return "model";
       if (status === 404 || /invalid url|not found/i.test(body)) return "url";
       if (/model.*(not|does not).*(exist|found)|unknown model|no such model|model_not_found/i.test(body)) return "model";
@@ -318,7 +327,7 @@ export class KeyPool {
        than reject a key that works, try the handful of model ids those servers
        actually use. */
     // a rejected key must be reported as such — not as "no usable model"
-    let refusals: { kind: "auth" | "quota"; error: string } | null = null;
+    let refusals: { kind: "auth" | "quota" | "rate"; error: string } | null = null;
     let lastError = "";
     const attempt = async (candidate: string) => {
       try {
@@ -326,7 +335,7 @@ export class KeyPool {
         if (r.ok) return { ok: true as const, reply: r.reply.slice(0, 40), model: candidate, models: list.models?.length ? list.models : [candidate] };
         const kind = kindOf(r.status, r.error);
         lastError = `${r.status} ${r.error}`;
-        if (kind === "auth" || kind === "quota") refusals = refusals ?? { kind, error: lastError };
+        if (kind === "auth" || kind === "quota" || kind === "rate") refusals = refusals ?? { kind, error: lastError };
       } catch (e: any) {
         lastError = String(e?.message ?? e).slice(0, 160);
       }
