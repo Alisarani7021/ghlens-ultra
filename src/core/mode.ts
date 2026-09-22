@@ -70,6 +70,8 @@ export const MODE_LABELS: Record<string, string> = {
   wf: "ساخت ورک‌فلو",
   code: "توضیح کد",
   review: "بازبینی PR",
+  appgen: "ساخت نرم‌افزار کامل",
+  arch: "تحلیل معماری پروژه",
   "sec:scan": "اسکن امنیتی",
   "sec:secrets": "جست‌وجوی کلید لو‌رفته",
   "u:ip": "ابزار IP/DNS",
