@@ -36,6 +36,7 @@ import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
 import { aiDownNotice, aiHalted } from "./ai/brain";
 import { readMode, touchMode, clearMode, modeKeeps, setMode } from "./core/mode";
+import { parseRepoRef } from "./core/repo-ref";
 import { decryptSecret, encryptSecret } from "./core/crypto";
 import { keys as keysFeature } from "./features/keys";
 import { account as accountFeature } from "./features/account";
@@ -596,11 +597,12 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
   const sessionCtx = await inputContext(h);
   if (sessionCtx) return sessionCtx(text);
 
-  // heuristics: repo name → card ; question → assistant ; else search
-  const repoMatch = text.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/?$/) ?? text.match(/^([\w.-]+)\/([\w.-]+)$/);
-  if (repoMatch && repoMatch[1] && repoMatch[2] && !repoMatch[1].includes(",")) {
-    const full = `${repoMatch[1]}/${repoMatch[2]}`.replace(/\.git$/, "");
-    return scout.open(h, full, 0);
+  // heuristics: repo link/name → card ; question → assistant ; else search
+  // (parseRepoRef accepts /tree/main, .git, ssh, ?tab=… — all the shapes the
+  //  GitHub app and the share sheet actually produce)
+  if (/github\.com|^[\w.-]+\/[\w.-]+$/.test(text) && !/\s/.test(text.trim())) {
+    const ref = parseRepoRef(text);
+    if (ref) return scout.open(h, ref, 0);
   }
   /* The persistent bottom keyboard sends its label as plain text and nothing
      used to handle it, so tapping «🏠 منوی اصلی» ran a GitHub search for that
@@ -876,7 +878,13 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
     switch (mode.kind) {
       case "repochat": {
         const full = String(mode.data?.full ?? "");
-        if (!full) break;
+        // no target yet → the message the user types *is* the repository
+        if (!full) return async (t: string) => {
+          const ref = parseRepoRef(t);
+          if (!ref) return assistant.translatePick(h, t);   // search it, one tap away
+          await setMode(h.session, "repochat", { full: ref });
+          return assistant.repoChat(h, ref);
+        };
         return (t) => assistant.repoChat(h, full, t);
       }
       case "ask": return (t) => assistant.ask(h, t);
@@ -1270,10 +1278,20 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       case "a":
         if (action === "home") return assistant.home(h);
         if (action === "new") {
-          // standing in the chat section: the next message is a question, not a
-          // search — and it stays that way until the user presses a button
+          /* Pressing «گفت‌وگوی جدید» used to redraw the very same menu, which
+             reads as "this button does nothing". Now it says what to do next —
+             the user is standing in the chat section, so the next message is a
+             question and stays one until they press a button. */
           await setMode(h.session, "ask");
-          return assistant.home(h);
+          return h.reply(
+            `💬 <b>${fa ? "گفت‌وگوی تازه" : "New chat"}</b>\n\n` +
+              (fa
+                ? `✍️ فقط بنویس — یا با 🎤 ویس بفرست.\n\n` +
+                  `مثال‌ها:\n• «یک کتابخانهٔ سبک برای صف در Go»\n• «فرق Bun و Node چیست؟»\n• «برای پروژهٔ پایتونی‌ام چه ابزار CI خوب است؟»`
+                : `✍️ Type your question — or send a voice note.`),
+            kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
+            !!h.cbId,
+          );
         }
         if (action === "cont") {
           await setMode(h.session, "ask");
@@ -1307,6 +1325,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "a7z") return dl.offloadToActions(h, arg, "main", 900 * 1024 * 1024);
         if (action === "link") return dl.direct(h, arg);
         if (action === "recent") return dl.recent(h);
+        if (action === "forget") return dl.forget(h, arg);
+        if (action === "clear") return dl.clearHistory(h);
         if (action === "trending") { const rows = await h.store.board("daily", "all", 5); return dl.choose(h, rows[0]?.full_name ?? "cloudflare/workers-sdk"); }
         if (action === "favs") {
           const { results } = await h.store.favs(h.u.id, 8);

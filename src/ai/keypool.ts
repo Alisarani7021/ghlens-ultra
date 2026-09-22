@@ -93,12 +93,23 @@ export class KeyPool {
     if (!cached) await this.env.CACHE.put(KeyPool.CACHE_KEY, JSON.stringify(rows), { expirationTtl: 120 })
       .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
 
-    const usable = rows
-      .filter((r) => r.status === "ok" || r.status === "new" ||
-        // a rate-limited provider is not a dead key: try it again after the cooldown
-        (r.status === "warn" && Date.now() - Number(r.last_fail_at ?? 0) > KeyPool.COOLDOWN_MS))
-      .sort((a, b) => (a.last_ok_at ?? 0) - (b.last_ok_at ?? 0))   // round-robin by age
-      .slice(0, limit);
+    /* OpenRouter-style rotation: every key is a candidate, healthy ones first.
+       A key that was merely rate-limited used to be filtered out for ten
+       minutes, so a pool with one donated key answered «کلیدها محدود شده‌اند»
+       while the key itself was fine a second later. Now the healthy keys are
+       tried in round-robin order and anything parked is tried after them —
+       worse case one extra request, best case a real answer. */
+    const now = Date.now();
+    const age = (r: PoolKey) => Number(r.last_ok_at ?? 0);
+    const healthy = rows.filter((r) => r.status === "ok" || r.status === "new").sort((a, b) => age(a) - age(b));
+    const parked = rows
+      .filter((r) => r.status !== "ok" && r.status !== "new")
+      .sort((a, b) => {
+        const coolA = now - Number(a.last_fail_at ?? 0) <= KeyPool.COOLDOWN_MS ? 1 : 0;
+        const coolB = now - Number(b.last_fail_at ?? 0) <= KeyPool.COOLDOWN_MS ? 1 : 0;
+        return coolA - coolB || age(b) - age(a);   // proven keys first among the parked
+      });
+    const usable = [...healthy, ...parked].slice(0, limit);
 
     const out: LiveKey[] = [];
     for (const r of usable) {
@@ -156,10 +167,39 @@ export class KeyPool {
     await this.invalidate();
   }
 
-  async markFail(id: number, err: string): Promise<"deleted" | "kept"> {
-    // hard failures mean the key itself is gone: quota, revoked, unpaid
-    if (/401|403|402|invalid api key|insufficient|quota|credit|expired|no auth/i.test(err)) {
-      await this.remove(id, err.slice(0, 80));
+  /**
+   * Verdict on a failed call: is the key itself dead, or is the provider busy?
+   *
+   * This used to be one regex over the whole error string (`/401|403|402|…
+   * quota|credit/`), which deleted the owner's healthiest key: a Groq 429 body
+   * contains the word "quota", and pressing «تست کل استخر» fed that straight in
+   * — 120 successful calls thrown away because the provider was busy for a
+   * second.
+   *
+   * A key is removed ONLY when the provider says in so many words that the key
+   * is invalid or the account has no credit, and never on a 429/5xx/timeout.
+   * Everything else parks the key on cooldown and the pool moves to the next
+   * one. A key that has already answered for us needs two refusals in a row
+   * before it is deleted — a single strange 401 is not proof of death.
+   */
+  async markFail(id: number, err: string, meta: { status?: number; kind?: string } = {}): Promise<"deleted" | "kept"> {
+    const text = String(err ?? "").toLowerCase();
+    const code = Number(meta.status ?? 0) || Number((text.match(/\b(4\d\d|5\d\d)\b/) ?? [])[1] ?? 0);
+    const kind = meta.kind ?? "";
+    const busy = code === 429 || code >= 500 || code === 408 || kind === "rate" ||
+      /rate.?limit|too many requests|resource[_ ]?exhausted|overloaded|timeout|timed out|fetch failed|empty response/.test(text);
+    const authRefusal = /invalid[_ -]?api[_ -]?key|incorrect api key|api key not valid|invalid_api_key|unauthorized|no auth|authentication failed/.test(text) ||
+      /\b(revoked|disabled|expired)\b/.test(text) && /key|token/.test(text);
+    const creditRefusal = /insufficient|out of credit|no credit|exceeded your current quota|payment required|billing hard limit|credit balance/.test(text);
+    const explicit = authRefusal || creditRefusal || kind === "auth" || kind === "quota";
+    const row = await this.env.DB.prepare(`SELECT ok_count, fail_count FROM ai_keys WHERE id=?`).bind(id)
+      .first<{ ok_count: number; fail_count: number }>().catch(() => null);
+    const proven = Number(row?.ok_count ?? 0) > 0;
+    const strikes = Number(row?.fail_count ?? 0);
+    const statusSaysDead = code === 400 || code === 401 || code === 402 || code === 403;
+    const fatal = explicit && !busy && statusSaysDead && (!proven || strikes >= 1);
+    if (fatal) {
+      await this.remove(id, `${code || "?"} ${err}`.slice(0, 80));
       return "deleted";
     }
     await this.env.DB.prepare(

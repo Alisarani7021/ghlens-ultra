@@ -199,19 +199,46 @@ export class RepoRag {
   async ask(full: string, question: string, readmeText: string, locale = "fa") {
     const key = `rag:${full}:${hash(readmeText.slice(0, 6000))}`;
     let chunks: { text: string; vec: number[] }[] | null = (await this.env.CACHE.get<{ text: string; vec: number[] }[]>(key, "json").catch(() => null)) ?? null;
-    if (!chunks) {
-      const parts = RepoRag.chunk(readmeText).slice(0, 24);
-      const vecs = await this.ai.embed(parts).catch(() => [] as number[][]);
-      if (!vecs.length || !vecs[0]?.length) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
-      chunks = parts.map((text, i) => ({ text, vec: vecs[i] ?? [] }));
-      await this.env.CACHE.put(key, JSON.stringify(chunks), { expirationTtl: 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    let top: { text: string; score: number }[] = [];
+
+    /* Two ways to find the right passages, and the second one does not need a
+       single neuron: embeddings (Workers AI) when they are available, and the
+       keyword ranker when they are not. Until now a missing embedding call sent
+       the whole answer straight to «extractive» mode — the user asked the bot a
+       question and got raw README dumps back, with a working donated key
+       sitting right there. Retrieval is not the answer; the model is. */
+    if (chunks?.length) {
+      const qv = await this.ai.embedOne(question).catch(() => [] as number[]);
+      if (qv.length) {
+        top = chunks
+          .map((c) => ({ text: c.text, score: RepoRag.cos(qv, c.vec) }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 6);
+      }
     }
-    const qv = await this.ai.embedOne(question).catch(() => [] as number[]);
-    if (!qv.length) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
-    const top = chunks
-      .map((c) => ({ ...c, score: RepoRag.cos(qv, c.vec) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6);
+    if (!top.length) {
+      const parts = RepoRag.chunk(readmeText);
+      if (!chunks) {
+        const vecs = await this.ai.embed(parts.slice(0, 24)).catch(() => [] as number[][]);
+        if (vecs.length && vecs[0]?.length) {
+          chunks = parts.slice(0, 24).map((text, i) => ({ text, vec: vecs[i] ?? [] }));
+          await this.env.CACHE.put(key, JSON.stringify(chunks), { expirationTtl: 604800 }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+          const qv = await this.ai.embedOne(question).catch(() => [] as number[]);
+          if (qv.length) {
+            top = chunks.map((c) => ({ text: c.text, score: RepoRag.cos(qv, c.vec) })).sort((a, b) => b.score - a.score).slice(0, 6);
+          }
+        }
+      }
+      if (!top.length) {
+        // no embeddings: rank the passages by keywords — Persian questions are
+        // mapped to English terms there, so this still finds "how to install"
+        const hits = RepoRag.lexicalRank(parts.slice(0, 60), question, 6);
+        top = (hits.length ? hits : RepoRag.keySections(parts))
+          .map((h: any) => ({ text: h.text, score: Number(h.score ?? 0) }));
+        console.error("rag-lexical-fallback", full);
+      }
+    }
+    if (!top.length) return { ...(await this.askExtractive(full, question, readmeText)), mode: "extractive" as const };
 
     const context = top.map((c, i) => `[[${i + 1}]] ${c.text}`).join("\n\n---\n\n");
     const answer = await this.ai.chat(

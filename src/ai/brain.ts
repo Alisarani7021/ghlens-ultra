@@ -227,7 +227,8 @@ export class AiBrain {
           signal: AbortSignal.timeout(90000),
         });
         if (!res.ok) {
-          await pool.markFail(k.id, `${res.status} ${(await res.text()).slice(0, 160)}`);
+          const body = (await res.text()).slice(0, 200);
+          await pool.markFail(k.id, body, { status: res.status });
           return "";
         }
         const j: any = await res.json().catch(() => ({}));
@@ -242,11 +243,20 @@ export class AiBrain {
 
     const primary = prompts.map((_, i) => keys[i % keys.length]!);
     const first = await Promise.all(prompts.map((p, i) => runOne(p, primary[i]!)));
-    // retry whatever failed, on a key that has not been used yet if possible
-    const spare = keys.find((k) => !usedIds.has(k.id)) ?? keys[0]!;
     const out = [...first];
+    /* A failed part is retried on every other key in the pool, in order — the
+       OpenRouter behaviour the owner asked for: if one key (or its model) cannot
+       do it, the next one tries, and only a pool-wide failure is a failure.
+       Long translations are exactly where a single weak key used to leave a
+       gap in the middle of the README. */
     for (let i = 0; i < out.length; i++) {
-      if (!out[i]) out[i] = await runOne(prompts[i]!, spare);
+      if (out[i]) continue;
+      for (const k of keys) {
+        const t = await runOne(prompts[i]!, k);
+        if (t) { out[i] = t; break; }
+      }
+      // last door: the normal chat chain (Workers AI, kept keys, cooling keys)
+      if (!out[i]) out[i] = await this.chat(prompts[i]!, opts).catch(() => "");
     }
     return out;
   }
@@ -364,6 +374,7 @@ export class AiBrain {
     await this.env.CACHE.put("aipool:has", "1", { expirationTtl: 300 }).catch(() => null);
 
     const pool = new KeyPool(this.env);
+    let lastPoolError = "";
     for (const k of keys) {
       try {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -392,7 +403,8 @@ export class AiBrain {
               }
             }
           }
-          const verdict = await pool.markFail(k.id, `${res.status} ${body}`);
+          const verdict = await pool.markFail(k.id, body, { status: res.status });
+          lastPoolError = `${k.provider} ${res.status}: ${body.replace(/\s+/g, " ").slice(0, 120)}`;
           console.error("pool-key-failed", k.id, res.status, verdict);
           // tell the donor their key is gone (best effort, never blocks)
           if (verdict === "deleted") await this.notifyDonor(k.id, res.status, body).catch(() => null);
@@ -426,11 +438,17 @@ export class AiBrain {
             if (out3) { await pool.markOk(k.id, better); console.error("ai-key-model-switched", k.id, better); return out3; }
           }
         }
-        await pool.markFail(k.id, "empty response");
+        await pool.markFail(k.id, "empty response", { kind: "model" });
+        lastPoolError = `${k.provider}: empty response from ${k.model || "auto"}`;
       } catch (e: any) {
-        await pool.markFail(k.id, String(e?.message ?? e).slice(0, 120)).catch(() => null);
+        const msg = String(e?.message ?? e).slice(0, 120);
+        lastPoolError = `${k.provider}: ${msg}`;
+        await pool.markFail(k.id, msg).catch(() => null);
       }
     }
+    /* every key was tried and none answered — remember *why* so the notice can
+       be honest instead of a vague «محدود شده‌اند» */
+    if (lastPoolError) await this.env.CACHE.put("ai:last-pool-error", lastPoolError, { expirationTtl: 1800 }).catch(() => null);
     return "";
   }
 
@@ -762,12 +780,17 @@ export async function aiDownNotice(env: Env, loc: string): Promise<string> {
       : "⚠️ The account's free Workers AI neurons are spent for today. It resets automatically, or add an OpenAI-compatible key (Groq / OpenRouter / Gemini) as OPENAI_COMPAT_KEY. Everything else keeps working.";
   }
   if (reason === "pool-cooling") {
+    /* Say what actually happened. «همهٔ کلیدها را یکی‌یکی امتحان کردم و این
+       خطا آمد» is actionable; «محدود شده‌اند» made a 503 from one custom
+       server look like a mysterious provider-wide rate limit. */
+    const detail = String((await env.CACHE.get("ai:last-pool-error").catch(() => "")) ?? "").slice(0, 200);
     return fa
-      ? "⏳ کلیدهای اهدایی همین حالا از سوی ارائه‌دهنده محدود شده‌اند (نرخ/صف).\n" +
+      ? "⏳ <b>همهٔ کلیدهای استخر امتحان شدند و هیچ‌کدام جواب نداد</b>\n" +
+        (detail ? `آخرین خطا: <code>${detail.replace(/[<>]/g, "")}</code>\n` : "") +
         "• چند دقیقه دیگر خودکار دوباره امتحان می‌شوند\n" +
         "• اگر کلید تازه‌ای اهدا شود، بلافاصله استفاده می‌شود\n" +
         "بقیهٔ ربات (جست‌وجو، مخزن‌ها، ابزارها) کامل کار می‌کند."
-      : "⏳ The donated keys are currently rate-limited by their providers; they retry automatically in a few minutes.";
+      : "⏳ Every donated key was tried and none answered" + (detail ? ` — last error: ${detail}` : "") + ".";
   }
   if (reason === "missing") {
     return fa

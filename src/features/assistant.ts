@@ -1,5 +1,6 @@
 import type { H } from "../core/handler";
 import { setMode } from "../core/mode";
+import { parseRepoRef } from "../core/repo-ref";
 import { GithubRest } from "../github/rest";
 import { RepoRag } from "../ai/vector";
 import { aiDownNotice } from "../ai/brain";
@@ -22,15 +23,17 @@ import { kb } from "../tg/keyboards";
 export class Assistant {
   async home(h: H) {
     const fa = h.loc === "fa";
-    const chat = await h.store.history(`u${h.u.id}`, 4);
     await h.reply(
       `🤖 <b>${fa ? "دستیار هوش مصنوعی لنز" : "Lens AI assistant"}</b>\n\n` + (fa
         ? `می‌توانم:\n• پروژه مناسب برایت پیدا کنم («یک کتابخانه سبک برای صف در Go»)\n• هر مخزنی را تحلیل کنم و رقیب‌هایش را بگویم\n• با محتوای یک مخزن چت کنم و منبع بدم\n• README را فارسی کنم\n• ورک‌فلوی GitHub Actions بسازم\n• کد یا PR را بازبینی کنم\n\nفقط بنویس — یا با 🎤 ویس بفرست.`
         : `Ask anything about open source, or send a voice note.`),
       kb(
+        /* «چت با مخزن» deliberately lives only with a repository (repo card and
+           deep scout) — in the AI menu it was a dead end that asked for a repo
+           name. «🕘 ادامه گفت‌وگو» is gone too: the chat section keeps its own
+           memory, so there is nothing to "resume". */
         [
           { text: "💬 " + (fa ? "گفت‌وگوی جدید" : "New chat"), cb: "a:new" },
-          { text: "🧠 " + (fa ? "چت با مخزن" : "Chat with repo"), cb: "a:repochat" },
         ],
         [
           { text: "📝 " + (fa ? "ترجمه README" : "Translate README"), cb: "ai:tr:ask" },
@@ -44,10 +47,7 @@ export class Assistant {
           { text: "🎙 " + (fa ? "پاسخ صوتی" : "Voice answer"), cb: "a:voice" },
           { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" },
         ],
-        chat.results?.length
-          ? [[{ text: "🕘 " + (fa ? "ادامه گفت‌وگو" : "Continue chat"), cb: "a:cont" }]]
-          : [],
-        
+
       ),
       !!h.cbId,
     );
@@ -116,9 +116,22 @@ export class Assistant {
   }
 
   /** Chat with a repository: RAG over README + docs, with citations. */
-  async repoChat(h: H, full: string, question?: string) {
+  async repoChat(h: H, input: string, question?: string) {
     const fa = h.loc === "fa";
+    const full = parseRepoRef(input) ?? input.trim();
     if (!question) {
+      /* Reached without a repository (an old button, or /repochat with no
+         argument): ask for the repo and keep the section armed, instead of
+         showing a chat that answers from an empty target. */
+      if (!parseRepoRef(input)) {
+        await setMode(h.session, "repochat", { full: "" });
+        return h.reply(
+          fa ? `🧠 <b>چت با مخزن</b>\n\nنام مخزن را بفرست — <code>owner/repo</code> یا لینک گیت‌هاب.\n\n<i>مثال: <code>python-telegram-bot/python-telegram-bot</code></i>`
+             : `🧠 <b>Chat with a repo</b>\n\nSend owner/repo or a GitHub link.`,
+          kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]),
+          !!h.cbId,
+        );
+      }
       await setMode(h.session, "repochat", { full });   // stays until they leave the chat
       return h.reply(
         `🧠 <b>${fa ? "چت با مخزن" : "Chat with repo"}</b>\n\n` + (fa
@@ -261,12 +274,23 @@ export class Assistant {
   }
 
   /** README → Persian (or any locale), with smart truncation + caching. */
-  async translateReadme(h: H, full: string) {
+  async translateReadme(h: H, input: string) {
     const fa = h.loc === "fa";
+    /* Accept whatever the user pastes. A full github.com URL used to be handed
+       to the API as if it were `owner/repo`, so the readme lookup 404'd and the
+       user saw «❌ README پیدا نشد» for a repository that obviously exists. */
+    const full = parseRepoRef(input) ?? "";
+    if (!full) return this.translatePick(h, input);
     await h.loading(fa ? "🌍 در حال ترجمه README…" : "🌍 translating README…");
     const gh = new GithubRest(h.env);
     const raw = await gh.readme(full, 3600).catch(() => null);
-    if (!raw?.content) return h.reply(fa ? "❌ README پیدا نشد." : "❌ README missing.", kb([{ text: "◀️", cb: `s:card:${full}` }]), true);
+    if (!raw?.content) return h.reply(
+      (fa ? `❌ برای <code>${tgEscape(full)}</code> فایل README پیدا نشد.\n\n` +
+            `ممکن است مخزن خالی باشد یا نامش را اشتباه نوشته باشی.`
+          : `❌ No README in ${tgEscape(full)}.`),
+      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }]]),
+      true,
+    );
     const md = decodeB64(raw.content);
 
     const cacheKey = `trl:${full}:${h.loc}`;
@@ -312,6 +336,39 @@ export class Assistant {
       [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }],
     ), !!h.cbId);
     await h.session.set(`tr:${full}`, translated);
+  }
+
+  /**
+   * «این را ترجمه کن» for something that is not a repo reference.
+   *
+   * Typing a project *name* (or a half-remembered URL) used to dead-end in
+   * «README پیدا نشد». Instead: search GitHub with the same words and offer the
+   * top hits as one-tap translations.
+   */
+  async translatePick(h: H, query: string) {
+    const fa = h.loc === "fa";
+    const q = String(query ?? "").trim().slice(0, 120);
+    if (!q) return h.reply(fa ? "📝 نام مخزن را بفرست." : "Send a repo.", kb([[{ text: "◀️", cb: "a:home" }]]), true);
+    await h.loading(fa ? "🔎 دنبال مخزنش می‌گردم…" : "🔎 looking for that repo…");
+    const res = await h.gh().searchRepos(q.replace(/[^\w./-]+/g, " ").trim() || q, "stars", "desc", 5).catch(() => null);
+    const items = (res?.items ?? []).slice(0, 5);
+    if (!items.length) {
+      return h.reply(
+        (fa ? `❌ مخزنی برای «<i>${tgEscape(q)}</i>» پیدا نشد.\n\n`
+              + `لینک گیت‌هاب یا <code>owner/repo</code> را بفرست.`
+            : `❌ Nothing found for that. Send a link or owner/repo.`),
+        kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }]]), true,
+      );
+    }
+    await h.reply(
+      (fa ? `📝 <b>کدام را ترجمه کنم؟</b>\n\n<i>ورودی تو مخزن نبود، پس با همین کلمات جست‌وجو کردم:</i>`
+          : `📝 Which one should I translate?`),
+      kb(
+        ...items.map((r: any) => [{ text: `📄 ${r.full_name} ⭐${fmt(r.stargazers_count ?? 0)}`, cb: `ai:tr:${r.full_name}` }]),
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }],
+      ),
+      !!h.cbId,
+    );
   }
 
   /** Workflow generator */

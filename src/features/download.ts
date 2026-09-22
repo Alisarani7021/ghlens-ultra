@@ -4,6 +4,7 @@ import { BlobStore, streamParts } from "../core/blobstore";
 import { fmt } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
 import { kb } from "../tg/keyboards";
+import { parseRepoRef } from "../core/repo-ref";
 
 /**
  * SOURCE INBOX — download any repository's source tree, straight into Telegram.
@@ -360,21 +361,71 @@ export class Downloader {
     );
   }
 
+  /**
+   * «دانلودهای اخیر» — one row per repository (not twelve copies of the same
+   * zip), with a delete key on every row and one to empty the list.
+   */
   async recent(h: H) {
     const fa = h.loc === "fa";
     const { results } = await h.env.DB.prepare(
-      `SELECT id, full_name, ref, kind, bytes, status, created_at FROM downloads WHERE user_id=? ORDER BY created_at DESC LIMIT 12`,
+      `SELECT id, full_name, ref, kind, bytes, status, created_at FROM downloads WHERE user_id=? ORDER BY created_at DESC LIMIT 60`,
     ).bind(h.u.id).all<any>().catch(() => ({ results: [] as any[] }));
+
+    /* same repo downloaded ten times is one entry that says ×10 */
+    const uniq: any[] = [];
+    const byName = new Map<string, any>();
+    for (const r of results ?? []) {
+      const hit = byName.get(r.full_name);
+      if (hit) { hit.n += 1; hit.bytes = Math.max(hit.bytes ?? 0, r.bytes ?? 0); continue; }
+      const row = { ...r, n: 1 };
+      byName.set(r.full_name, row);
+      uniq.push(row);
+    }
+
+    const shown = uniq.slice(0, 8);
     await h.reply(
-      `🕘 <b>${fa ? "دانلودهای اخیر" : "Recent downloads"}</b>\n\n` +
-        ((results ?? []).map((r, i2) =>
-          `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> <code>${tgEscape(r.ref ?? "")}</code> — ${fmt((r.bytes ?? 0) / 1048576)} MB ${r.status === "ready" ? "✅" : "⏳"}`).join("\n") ||
-          (fa ? "<i>خالی است.</i>" : "<i>empty</i>")),
+      `🕘 <b>${fa ? "دانلودهای اخیر" : "Recent downloads"}</b>` +
+        (uniq.length ? ` <i>(${uniq.length} ${fa ? "مخزن" : "repos"})</i>` : "") +
+        `\n\n` +
+        (shown.map((r, i2) =>
+          `${i2 + 1}. <b>${tgEscape(r.full_name)}</b> <code>${tgEscape(r.ref ?? "")}</code>` +
+          ` — ${mb(r.bytes)} MB${r.n > 1 ? ` ×${r.n}` : ""} ${r.status === "ready" ? "✅" : "⏳"}`).join("\n") ||
+          (fa ? "<i>خالی است.</i>" : "<i>empty</i>")) +
+        (uniq.length > shown.length ? `\n<i>… ${uniq.length - shown.length} ${fa ? "تای دیگر" : "more"}</i>` : ""),
       kb(
-        ...(results ?? []).slice(0, 6).map((r) => [{ text: `📦 ${r.full_name}`, cb: `d:repo:${r.full_name}` }]),
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "d:home" }],
+        ...shown.map((r) => [
+          { text: `📦 ${r.full_name}`, cb: `d:repo:${r.full_name}` },
+          { text: "🗑", cb: `d:forget:${r.full_name}` },   // contextual, like «◀️»
+        ]),
+        uniq.length ? [[{ text: "🗑 " + (fa ? "پاک کردن لیست" : "Clear the list"), cb: "d:clear" }]] : [],
+        [[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "d:home" }]],
       ),
       !!h.cbId,
     );
   }
+
+  /** Drop one repository (all its rows) from this user's history. */
+  async forget(h: H, full: string) {
+    const fa = h.loc === "fa";
+    const ref = parseRepoRef(full) ?? full.trim();
+    const res: any = await h.env.DB.prepare(`DELETE FROM downloads WHERE user_id=? AND full_name=?`)
+      .bind(h.u.id, ref).run().catch(() => null);
+    const n = Number(res?.meta?.changes ?? 0);
+    await h.toast(fa ? `🗑 حذف شد${n > 1 ? ` (${n} رکورد)` : ""}` : `🗑 removed`);
+    return this.recent(h);
+  }
+
+  /** Empty the whole history for this user. */
+  async clearHistory(h: H) {
+    const fa = h.loc === "fa";
+    const res: any = await h.env.DB.prepare(`DELETE FROM downloads WHERE user_id=?`).bind(h.u.id).run().catch(() => null);
+    await h.toast(fa ? `🗑 لیست پاک شد${res?.meta?.changes ? ` (${res.meta.changes})` : ""}` : "🗑 history cleared");
+    return this.recent(h);
+  }
+}
+
+/** «1.8233184814453125 MB» was the old formatting; nobody wants 16 decimals. */
+function mb(bytes: number | null | undefined) {
+  const v = Number(bytes ?? 0) / 1048576;
+  return v >= 100 ? v.toFixed(0) : v.toFixed(2);
 }

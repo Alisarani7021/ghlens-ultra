@@ -218,7 +218,7 @@ export const keys = {
         await pool.markOk(k.id, k.model);
         results.push(`🟢 <b>${tgEscape(k.provider)}</b> · <code>${tgEscape(k.model || "auto")}</code>${r.reply ? ` — <i>${tgEscape(r.reply)}</i>` : ""}`);
       } else {
-        const verdict = await pool.markFail(k.id, r.error ?? "unknown");
+        const verdict = await pool.markFail(k.id, r.error ?? "unknown", { kind: r.errorKind });
         results.push(`🔴 <b>${tgEscape(k.provider)}</b> · <code>${tgEscape(k.model || "auto")}</code> — ${tgEscape(String(r.error).slice(0, 120))}\n   ${verdict === "deleted" ? (fa ? "<i>کلید سوخته بود و از استخر حذف شد</i>" : "<i>removed from the pool</i>") : (fa ? "<i>موقتاً کنار گذاشته شد</i>" : "<i>marked unhealthy</i>")}`);
       }
     }
