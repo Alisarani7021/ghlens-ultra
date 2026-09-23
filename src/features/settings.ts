@@ -2,7 +2,7 @@ import type { H } from "../core/handler";
 import type { Env } from "../env";
 import { fmt } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
-import { kb, L, type Loc } from "../tg/keyboards";
+import { kb, L, type Btn, type Loc } from "../tg/keyboards";
 import { aside, details, footer, h1, h2, hr, p, table, ul } from "../tg/rich";
 
 /** Language, help, about and inline-mode. */
@@ -68,15 +68,14 @@ export class Settings {
    * are a compact list, not a wall of emoji, and the onboarding card shows the
    * real state (linked or not).
    */
-  async home(h: H, loc?: Loc, _opts?: { force?: boolean }) {
+  async home(h: H, loc?: Loc, opts?: { force?: boolean }) {
     const lang = loc ?? h.loc;
     const fa = lang === "fa";
-    // /start always lands as a new message. Onboarding depends on it: asking to
-    // link GitHub inside the same message the previous /start was printed in
-    // leaves the user staring at text they have already read. Everything else
-    // (a button, a deep link) edits in place, which is what made the menu feel
-    // like one screen.
-    const fresh = h.text.trim().toLowerCase().startsWith("/start");
+    // `force` means "this is a command, not a page turn": /start lands as a new
+    // message (with the artwork) so the onboarding line is readable even if the
+    // user has started the bot before. A button press edits in place instead,
+    // which is what keeps the menu feeling like one screen.
+    const fresh = opts?.force === true;
     const u = await h.store.user(h.u.id);
     const linked = !!(u as any)?.github_login;
     const aiState = await aiEngineState(h.env);
@@ -242,7 +241,7 @@ export class Settings {
           { text: "🔭 " + (fa ? "کارت اصلی" : "Main card"), cb: "m:home" },
           { text: L(lang, "help"), cb: "h:main" },
         ],
-        menu2Kb(lang, u?.plan === "admin").inline_keyboard.slice(0, -1) as any,
+        menu2Rows(lang, u?.plan === "admin"),
       ),
       !!h.cbId,
     );
@@ -511,10 +510,16 @@ function mainMenuKb(loc: Loc, isAdmin: boolean) {
   );
 }
 
-/** Page 2 of the main menu — a section list, not a second wall. */
-export function menu2Kb(loc: Loc, isAdmin: boolean) {
+/**
+ * Page 2 of the main menu — a section list, not a second wall.
+ *
+ * Returned in the keyboard's *internal* shape (not a built InlineKeyboardMarkup):
+ * `kb()` sanitises its input, and handing it already-wrapped Telegram buttons
+ * silently drops every row — the one bug this signature exists to prevent.
+ */
+export function menu2Rows(loc: Loc, isAdmin: boolean): Btn[][] {
   const fa = loc === "fa";
-  return kb(
+  return [
     [
       { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
     ],
@@ -547,8 +552,8 @@ export function menu2Kb(loc: Loc, isAdmin: boolean) {
       { text: "🌐", cb: "lang:menu" },
       { text: "📚", cb: "h:main" },
     ],
-    [{ text: "◀️ " + (fa ? "برگشت" : "Back"), cb: "m:home" }],
-  );
+    [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }],
+  ];
 }
 
 

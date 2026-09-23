@@ -612,5 +612,34 @@ const enc = (s) => new TextEncoder().encode(s);
   }
 }
 
+// ── menu shape ──────────────────────────────────────────────────────────
+// The main menu is two pages, and both keyboards are built by composing rows
+// into kb(). kb() sanitises its input, so a caller that hands it an already
+// built InlineKeyboardMarkup gets every row silently dropped — which is exactly
+// how page 2 first shipped with three buttons. These assertions fail loudly.
+{
+  const kbOut = join(scratch, "kb.mjs");
+  const setOut = join(scratch, "settings.mjs");
+  execSync(`npx esbuild src/tg/keyboards.ts --bundle --format=esm --platform=neutral --outfile=${kbOut} --log-level=error`, { stdio: "inherit" });
+  execSync(`npx esbuild src/features/settings.ts --bundle --format=esm --platform=neutral --outfile=${setOut} --log-level=error`, { stdio: "inherit" });
+  const KB = await import(kbOut);
+  const ST = await import(setOut);
+
+  for (const loc of ["fa", "en"]) {
+    const rows = ST.menu2Rows(loc, false);
+    ok(`menu2 ${loc}: rows, not a built keyboard`, Array.isArray(rows) && Array.isArray(rows[0]) && !rows[0].cb);
+    ok(`menu2 ${loc}: every row is non-empty`, rows.every((r) => Array.isArray(r) && r.length > 0));
+    ok(`menu2 ${loc}: every row carries a target`, rows.every((r) => r.every((b) => b && (b.cb || b.url || b.copy || b.web))));
+
+    // composing it the way the screen does must keep every single button
+    const composed = KB.kb([[{ text: "🔭 " + (loc === "fa" ? "کارت اصلی" : "Main card"), cb: "m:home" }]], ST.menu2Rows(loc, false));
+    const flat = composed.inline_keyboard.flat();
+    const want = rows.flat().length + 1;
+    eq(`menu2 ${loc}: composing keeps all ${want} buttons`, flat.length, want);
+    ok(`menu2 ${loc}: has a way home`, flat.some((b) => b.callback_data === "m:home"));
+    ok(`menu2 ${loc}: no empty rows`, composed.inline_keyboard.every((r) => r.length > 0));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

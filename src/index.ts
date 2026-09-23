@@ -1047,7 +1047,8 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
           await h.tg.sendMessage(referrer.id, `🎁 ${fa ? "یک دوست با لینک تو آمد! +۵۰ XP" : "A friend joined via your link! +50 XP"}`, { parse_mode: "HTML" }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
         }
       }
-      return settings.home(h);
+      // a command, not a page turn: send a fresh card (with the artwork)
+      return settings.home(h, undefined, { force: true });
     }
     case "/reset": case "/cancel": case "/esc": {
       // any user can escape a half-finished wizard or a stale step: nothing the
@@ -2224,7 +2225,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
 
 <div class="foot">
   <span>✅ سرویس‌ورکر فعال — <a href="${health}">${health}</a></span>
-  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۳۶ تست</span>
+  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۴۸ تست</span>
   <span>💻 <a href="https://github.com/${repo}">github.com/${repo}</a></span>
   <span>© ${year}</span>
 </div>
@@ -2233,7 +2234,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 236 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 248 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;
