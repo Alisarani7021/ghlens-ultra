@@ -82,6 +82,14 @@ export interface EngineCtx {
   trace: string;
   event?: HubEvent;
   autonomy?: "manual" | "auto-with-review" | "auto";
+  /**
+   * Preview mode. A dry run must be indistinguishable from a real one in what it
+   * *shows* and completely inert in what it *does*: it does not ask for approval
+   * and it does not post, no matter how the owner's autonomy is set. Without
+   * this flag the two were the same code path, which is how "آزمایشی" produced
+   * real prompts.
+   */
+  dry?: boolean;
   /** resume support: skip straight to this node (approval already granted) */
   resumeFrom?: string;
 }
@@ -428,6 +436,8 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
     }
 
     case "approval": {
+      // A preview never knocks on anyone's door; it reports what it would ask.
+      if (ctx.dry) return { patch: {}, summary: "آزمایشی — بدون پرسش تأیید", branch: node.next ?? [] };
       // Draft first, ask second: the owner must be able to read the thing they
       // are approving, so the content row always exists before the gate.
       const preview = String(bag[String(cfg.from ?? "post")] ?? "").slice(0, 3500);
@@ -460,6 +470,12 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
       const kind = String(cfg.kind ?? "telegram");
       const c = connector(kind);
       if (!c?.act) throw new Error(`connector ${kind} has no actions`);
+      /* The one place in the platform that publishes. A dry run stops here with
+         a sentence instead of a post, so "test" can never reach the channel. */
+      if (ctx.dry) {
+        return { patch: { would_publish: String(bag[String(cfg.from ?? "post")] ?? "").slice(0, 200) },
+          summary: "آزمایشی — منتشر نشد" };
+      }
       const conf = await loadConnectorConfig(ctx.env, ctx.owner_id, kind);
       const out = await c.act({ env: ctx.env, owner_id: ctx.owner_id, config: conf }, String(cfg.action ?? "publish"), {
         ...(cfg.args ?? {}),

@@ -3,6 +3,7 @@ import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
 import { setMode, clearMode } from "../core/mode";
 import { publish } from "../hub/bus";
+import { readAutonomy, setAutonomy } from "../hub/policy";
 import {
   describeDag, planMission, savePlan, type MissionPlan,
 } from "../hub/mission";
@@ -93,6 +94,7 @@ export class HubOS {
     ]);
     const live = wfs.filter((w) => w.enabled).length;
     const wired = conns.filter((c) => c.enabled).length;
+    const auto = (await readAutonomy(h.env, owner)) === "auto";
 
     const text = fa
       ? `🌌 <b>هاب جهانی — هستهٔ اتوماسیون</b>\n\n` +
@@ -101,11 +103,13 @@ export class HubOS {
         `<b>وضعیت زنده</b>\n` +
         `• 🔌 کانکتور فعال: <b>${wired}</b> از ${conns.length}\n` +
         `• ⚙️ ورک‌فلو فعال: <b>${live}</b> از ${wfs.length}\n` +
-        `• 🕹 در انتظار تأیید تو: <b>${review.length}</b>`
+        `• 🕹 در انتظار تأیید تو: <b>${review.length}</b>\n` +
+        `• ${auto ? "🔓" : "🔒"} انتشار: <b>${auto ? "خودکار، بدون تأیید" : "با تأیید تو"}</b>`
       : `🌌 <b>Universal Hub — automation core</b>\n\n` +
         `<blockquote>Everything that happens outside becomes an <b>event</b>; every workflow reacts; ` +
         `everything produced keeps its <b>lineage</b>.</blockquote>\n\n` +
-        `• 🔌 connectors: <b>${wired}</b>/${conns.length} · ⚙️ workflows: <b>${live}</b>/${wfs.length} · 🕹 awaiting you: <b>${review.length}</b>`;
+        `• 🔌 connectors: <b>${wired}</b>/${conns.length} · ⚙️ workflows: <b>${live}</b>/${wfs.length} · 🕹 awaiting you: <b>${review.length}</b>\n` +
+        `• ${auto ? "🔓" : "🔒"} publishing: <b>${auto ? "automatic" : "approval required"}</b>`;
 
     return h.reply(
       text,
@@ -137,6 +141,14 @@ export class HubOS {
         [
           { text: fa ? "🖼 کارخانهٔ رسانه" : "🖼 Media factory", cb: "hos:media" },
           { text: fa ? "📖 راهنما: از کجا چه کاری" : "📖 How to use", cb: "hos:guide" },
+        ],
+        [
+          {
+            text: auto
+              ? (fa ? "🔓 انتشار خودکار: روشن" : "🔓 Auto-publish: on")
+              : (fa ? "🔒 انتشار: با تأیید تو" : "🔒 Publishing: approval"),
+            cb: "hos:auto",
+          },
         ],
         [
           { text: fa ? "🚀 ساخت نمونهٔ شخصی (یک‌کلیکی)" : "🚀 Self-host a copy", cb: "hos:deploy" },
@@ -357,6 +369,53 @@ export class HubOS {
   }
 
   // ── mission ─────────────────────────────────────────────────────────────
+  /**
+   * Publishing autonomy — the switch between «ask me» and «just do it».
+   *
+   * The policy engine always had the rule; what it lacked was a setting, so the
+   * gate was permanent. This screen is that setting, stated in the owner's own
+   * terms, with the consequences spelled out rather than implied.
+   */
+  async autonomy(h: H) {
+    const fa = h.loc === "fa";
+    const mode = await readAutonomy(h.env, h.u.id);
+    const on = mode === "auto";
+    const conns = await this.connectorRows(h);
+    const chan = conns.find((c) => c.kind === "telegram" && c.enabled);
+    const text = fa
+      ? `🔓 <b>انتشار خودکار</b>\n\n` +
+        `<blockquote>وقتی روشن باشد، ورک‌فلوها خودشان منتشر می‌کنند: رویداد می‌رسد، متن ساخته می‌شود، ` +
+        `سیاست‌ها چک می‌شوند و پست بی‌پرسش می‌رود. وقتی خاموش باشد، هر پست اول به تو نشان داده می‌شود.</blockquote>\n\n` +
+        `وضعیت الان: <b>${on ? "🔓 روشن — بدون تأیید منتشر می‌شود" : "🔒 خاموش — با تأیید تو"}</b>\n` +
+        `مقصد: ${chan ? `«${tgEscape(chan.label || "@" + "")}»` : "❗️ کانالی وصل نیست"}\n\n` +
+        `<b>هر دو حالت امن‌اند.</b> حتی در حالت خودکار، دروازهٔ قواعد قبل از انتشار کار می‌کند: ` +
+        `محتوای تکراری، بدون منبع، یا با اطمینان پایین <b>مسدود یا برگشت داده می‌شود</b> و به تو گزارش می‌رسد. ` +
+        `خودکار یعنی «بدون پرسیدن»، نه «بدون بررسی».`
+      : `🔓 <b>Auto-publish</b>\n\nCurrently: <b>${on ? "ON — publishes without asking" : "OFF — asks you first"}</b>`;
+    return h.reply(
+      text,
+      kb(
+        on
+          ? [{ text: fa ? "🔒 برگرد به حالت تأییدی" : "🔒 Back to approval", cb: "hos:auto:off" }]
+          : [{ text: fa ? "🔓 روشن کن: بدون تأیید منتشر کن" : "🔓 Turn on auto-publish", cb: "hos:auto:on" }],
+        [{ text: fa ? "🎯 رویدادها" : "Events", cb: "hos:events" }, { text: fa ? "🕹 صف تأیید" : "Queue", cb: "hos:queue" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  async setAutonomy(h: H, mode: "manual" | "auto") {
+    const fa = h.loc === "fa";
+    await setAutonomy(h.env, h.u.id, mode);
+    await h.toast(
+      mode === "auto"
+        ? (fa ? "🔓 از این لحظه بدون تأیید منتشر می‌شود" : "🔓 auto-publish on")
+        : (fa ? "🔒 دوباره با تأیید تو" : "🔒 approval required again"),
+      true,
+    );
+    return this.autonomy(h);
+  }
+
   async missionPrompt(h: H) {
     const fa = h.loc === "fa";
     await setMode(h.session, "hos:mission");
@@ -468,9 +527,14 @@ export class HubOS {
     if (!wf) return h.toast("?");
     await h.loading(fa ? "⚙️ در حال اجرا…" : "Running…");
 
+    /* A run without a live event is a preview: it never publishes and never
+       asks for approval. A run *with* an event (a replay, or a real delivery)
+       behaves like production and honours the owner's autonomy setting. */
+    const dry = !eventOverride;
     const sample = eventOverride ?? sampleEventFor(wf.on_event, h.u.id);
+    const autonomy = dry ? "manual" : await readAutonomy(h.env, h.u.id);
     const res = await runWorkflow(
-      { env: h.env, ai: h.ai, tg: h.tg, owner_id: h.u.id, trace: "tr_manual" + id.slice(-6), event: sample, autonomy: "manual" },
+      { env: h.env, ai: h.ai, tg: h.tg, owner_id: h.u.id, trace: "tr_manual" + id.slice(-6), event: sample, autonomy, dry },
       wf, {},
     );
 
@@ -480,7 +544,8 @@ export class HubOS {
 
     if (h.cbId) {
       return h.reply(
-        `${res.state === "ok" ? "✅" : res.state === "waiting" ? "🕹" : "❌"} <b>${tgEscape(wf.name)}</b> — ${res.state}${gate}\n\n${steps}${published}`,
+        `${res.state === "ok" ? "✅" : res.state === "waiting" ? "🕹" : "❌"} <b>${tgEscape(wf.name)}</b> — ${res.state}${gate}\n\n${steps}${published}` +
+          (dry ? `\n\n🧪 <i>${fa ? "اجرای آزمایشی روی یک رویداد نمونه بود؛ هیچ‌چیز منتشر نشد." : "dry run on a sample event — nothing was published"}</i>` : ""),
         kb(
           [{ text: fa ? "🔁 اجرای دوباره" : "🔁 Re-run", cb: `hos:wfrun:${id}` }],
           [{ text: fa ? "📊 اجراها" : "📊 Runs", cb: "hos:runs" }, { text: fa ? "🧩 گره‌ها" : "🧩 Nodes", cb: `hos:wfv:${id}` }],
@@ -1318,8 +1383,11 @@ export async function pollDueConnectors(env: any, ai: any, tg: any, limit = 8) {
     try { config = JSON.parse(row.config ?? "{}"); } catch { /* {} */ }
     try {
       const res = await c.poll({ env, owner_id: row.owner_id, config, cursor: row.cursor ?? null });
+      // the same setting the webhook path reads: an event that arrives on its
+      // own is published only if the owner asked for that
+      const autonomy = await readAutonomy(env, row.owner_id);
       for (const ev of res.events.slice(0, 10)) {
-        const r = await publish({ env, ai, tg }, { ...ev, owner_id: row.owner_id });
+        const r = await publish({ env, ai, tg, autonomy }, { ...ev, owner_id: row.owner_id });
         if (!r.duplicate) { events++; runs += r.runs.length; }
       }
       await env.DB.prepare(`UPDATE hub_connectors SET status='ok', detail=?, last_poll=?, cursor=? WHERE id=?`)

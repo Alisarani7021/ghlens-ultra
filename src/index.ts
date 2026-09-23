@@ -1682,6 +1682,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "integ") return hubOS.integrations(h);
         if (action === "deploy") return hubOS.deployPrompt(h);
         if (action === "guide") return hubOS.guide(h);
+        if (action === "auto") return hubOS.autonomy(h);
+        if (action === "setauto") return hubOS.setAutonomy(h, arg === "auto" ? "auto" : "manual");
         break;
       // ── admin ──
       case "adm":

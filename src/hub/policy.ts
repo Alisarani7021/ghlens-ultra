@@ -17,6 +17,8 @@
  *  missing a source reports both, so the owner fixes it in one pass.
  */
 
+import type { Env } from "../env";
+
 export type Requirement = "approval" | "review" | null;
 
 export interface PolicyVerdict {
@@ -181,4 +183,32 @@ export function evaluate(s: PolicySubject, c: PolicyContext): PolicyDecision {
         ? active.filter((v) => v.require === "review").map((v) => v.why).join(" · ")
         : "همهٔ قواعد عبور کردند";
   return { allow, require, verdicts, active, summary };
+}
+
+/**
+ * The owner's publishing autonomy, stored per user.
+ *
+ * `externalPublish` has always supported "publish without asking", but nothing
+ * ever set it: every call site passed `manual` explicitly, so the gate was the
+ * only behaviour that could happen. The setting is what makes the rule real —
+ * and it is deliberately per owner and stored in `flags`, so flipping it is one
+ * row, visible, and reversible.
+ */
+export type Autonomy = "manual" | "auto";
+
+const key = (owner: number) => `hub:auto:${owner}`;
+
+export async function readAutonomy(env: Env, owner: number): Promise<Autonomy> {
+  try {
+    const row = await env.DB.prepare(`SELECT value FROM flags WHERE key=?`)
+      .bind(key(owner)).first<{ value: string }>();
+    return row?.value === "auto" ? "auto" : "manual";
+  } catch {
+    return "manual";
+  }
+}
+
+export async function setAutonomy(env: Env, owner: number, mode: Autonomy): Promise<void> {
+  await env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+    .bind(key(owner), mode, Date.now()).run();
 }

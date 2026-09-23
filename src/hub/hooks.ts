@@ -3,6 +3,7 @@ import type { AiBrain } from "../ai/brain";
 import { Telegram } from "../tg/api";
 import { type HubEvent, hubId, newTrace } from "./event";
 import { publish } from "./bus";
+import { readAutonomy } from "./policy";
 import { hubId as _hubId } from "./event";
 
 /**
@@ -261,7 +262,10 @@ export async function handleHook(
     id: hubId("evt"), type, source: src, payload: { ...data, identity }, ts: Date.now(), trace, owner_id: ownerId,
   };
 
-  const result = await publish({ env, ai, tg: new Telegram(env) }, ev);
+  /* Webhooks are the "it happened, just publish" path — so this is exactly
+     where the owner's autonomy setting has to be honoured. Default stays manual. */
+  const autonomy = await readAutonomy(env, ownerId);
+  const result = await publish({ env, ai, tg: new Telegram(env), autonomy }, ev);
 
   await env.DB.prepare(
     `INSERT OR REPLACE INTO hub_webhooks (id, owner_id, source, type, event_id, status, ts)
