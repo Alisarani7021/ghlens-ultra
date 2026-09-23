@@ -144,7 +144,13 @@ export class Settings {
 
     await h.tg.sendMessage(h.chatId, hello, {
       parse_mode: "HTML",
-      reply_markup: mainMenuKb(lang, u?.plan === "admin") as any,
+      reply_markup: mainMenuKb(
+        lang,
+        u?.plan === "admin",
+        // the mini app is served by this same worker; without this the
+        // keyboard falls back to a callback and /app stays unreachable
+        h.env.WORKER_URL ? `${h.env.WORKER_URL}/app` : undefined,
+      ) as any,
       disable_web_page_preview: true,
     });
   }
@@ -402,6 +408,9 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: L(loc, "profile"), cb: "me:home" },
       { text: L(loc, "dashboard"), cb: "me:dash" },
     ],
+    ...(miniAppUrl
+      ? [[{ text: "📱 " + (fa ? "اپلیکیشن (نسخهٔ وب)" : "Mini App (web)"), web: miniAppUrl }]]
+      : []),
     [
       { text: L(loc, "lang"), cb: "lang:menu" },
       { text: L(loc, "help"), cb: "h:main" },

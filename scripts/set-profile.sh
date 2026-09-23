@@ -6,7 +6,8 @@
 # be set per language with the Bot API, so the bot's front page stops saying
 # things that are no longer true (it advertised a podcast for a while).
 #
-# Usage:  BOT_TOKEN=… ./scripts/set-profile.sh [--dry]
+# Usage:  BOT_TOKEN=… [WORKER_URL=…] ./scripts/set-profile.sh [--dry]
+# Also points the chat menu button at the mini app.
 set -euo pipefail
 
 : "${BOT_TOKEN:?set BOT_TOKEN (or source .secrets.local.sh)}"
@@ -122,13 +123,33 @@ call setMyDescription ar description "$desc_ar"
 call setMyDescription ru description "$desc_ru"
 call setMyDescription zh description "$desc_zh"
 
+# ── the menu button next to the message box ────────────────────
+# It was left on {"type":"commands"}, so the mini app existed with no way in
+# from inside the bot. Point it at the worker's /app.
+echo "▸ chat menu button → mini app"
+WEBAPP_URL="${WORKER_URL:-https://ghlens-ultra.gitguts.workers.dev}/app"
+if [ -n "$DRY" ]; then
+  echo "  (dry) setChatMenuButton → $WEBAPP_URL"
+else
+  MENU_JSON=$(python3 -c 'import json,sys; print(json.dumps({"menu_button":{"type":"web_app","text":"اپلیکیشن","web_app":{"url":sys.argv[1]}}}))' "$WEBAPP_URL")
+  curl -s "$API/setChatMenuButton" -H 'content-type: application/json' --data-binary "$MENU_JSON" >/dev/null
+  # Measured, not assumed: on this API version the *default* menu button cannot
+  # be a Web App — the call answers true and the read-back still says commands.
+  # So the command list stays there, and the mini app opens from the "📱 اپلیکیشن"
+  # button in the main menu and from the landing page.
+  curl -s "$API/getChatMenuButton" | python3 -c "
+import sys, json
+t = json.load(sys.stdin)['result'].get('type')
+print('  default menu button →', t, '(​the in-bot button is the reliable path)' if t != 'web_app' else '✅ web app')"
+fi
+
 echo "▸ verify"
 if [ -z "$DRY" ]; then
-  for m in getMyName getMyShortDescription getMyDescription; do
+  for m in getMyName getMyShortDescription getMyDescription getChatMenuButton; do
     curl -s "$API/$m" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)['result']
-print(' ', '$m', '→', repr(d.get('name') or d.get('short_description') or d.get('description'))[:90])
+print(' ', '$m', '→', repr(d.get('name') or d.get('short_description') or d.get('description') or json.dumps(d, ensure_ascii=False))[:90])
 "
   done
 fi
