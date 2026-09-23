@@ -193,7 +193,7 @@ Counts: **77 commands · 137 callback actions · 12 dossier tabs · 20 D1 tables
 | Store READMEs forever | Copyright + storage: we cache translations for 30 d and keep digests only |
 | Let the LLM generate statistics | Hallucination risk — all numbers come from GitHub/OSV, the model only summarises |
 | Full OAuth GitHub login | Needs a client secret + callback page; the bot works read-only without it. Roadmap item |
-| Voice *calls* / music podcast | Workers AI TTS speaks, it doesn't sing; multi-voice dialogue is a roadmap item |
+| Any audio output | **Removed by owner instruction** — no podcast, no spoken answers, no TTS. Only inbound voice notes survive, as a keyboard that produces text |
 
 
 ---

@@ -78,8 +78,9 @@ Optional gateway→ any OpenAI-compatible endpoint (OPENAI_COMPAT_*)
 Rules that keep it cheap and correct:
 
 - **cache everything deterministic**: translations keyed by content hash (30 d),
-  analyses by `full_name:stars` (7 d), podcasts by `scope:day` (12 h). The KV +
-  in-isolate memo means the second identical question costs zero tokens.
+  analyses by `full_name:stars` (7 d), digests by `scope:day` (12 h). The KV +
+  in-isolate memo means the second identical question costs zero tokens. There is
+  no audio path to cache any more — see "Audio" in the README.
 - **never let the model touch numbers**: prompts receive the already-fetched
   GitHub/OSV JSON and are instructed to only summarise it.
 - **meter per user/feature/day** in `ai_usage`; `/admin` shows today's usage and
@@ -123,8 +124,8 @@ retention) and then, in `waitUntil`:
 |---|---|
 | `*/15 * * * *` | snapshot tracked + board repos, rebuild daily board, drain `digest_queue`, run broadcasts at ~20 msg/s (45 ms spacing) |
 | `0 * * * *` | push up to 40 fresh repos into Vectorize (README digest embedded, not the whole file), security sweep of watched repos → advisories + alerts |
-| `0 6 * * *` | AI morning brief, podcast generation, per-interest picks, enqueue digests for users active in 14 d |
-| `0 6 * * 0` | growth leaders, weekly board, leaderboard fan-out, weekly podcast, cleanup |
+| `0 6 * * *` | AI morning brief, per-interest picks, enqueue digests for users active in 14 d |
+| `0 6 * * 0` | growth leaders, weekly board, leaderboard fan-out, cleanup |
 | `0 4 1 * *` | retention: events 180 d, snapshots 2 y, ai_usage 90 d, downloads 30 d, messages 60 d, webhook_log 30 d |
 
 ## 9. Failure modes (designed, not discovered)

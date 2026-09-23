@@ -13,7 +13,7 @@ Everything here is free-tier friendly. Total time: ~20 minutes.
 | Node 20+ | nodejs.org | the sandbox scripts assume `node`/`npx` |
 | Bot token | Telegram → **@BotFather** → `/newbot` | keep it secret |
 | GitHub token | github.com → Settings → Developer settings → **Fine-grained or classic PAT** | scope: `public_repo` (read-only is enough for everything except `repository_dispatch`, which uses the *helper* token) |
-| Cloudflare API token | My Profile → API Tokens → **Edit Cloudflare Workers** template | add `Account → D1:Edit`, `R2:Edit`, `Queues:Edit`, `Vectorize:Edit` |
+| Cloudflare API token | My Profile → API Tokens → **Edit Cloudflare Workers** template | add `Account → D1:Edit`, `Workers KV Storage:Edit`, `Queues:Edit`, `Workers AI:Read` (no R2 and no Vectorize — neither is used) |
 
 ---
 
@@ -201,7 +201,7 @@ http://localhost:8787`) and register that URL with `set-webhook.sh`.
 | `/health` shows `vectorize: false` | index name mismatch | `wrangler vectorize list`; the binding must be `ghlens-index` |
 | Bot answers nothing | webhook not set / wrong secret | re-run `set-webhook.sh`; check `wrangler tail` |
 | `403 forbidden` on the hook | header token mismatch | it must equal `TELEGRAM_WEBHOOK_SECRET` |
-| Search returns nothing | empty Vectorize index (normal on day 1) | the hourly cron fills it; `/admin → snapshot` accelerates |
+| Search returns nothing | nothing indexed yet (normal on day 1) | the hourly cron indexes fresh repos; semantic search reads vectors stored in D1, so no Vectorize index has to exist |
 | Podcast has no audio | TTS capacity | script is still delivered, retry later; check `/admin → AI self-test` |
 | Download says "Actions token missing" | helper repo not configured | set `HELPER_REPO` + `HELPER_REPO_TOKEN` |
 | Share card falls back to a link | Browser Rendering needs `CF_API_TOKEN`+`CF_ACCOUNT_ID` | set both |
