@@ -39,7 +39,7 @@ vuejs/core                  →  پرونده: ۱۲ تب · امنیت · جام
 | **دانلود و امنیت** | دانلود مستقیم با کش و تقسیم جریانی · اسکن وابستگی با OSV · شکار کلید لو‌رفته · CVE · تبدیل پکیج (deb ⇄ rpm ⇄ pacman ⇄ apk) |
 | **ابزار** | IP/DNS/ASN/TLS، CIDR، JWT، هش، UUID، کرون، رجکس، SemVer · رادار شبکه |
 | **حساب** | پروفایل، XP، نشان، رتبهٔ هفتگی، ارجاع، داشبورد ۳۰ روزه · `/keys` استخر کلیدهای اهدایی (تست قبل از پذیرش، حذف خودکار کلید مرده) · `/connect` اتصال گیت‌هاب با توکن کم‌دسترسی |
-| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · پیام‌های Rich (جدول، تیتر، بخش بازشو) |
+| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · کارت‌های Rich (عکس، جدول حاشیه‌دار، تیتر، بخش بازشو) · منوی دوصفحه‌ای |
 
 ## هاب رویدادمحور
 
@@ -175,7 +175,7 @@ MIT — [LICENSE](LICENSE). داده از APIهای عمومی گیت‌هاب،
 
 # English
 
-**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 405 callback keys, 33 D1 tables, 236 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
+**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 418 callback keys, 33 D1 tables, 236 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
 
 **Core** — hybrid semantic + lexical search (1024-dim `bge-m3` embeddings stored **in D1**, cosine similarity in SQL, no Vectorize dependency) · 12-tab dossier from a single GraphQL query (growth, bus factor, merge rate, releases, CI, security) · repo chat with citations · structure-preserving README translation · direct downloads with streaming splits · OSV dependency scans, leaked-key hunting, CVE alerts · package conversion (deb ⇄ rpm ⇄ pacman ⇄ apk).
 

@@ -3,7 +3,7 @@ import type { Env } from "../env";
 import { fmt } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
 import { kb, L, type Loc } from "../tg/keyboards";
-import { aside, details, footer, h1, hr, p, table, ul } from "../tg/rich";
+import { aside, details, footer, h1, h2, hr, p, table, ul } from "../tg/rich";
 
 /** Language, help, about and inline-mode. */
 export class Settings {
@@ -38,23 +38,23 @@ export class Settings {
   }
 
   /**
-   * The welcome banner.
+   * The welcome photo and its caption.
    *
-   * Telegram keeps the image and hands back a `file_id`; sending by that id
-   * means every /start shows the artwork without uploading a byte, and no CDN,
-   * bucket or static route has to exist for one picture. If the id ever goes
-   * stale (bot moved, file re-uploaded) sendPhoto fails and the welcome card
-   * still arrives — the picture is decoration, never a dependency.
+   * Telegram stores the image and hands back a `file_id`; sending by that id
+   * costs no upload and needs no bucket, CDN or static route for one picture.
+   * The caption carries the branding so the photo is never a bare image, and if
+   * the id ever goes stale `sendPhoto` fails harmlessly — the card below it is
+   * the actual interface.
    */
-  private static readonly START_BANNER =
-    "AgACAgQAAxkDAAICR2q0Kzc9gh09PPk9AAHe34LMS6liZwACuw9rGzOloFFvA9miDkY3WgEAAwIAA3kAAz0E";
+  private static readonly WELCOME_PHOTO =
+    "AgACAgQAAxkDAAICcWq0SrIH0MJBdSYRDwG7zNJMMW2iAALcD2sbM6WgUeoS3A-W4xtuAQADAgADdwADPQQ";
 
-  private static readonly START_CAPTION_FA =
+  private static readonly WELCOME_CAPTION_FA =
     "🔭 <b>GitHub Lens Ultra</b>\n" +
     "<b>هر مخزنی، هر نسخه‌ای، هر آسیب‌پذیری — از پشت یک لنز.</b>\n" +
     "<i>کاوش · ترجمه · امنیت · دانلود · هاب جهانی رویدادها — کاملاً روی کلودفلر</i>";
 
-  private static readonly START_CAPTION_EN =
+  private static readonly WELCOME_CAPTION_EN =
     "🔭 <b>GitHub Lens Ultra</b>\n" +
     "<b>Every repo, every release, every vulnerability — through one lens.</b>\n" +
     "<i>Search · translate · audit · download · an event-driven hub — all on Cloudflare</i>";
@@ -68,9 +68,15 @@ export class Settings {
    * are a compact list, not a wall of emoji, and the onboarding card shows the
    * real state (linked or not).
    */
-  async home(h: H, loc?: Loc, opts?: { force?: boolean }) {
+  async home(h: H, loc?: Loc, _opts?: { force?: boolean }) {
     const lang = loc ?? h.loc;
     const fa = lang === "fa";
+    // /start always lands as a new message. Onboarding depends on it: asking to
+    // link GitHub inside the same message the previous /start was printed in
+    // leaves the user staring at text they have already read. Everything else
+    // (a button, a deep link) edits in place, which is what made the menu feel
+    // like one screen.
+    const fresh = h.text.trim().toLowerCase().startsWith("/start");
     const u = await h.store.user(h.u.id);
     const linked = !!(u as any)?.github_login;
     const aiState = await aiEngineState(h.env);
@@ -171,9 +177,74 @@ export class Settings {
         ` · <a href="https://github.com/Alisarani7021/ghlens-ultra">github.com/Alisarani7021/ghlens-ultra</a>`,
       );
 
+    // A fresh /start opens with the artwork; the card below carries the buttons.
+    // Notified silently so the two messages do not ring twice.
+    if (fresh) {
+      await h.tg
+        .sendPhoto(h.chatId, Settings.WELCOME_PHOTO, fa ? Settings.WELCOME_CAPTION_FA : Settings.WELCOME_CAPTION_EN, {
+          parse_mode: "HTML",
+          disable_notification: true,
+        } as any)
+        .catch(() => null);
+    }
     await h.replyRich(
       helloRich,
       mainMenuKb(lang, u?.plan === "admin") as any,
+      !fresh,
+    );
+  }
+
+  /**
+   * Page 2 of the main menu.
+   *
+   * A short card, not the welcome text twice: what is behind the page-turn key,
+   * with every entry reachable as a button. The bottom emoji row mirrors the
+   * most-used keys of page 1 so a typo in one callback cannot strand anyone.
+   */
+  async home2(h: H) {
+    const lang = h.loc;
+    const fa = lang === "fa";
+    const u = await h.store.user(h.u.id);
+    const card =
+      h2(fa ? "📄 بخش‌های بیشتر" : "📄 More sections") +
+      p(fa
+        ? "بقیهٔ ربات اینجاست — هر ردیف یک بخش کامل. برای برگشتن به کارت اصلی «🔭 کارت اصلی» را بزن."
+        : "The rest of the bot — one section per row. «🔭 Main card» takes you back." ) +
+      table(
+        [
+          [fa ? "بخش" : "Section", fa ? "چه می‌کند" : "What it does"],
+          ["🌐 " + (fa ? "ابر و هوش مصنوعی" : "Cloud & AI"), fa
+            ? "GitLab، ساخت پست کانال، اجرای پایتون، مدل‌های چندمودی"
+            : "GitLab, channel-post drafting, python runs, multimodal models"],
+          ["🧰 " + (fa ? "جعبه‌ابزار توسعه‌دهنده" : "Dev toolbox"), fa
+            ? "کرون، رجکس، CIDR، JWT، هش، SemVer، رنگ — همه آفلاین"
+            : "cron, regex, CIDR, JWT, hashes, semver, colour — all offline"],
+          ["📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), fa
+            ? "سلامت شبکه، DNS، تأخیر، پروکسی‌ها"
+            : "network health, DNS, latency, proxies"],
+          ["⭐ " + (fa ? "علاقه‌مندی و اشتراک" : "Stars & alerts"), fa
+            ? "مخزن‌های نشان‌شده و هشدار انتشار/گزارش"
+            : "starred repos and release/advisory alerts"],
+        ],
+        { caption: fa ? "🗂 پشت صفحهٔ اول" : "🗂 Behind page one" },
+      ) +
+      hr() +
+      footer(
+        (fa ? "صفحهٔ ۲ از ۲" : "page 2 of 2") +
+        " · 🧠 " + (await aiEngineState(h.env)) +
+        ` · <a href="https://github.com/Alisarani7021/ghlens-ultra">github.com/Alisarani7021/ghlens-ultra</a>`,
+      );
+
+    await h.replyRich(
+      card,
+      kb(
+        [
+          { text: "🔭 " + (fa ? "کارت اصلی" : "Main card"), cb: "m:home" },
+          { text: L(lang, "help"), cb: "h:main" },
+        ],
+        menu2Kb(lang, u?.plan === "admin").inline_keyboard.slice(0, -1) as any,
+      ),
+      !!h.cbId,
     );
   }
 
@@ -392,11 +463,18 @@ All numbers come from GitHub's and OSV's real APIs; AI only summarises.`) +
   }
 }
 
+/**
+ * The main menu, page 1 of 2.
+ *
+ * The owner's screenshot showed the problem: 24 keys under one card is a wall,
+ * and the twelve most useful ones are the ones that pay for the wall. So the
+ * daily actions stay here and the rest moved behind one page-turn key —
+ * «بخش‌های بیشتر». Callback data stays destructive-free either way: this screen
+ * only navigates.
+ */
 function mainMenuKb(loc: Loc, isAdmin: boolean) {
   const fa = loc === "fa";
   return kb(
-    // The donated-key engine sits at the top: it is the one thing that turns
-    // every AI feature on, and the owner asked for it on the main page.
     [
       { text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
       { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
@@ -419,31 +497,57 @@ function mainMenuKb(loc: Loc, isAdmin: boolean) {
     ],
     [
       { text: L(loc, "tools"), cb: "u:home" },
-      { text: L(loc, "devutils"), cb: "dvu:home" },
-    ],
-    [
-      { text: L(loc, "contribute"), cb: "c:home" },
-      { text: "📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), cb: "nr:home" },
-    ],
-    [
-      { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
-    ],
-    [
-      { text: "🌌 " + (fa ? "هاب جهانی — اتوماسیون و رویدادها" : "Universal Hub — events & automation"), cb: "hos:home" },
-    ],
-    [
-      { text: L(loc, "fav"), cb: "f:list" },
-      { text: L(loc, "subs"), cb: "sub:list" },
-    ],
-    [
       { text: L(loc, "profile"), cb: "me:home" },
-      { text: L(loc, "dashboard"), cb: "me:dash" },
     ],
     [
       { text: L(loc, "lang"), cb: "lang:menu" },
       { text: L(loc, "help"), cb: "h:main" },
     ],
+    [
+      { text: "📄 " + (fa ? "بخش‌های بیشتر" : "More sections"), cb: "m:2" },
+      { text: "🌌 " + (fa ? "هاب جهانی" : "Hub"), cb: "hos:home" },
+    ],
     ...(isAdmin ? [[{ text: "🛡 Admin", cb: "adm:home" }]] : []),
+  );
+}
+
+/** Page 2 of the main menu — a section list, not a second wall. */
+export function menu2Kb(loc: Loc, isAdmin: boolean) {
+  const fa = loc === "fa";
+  return kb(
+    [
+      { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
+    ],
+    [
+      { text: L(loc, "devutils"), cb: "dvu:home" },
+      { text: L(loc, "contribute"), cb: "c:home" },
+    ],
+    [
+      { text: "📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), cb: "nr:home" },
+      { text: L(loc, "dashboard"), cb: "me:dash" },
+    ],
+    [
+      { text: L(loc, "fav"), cb: "f:list" },
+      { text: L(loc, "subs"), cb: "sub:list" },
+    ],
+    // dup-ok: both menu pages must reach the admin panel
+    ...(isAdmin ? [[{ text: "🛡 Admin", cb: "adm:home" }]] : []),
+    [
+      { text: "🔍", cb: "n:search" },
+      { text: "🔥", cb: "t:menu" },
+      { text: "🛰", cb: "s:home" },
+    ],
+    [
+      { text: "🤖", cb: "a:home" },
+      { text: "📥", cb: "d:home" },
+      { text: "🧰", cb: "u:home" },
+    ],
+    [
+      { text: "🌌", cb: "hos:home" },
+      { text: "🌐", cb: "lang:menu" },
+      { text: "📚", cb: "h:main" },
+    ],
+    [{ text: "◀️ " + (fa ? "برگشت" : "Back"), cb: "m:home" }],
   );
 }
 

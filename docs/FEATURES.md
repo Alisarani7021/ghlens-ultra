@@ -167,7 +167,7 @@ Counts: **77 commands · 137 callback actions · 12 dossier tabs · 20 D1 tables
 124. AI self-test (fast/smart/code/embed/TTS/whisper/translate with timings)
 125. Analytics Engine data points on every command and cron run
 
-## L. Platform (12)
+## L. Platform (14)
 
 126. Telemetry: `events` + Analytics Engine
 127. Queue consumer with 9 job types, retry/backoff, dead-letter queue
@@ -177,10 +177,12 @@ Counts: **77 commands · 137 callback actions · 12 dossier tabs · 20 D1 tables
 131. `Telegram.call()` retry logic: 429 `retry_after`, 5xx backoff, silent "not modified", smart 4000-char splitting
 132. ETag conditional requests (304s don't consume GitHub quota)
 133. Vector indexing cron: README digests embedded, incremental (`indexed_at`)
-134. Public JSON API: `/api/miniapp`, `/api/repo`, `/api/card`, `/api/compare-card`, `/api/stats`, `/api/search`
+134. Public JSON API: `/api/repo`, `/api/card`, `/api/compare-card`, `/api/stats`, `/api/search`
 135. ~~Telegram Mini App~~ — **removed by owner request**; the bot's interface is the chat. The read-only JSON API (`/api/repo`, `/api/card`, `/api/stats`) stays for share cards and integrations
-136. Landing page with health endpoint
-137. Landing/share cards rendered as standalone HTML (screenshot-ready at 1200×630)
+136. **Rich-media welcome**: `/start` opens with the artwork as a photo card (file_id, no upload) and the menu as a Rich Message — `<h1>`, pull-quote, bordered caption table, three collapsible blocks. Every rich send degrades to a plain HTML message through `richToLegacy()` if the API in front of the bot cannot render it (`src/tg/rich.ts`, `scripts/test-rich.mjs`)
+137. Two-page main menu: 12 daily keys on page 1, the rest behind «📄 بخش‌های بیشتر», which returns as a caption table with an emoji shortcut row — never a 24-key wall, never a dead end
+138. Landing page with health endpoint
+139. Landing/share cards rendered as standalone HTML (screenshot-ready at 1200×630)
 
 ---
 

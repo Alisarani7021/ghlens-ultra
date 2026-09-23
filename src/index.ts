@@ -1289,6 +1289,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         // «فعلاً نه» on the onboarding card: the menu, even without GitHub —
         // otherwise the skip button would bounce straight back to the card
         if (action === "menu") return settings.home(h, undefined, { force: true });
+        // page 2 of the main menu
+        if (action === "2") return settings.home2(h);
         break;
       case "h":
         if (action === "main") return settings.help(h);
@@ -2167,7 +2169,7 @@ function landing(env: Env) {
 <meta name="description" content="ربات تلگرامِ کاوش، تحلیل، ترجمه، امنیت و دانلود اوپن‌سورس + هاب رویدادمحور — کاملاً روی Cloudflare.">
 <meta property="og:title" content="GitHub Lens Ultra">
 <meta property="og:description" content="کاوش، تحلیل، ترجمه و دانلود اوپن‌سورس در تلگرام — با هاب رویدادمحور و دروازهٔ تأیید انسانی.">
-<meta property="og:image" content="${raw}/start-banner.jpg">
+<meta property="og:image" content="${raw}/welcome.jpg">
 <meta name="theme-color" content="#070b14">
 <style>
 :root{--bg:#070b14;--fg:#e8f0fa;--mut:#93a4bd;--acc:#4de2ff;--acc2:#a6ff6b;--line:#1b2637;--card:#0d1524}
@@ -2210,9 +2212,11 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   </div>
 </div>
 
-<img class="banner" src="${raw}/start-banner.jpg" alt="GitHub Lens Ultra" loading="lazy">
+<img class="banner" src="${raw}/welcome.jpg" alt="GitHub Lens Ultra — an open-source observatory" loading="lazy">
 
 <div class="grid">${card(fa)}</div>
+
+<img class="banner" src="${raw}/sections.jpg" alt="بخش‌های بیشتر ربات" loading="lazy">
 
 <div class="row">
   <a class="btn" href="https://t.me/${bot}">🚀 باز کردن ربات در تلگرام</a>
