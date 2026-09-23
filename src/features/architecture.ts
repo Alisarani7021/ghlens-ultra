@@ -7,12 +7,27 @@ import { tgEscape } from "../tg/types";
 export class ArchitectureExplainer {
   async explain(h: H, input: string) {
     const fa = h.loc === "fa";
-    const full = parseRepoRef(input) ?? input.trim();
+    let full = parseRepoRef(input);
+    if (!full) {
+      const clean = input.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/+$/, "");
+      if (clean.includes("/")) {
+        full = clean;
+      } else if (clean.length >= 2) {
+        // User typed bare repo or keyword like "v2rayNG"
+        await h.loading(fa ? `🔎 جست‌وجوی دقیق مخزن برای «${clean}»…` : `Searching repository for "${clean}"…`);
+        const searchGh = new GithubRest(h.env);
+        const res = await searchGh.searchRepos(clean, "stars", "desc", 1).catch(() => null);
+        if (res?.items?.[0]?.full_name) {
+          full = res.items[0].full_name;
+        }
+      }
+    }
+
     if (!full || !full.includes("/")) {
       return h.reply(
         fa
-          ? "🗺 <b>تحلیل معماری و جریان کد (Code Flow)</b>\n\nنام یا لینک مخزن را بفرست تا کل ساختار و معماری پروژه را در ۳۰ ثانیه تحلیل کنم."
-          : "🗺 Send a repo reference to analyze its architecture and code flow.",
+          ? "🗺 <b>تحلیل معماری و جریان کد (Code Flow)</b>\n\nنام یا آدرس هر مخزن گیت‌هاب را بفرست (مثلاً <code>v2rayNG</code> یا <code>2dust/v2rayNG</code> یا لینک کامل گیتهاب) تا کل ساختار و معماری پروژه را در ۳۰ ثانیه تحلیل کنم."
+          : "🗺 Send a repo name or link (e.g. <code>v2rayNG</code> or <code>owner/repo</code>) to analyze its architecture and code flow.",
         kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }]]),
         !!h.cbId,
       );

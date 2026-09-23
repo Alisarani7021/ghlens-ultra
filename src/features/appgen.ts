@@ -24,16 +24,21 @@ export class AppGen {
     await h.loading(fa ? "🏗️ در حال معماری ساختار فایل‌ها و تولید کد کامل…" : "Generating project files and zip…");
 
     const prompt =
-      `You are an expert full-stack developer. The user wants to build the following complete standalone application:\n` +
+      `You are a staff software architect and principal engineer.\n` +
+      `The user requested a complete, professional, production-ready application:\n` +
       `"${query}"\n\n` +
-      `Generate the essential files for this application in JSON format as an array of objects:\n` +
+      `Build a comprehensive, modular project structure with production standards:\n` +
+      `- Modular directory layout (e.g. src/, config/, utils/, handlers/ or similar as appropriate)\n` +
+      `- Full, working, robust implementation without ellipses, TODOs, or placeholder comments\n` +
+      `- Clean configuration with .env.example, logging, error handling and retry logic\n` +
+      `- Complete requirements.txt or package.json with pinned or compatible modern dependencies\n` +
+      `- Production Dockerfile and docker-compose.yml\n` +
+      `- Comprehensive README.md with clear step-by-step setup, prerequisites, architecture summary, and deployment guide\n\n` +
+      `Output format MUST be a strict JSON array of file objects:\n` +
       `[\n` +
-      `  {"path": "main.py", "content": "..."},\n` +
-      `  {"path": "requirements.txt", "content": "..."},\n` +
-      `  {"path": "README.md", "content": "..."},\n` +
-      `  {"path": ".env.example", "content": "..."}\n` +
+      `  {"path": "...", "content": "..."}\n` +
       `]\n` +
-      `Ensure the code is complete, modern, working, and has no placeholders. Return ONLY valid JSON array with no markdown fence.`;
+      `Output ONLY the raw JSON array. Do not wrap in markdown quotes or preamble.`;
 
     const res = await h.ai.chat(prompt, {
       tier: "smart",
@@ -56,16 +61,18 @@ export class AppGen {
 
     // Build zip file manually with a simple zip encoder
     const zipBytes = createSimpleZip(files);
-    const safeName = query.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() || "app";
-    const filename = `${safeName}.zip`;
+    let slug = query.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_").slice(0, 24).toLowerCase();
+    if (!slug || slug.length < 3) slug = "app_project";
+    const filename = `${slug}.zip`;
 
     await h.tg.sendDocument(
       h.chatId,
       filename,
       zipBytes,
-      `🎉 <b>پروژهٔ شما آماده شد!</b>\n` +
-      `📦 شامل ${files.length} فایل (${files.map((f) => f.path).join(", ")})\n` +
-      `<i>فایل ZIP را اکسترکت کن و طبق README.md ران کن.</i>`
+      `🚀 <b>پروژهٔ مهندسی‌شده و آمادهٔ اجرا</b>\n\n` +
+      `📦 شامل <b>${files.length}</b> فایل استاندارد:\n` +
+      `${files.slice(0, 6).map((f) => `• <code>${f.path}</code>`).join("\n")}${files.length > 6 ? "\n• و سایرفایل‌ها…" : ""}\n\n` +
+      `💡 <i>کافیست فایل ZIP را باز کرده و طبق دستورات داخل <code>README.md</code> اجرا کنی.</i>`
     );
 
     return h.toast(fa ? "✅ فایل زیپ ارسال شد" : "ZIP generated");

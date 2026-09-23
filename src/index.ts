@@ -946,6 +946,10 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/start": {
       // mini-app deep links: s_/d_/t_/c_ + owner/repo open the right screen
       if (arg === "k_keys") return keysFeature.home(h);
+      if (arg.startsWith("repo_")) {
+        const target = arg.slice(5).replace("_", "/");
+        return repoCard(h, target);
+      }
       const deep = arg.match(/^([sdtc])_(.+)$/);
       if (deep) {
         const full = normRepo(deep[2]);
@@ -1786,24 +1790,33 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
   // search results
   const res = await gh.searchRepos(query, "stars", "desc", 10).catch(() => null);
   for (const r of res?.items ?? []) {
+    const updated = (r.pushed_at ?? "").slice(0, 10);
+    const topics = (r.topics ?? []).slice(0, 4).map((t: string) => `#${t}`).join(" ");
     results.push({
       type: "article", id: `r:${r.full_name}`,
       title: `⭐ ${r.stargazers_count.toLocaleString()} | ${r.full_name}`,
-      description: `${r.language ? `[${r.language}] ` : ""}${(r.description ?? "").slice(0, 90)}`.trim(),
+      description: `${r.language ? `[${r.language}] ` : ""}${(r.description ?? "بدون توضیح").slice(0, 80)}`,
       thumbnail_url: r.owner?.avatar_url,
       input_message_content: {
         message_text:
           `📦 <b><a href="https://github.com/${r.full_name}">${r.full_name}</a></b>\n\n` +
-          `${r.description ? `<i>${r.description}</i>\n\n` : ""}` +
-          `⭐ <b>${r.stargazers_count.toLocaleString()}</b> · 🍴 <b>${r.forks_count.toLocaleString()}</b> · 🧩 <b>${r.language ?? "—"}</b>\n\n` +
-          `🤖 تحلیل و دانلود در @Gitguts_bot`,
+          `📝 <b>توضیحات:</b>\n<i>${tgEscape(r.description || "بدون توضیحات ثبت‌شده")}</i>\n\n` +
+          `📊 <b>آمار و وضعیت:</b>\n` +
+          `• ⭐ <b>ستاره‌ها:</b> ${r.stargazers_count.toLocaleString()}\n` +
+          `• 🍴 <b>فورک‌ها:</b> ${r.forks_count.toLocaleString()}\n` +
+          `• 🧩 <b>زبان اصلی:</b> <code>${r.language ?? "چندزبانه"}</code>\n` +
+          `• 🕒 <b>آخرین بروزرسانی:</b> <code>${updated}</code>\n` +
+          (topics ? `\n🏷 <b>برچسب‌ها:</b>\n<code>${topics}</code>\n` : "") +
+          `\n────────────\n` +
+          `🤖 <i>تحلیل هوشمند، ترجمه README و دانلود سورس با @Gitguts_bot</i>`,
         parse_mode: "HTML",
+        disable_web_page_preview: true,
       },
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🛰 بررسی در لنز", url: `https://t.me/Gitguts_bot?start=repo_${r.full_name.replace("/", "_")}` },
-            { text: "🌐 گیت‌هاب", url: r.html_url },
+            { text: "🛰 کاوش و دانلود در ربات", url: `https://t.me/Gitguts_bot?start=repo_${r.full_name.replace("/", "_")}` },
+            { text: "🌐 صفحه گیت‌هاب", url: r.html_url },
           ]
         ]
       },
