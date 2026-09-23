@@ -376,6 +376,15 @@ export default {
       if (url.pathname === "/") {
         return new Response(landing(env), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
+      // Compatibility shim, deliberately not a page: the bot's default chat
+      // menu button still opens /app on every client, and Telegram accepts
+      // setChatMenuButton for that scope without actually changing it, so the
+      // address cannot be un-shipped from here. It redirects to the landing
+      // page — no web app, no Telegram SDK, no state — and can be deleted the
+      // day the button is moved in BotFather.
+      if (url.pathname === "/app") {
+        return Response.redirect(url.origin + "/", 302);
+      }
       return new Response("Not found", { status: 404 });
     } catch (e: any) {
       console.error("fatal", e?.stack ?? e);

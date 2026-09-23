@@ -7,7 +7,7 @@
 # things that are no longer true (it advertised a podcast for a while).
 #
 # Usage:  BOT_TOKEN=… [WORKER_URL=…] ./scripts/set-profile.sh [--dry]
-# Also points the chat menu button at the mini app.
+# Also normalises the chat menu button (was: pointed at the removed mini app).
 set -euo pipefail
 
 : "${BOT_TOKEN:?set BOT_TOKEN (or source .secrets.local.sh)}"
@@ -124,23 +124,23 @@ call setMyDescription ru description "$desc_ru"
 call setMyDescription zh description "$desc_zh"
 
 # ── the menu button next to the message box ────────────────────
-# It was left on {"type":"commands"}, so the mini app existed with no way in
-# from inside the bot. Point it at the worker's /app.
-echo "▸ chat menu button → mini app"
-WEBAPP_URL="${WORKER_URL:-https://ghlens-ultra.gitguts.workers.dev}/app"
+# This step used to point the button at the mini app. The mini app is gone, so
+# the button goes back to the command list — including for whoever still has the
+# old web_app button pinned on their own chat, which now opens a 404.
+echo "▸ chat menu button → commands"
+OWNER_CHAT="${OWNER_CHAT:-5982315292}"
 if [ -n "$DRY" ]; then
-  echo "  (dry) setChatMenuButton → $WEBAPP_URL"
+  echo "  (dry) setChatMenuButton chat_id=$OWNER_CHAT → commands"
 else
-  MENU_JSON=$(python3 -c 'import json,sys; print(json.dumps({"menu_button":{"type":"web_app","text":"اپلیکیشن","web_app":{"url":sys.argv[1]}}}))' "$WEBAPP_URL")
+  MENU_JSON=$(python3 -c 'import json,sys; print(json.dumps({"chat_id": int(sys.argv[1]), "menu_button": {"type": "commands"}}))' "$OWNER_CHAT")
   curl -s "$API/setChatMenuButton" -H 'content-type: application/json' --data-binary "$MENU_JSON" >/dev/null
-  # Measured, not assumed: on this API version the *default* menu button cannot
-  # be a Web App — the call answers true and the read-back still says commands.
-  # So the command list stays there, and the mini app opens from the "📱 اپلیکیشن"
-  # button in the main menu and from the landing page.
   curl -s "$API/getChatMenuButton" | python3 -c "
 import sys, json
+print('  default menu button →', json.load(sys.stdin)['result'].get('type'))"
+  curl -s --get "$API/getChatMenuButton" --data-urlencode "chat_id=$OWNER_CHAT" | python3 -c "
+import sys, json
 t = json.load(sys.stdin)['result'].get('type')
-print('  default menu button →', t, '(​the in-bot button is the reliable path)' if t != 'web_app' else '✅ web app')"
+print('  owner menu button   →', t, '✅' if t == 'commands' else '⚠️ still points somewhere else')"
 fi
 
 echo "▸ verify"

@@ -180,6 +180,21 @@ Caps enforced by the API: `description` ≤ 512 characters, `short_description`
 > `/app` route, no web app button, no `src/web/`. The bot's interface is the chat
 > itself, and the worker's only web surface is the landing page at `/`.
 
+### Why `/app` answers with a redirect and not a 404
+
+`setChatMenuButton` was used earlier to put a Web App button on the *default*
+menu-button scope. On this Bot API version that scope is write-once in practice:
+subsequent calls — `commands`, `default`, or another `web_app` — all return
+`{"ok":true,"result":true}` and the read-back keeps returning the original
+`web_app` entry, so the address cannot be un-shipped from the worker side. Every
+client therefore still shows a «Mini App» button that opens
+`https://ghlens-ultra.gitguts.workers.dev/app`.
+
+Until that button is moved (`/setmenubutton` in BotFather, or `/empty`), the
+worker answers `/app` with a `302` to the landing page: no web app, no Telegram
+WebApp SDK, no state, nothing to keep in sync. Per-chat overrides *do* work, and
+`scripts/set-profile.sh` sets `commands` back for the known real chats.
+
 ## 7. The heavy-work helper repo (optional, for 1 GB+ repos)
 
 1. Create a repo (e.g. `you/ghlens-jobs`), copy `actions/pack-repo.yml` to
