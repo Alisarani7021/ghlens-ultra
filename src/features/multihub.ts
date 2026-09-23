@@ -53,7 +53,7 @@ export class MultiHub {
       title,
       kb(
         [
-          { text: "🧠 " + (fa ? "دیده‌بان تخصصی HuggingFace" : "HuggingFace Deep Radar"), cb: "hub:hf" },
+          { text: "👻 " + (fa ? "کارخانه بایپس و تونل‌های نامرئی" : "Ghost Tunnel Lab"), cb: "gt:home" },
           { text: "🦊 " + (fa ? "کاوشگر و بازرس GitLab" : "GitLab Deep Inspector"), cb: "hub:gitlab" },
         ],
         [
