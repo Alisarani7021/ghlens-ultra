@@ -4,6 +4,7 @@ Everything here is free-tier friendly. Total time: ~20 minutes.
 
 ---
 
+
 ## 0. What you need
 
 | Thing | Where | Notes |
@@ -152,6 +153,30 @@ HMAC, duplicates are dropped by delivery id.
 > configured per-repo and are the common case.
 
 ---
+
+## 6.5 Bot profile text and the mini app button
+
+Telegram shows two strings that come from the bot itself: the card on the Web App
+splash screen ("What can this bot do?") — that is `description` — and the "About"
+line in the profile (`short_description`). Both are settable over the API, so
+BotFather is not needed for them:
+
+```bash
+export BOT_TOKEN=…                       # from .secrets.local.sh
+export WORKER_URL=https://ghlens-ultra.<sub>.workers.dev
+./scripts/set-profile.sh                 # fa · en · ar · ru · zh + the language-less default
+./scripts/set-profile.sh --dry            # show what would be sent
+```
+
+Caps enforced by the API: `description` ≤ 512 characters, `short_description`
+≤ 120. A `BOT_DESC_INVALID` answer means you went over one of them.
+
+> **Measured, not assumed:** the chat menu button next to the message box cannot
+> be a Web App on this API version. `setChatMenuButton` answers `true` and
+> `getChatMenuButton` still reports `commands` (it *does* work per-chat, which is
+> how the limit was isolated). The reliable route into the mini app is the
+> "📱 اپلیکیشن (نسخهٔ وب)" button in the bot's main menu — `mainMenuKb` gets
+> `${WORKER_URL}/app` — plus the landing page's own button.
 
 ## 7. The heavy-work helper repo (optional, for 1 GB+ repos)
 
