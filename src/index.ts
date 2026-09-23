@@ -904,8 +904,8 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
       case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
+      case "gt_build": return async (t: string) => { await clearMode(h.session); return ghostTunnel.generateForUser(h, t); };
       case "gt_frag": return async (t: string) => { await clearMode(h.session); return ghostTunnel.injectFragment(h, t); };
-      case "gt_inspect": return async (t: string) => { await clearMode(h.session); return ghostTunnel.runInspect(h, t); };
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1557,16 +1557,14 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── ghost tunnel & bypass lab ──
       case "gt":
         if (action === "home") return ghostTunnel.home(h);
+        if (action === "build") {
+          await setMode(h.session, "gt_build");
+          return ghostTunnel.buildPrompt(h);
+        }
+        if (action === "script") return ghostTunnel.workerScript(h);
         if (action === "frag") {
           await setMode(h.session, "gt_frag");
           return ghostTunnel.fragmentPrompt(h);
-        }
-        if (action === "irfront") return ghostTunnel.irFronting(h);
-        if (action === "singbox") return ghostTunnel.singboxConfig(h);
-        if (action === "cleanip") return ghostTunnel.cleanIpRadar(h);
-        if (action === "inspect") {
-          await setMode(h.session, "gt_inspect");
-          return ghostTunnel.inspectPrompt(h);
         }
         break;
 
