@@ -273,3 +273,122 @@ CREATE TABLE IF NOT EXISTS ai_keys (
   created_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_keys_status ON ai_keys(status, last_ok_at);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  GHLENS ULTRA — Universal Hub OS  (event bus · connectors · content graph)
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+--  Everything the hub does is one of three things:
+--    1. an EVENT arrives   (github.release.created, rss.item.new, webhook.*)
+--    2. a WORKFLOW reacts  (a DAG of nodes: ai → filter → policy → publish)
+--    3. CONTENT is born    (a post, and everything derived from it)
+--
+--  Three tables carry that: hub_events (what happened), hub_runs (what we did
+--  about it) and hub_content + hub_edges (what we made, and what it came from).
+--  A fourth, hub_connectors, is where the outside world is wired in.
+
+-- ── the event log: every trigger, normalised ──────────────────────────────
+CREATE TABLE IF NOT EXISTS hub_events (
+  id       TEXT PRIMARY KEY,
+  type     TEXT NOT NULL,                 -- dotted: source.object.verb
+  source   TEXT NOT NULL,                 -- github | rss | http | telegram | webhook | manual
+  payload  TEXT NOT NULL DEFAULT '{}',
+  trace    TEXT NOT NULL,                 -- survives the whole fan-out
+  owner_id INTEGER,
+  dedupe   TEXT,                          -- stable identity → delivery is idempotent
+  ts       INTEGER NOT NULL,
+  handled  INTEGER NOT NULL DEFAULT 0,
+  error    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hub_events_ts   ON hub_events(ts);
+CREATE INDEX IF NOT EXISTS idx_hub_events_type ON hub_events(type, ts);
+CREATE INDEX IF NOT EXISTS idx_hub_events_own  ON hub_events(owner_id, ts);
+-- A webhook retried four times is still ONE release. The unique index is what
+-- makes at-least-once delivery safe to build on.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hub_events_dedupe ON hub_events(dedupe)
+  WHERE dedupe IS NOT NULL;
+
+-- ── connectors: the outside world, one row each ───────────────────────────
+CREATE TABLE IF NOT EXISTS hub_connectors (
+  id        TEXT PRIMARY KEY,
+  owner_id  INTEGER NOT NULL,
+  kind      TEXT NOT NULL,                -- github | rss | http | telegram | webhook
+  label     TEXT NOT NULL DEFAULT '',
+  config    TEXT NOT NULL DEFAULT '{}',   -- non-secret settings only
+  enabled   INTEGER NOT NULL DEFAULT 1,
+  cursor    TEXT,                          -- last seen id/timestamp for polls
+  last_poll INTEGER,
+  status    TEXT NOT NULL DEFAULT 'new',  -- new | ok | error | disabled
+  detail    TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_conn_owner ON hub_connectors(owner_id, kind);
+CREATE INDEX IF NOT EXISTS idx_hub_conn_poll  ON hub_connectors(enabled, kind, last_poll);
+
+-- ── content: every artefact carries its DNA ───────────────────────────────
+CREATE TABLE IF NOT EXISTS hub_content (
+  id          TEXT PRIMARY KEY,
+  owner_id    INTEGER,
+  kind        TEXT NOT NULL,               -- source | post | summary | prompt | thread | translate
+  title       TEXT,
+  body        TEXT,
+  lang        TEXT NOT NULL DEFAULT 'fa',
+  source_ref  TEXT,                        -- external identity (repo@tag, feed url, …)
+  dna         TEXT NOT NULL DEFAULT '{}',  -- ContentDNA: topic/tone/entities/models/…
+  state       TEXT NOT NULL DEFAULT 'draft', -- draft|review|approved|published|stale|blocked
+  confidence  REAL NOT NULL DEFAULT 0,
+  version     INTEGER NOT NULL DEFAULT 1,
+  channel     TEXT,                        -- where it was published (chat id)
+  msg_id      INTEGER,
+  performance TEXT NOT NULL DEFAULT '{}',  -- views/forwards, filled by the analyser
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_content_owner ON hub_content(owner_id, state, updated_at);
+CREATE INDEX IF NOT EXISTS idx_hub_content_src   ON hub_content(source_ref);
+
+-- ── the content graph: what came from what ────────────────────────────────
+CREATE TABLE IF NOT EXISTS hub_edges (
+  from_id    TEXT NOT NULL,                -- the child (derived artefact)
+  to_id      TEXT NOT NULL,                -- the parent (what it came from)
+  rel        TEXT NOT NULL,                -- derived_from | translated | variant | extracted
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (from_id, to_id, rel)
+);
+CREATE INDEX IF NOT EXISTS idx_hub_edges_to   ON hub_edges(to_id);
+CREATE INDEX IF NOT EXISTS idx_hub_edges_rel  ON hub_edges(rel);
+
+-- ── workflows: a mission compiled into a DAG ──────────────────────────────
+CREATE TABLE IF NOT EXISTS hub_workflows (
+  id         TEXT PRIMARY KEY,
+  owner_id   INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  mission    TEXT NOT NULL DEFAULT '',     -- the sentence the owner typed
+  dag        TEXT NOT NULL,                -- { entry, nodes[] }
+  on_event   TEXT NOT NULL DEFAULT '',     -- glob: github.release.* ('' = manual)
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  runs       INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_wf_owner  ON hub_workflows(owner_id);
+CREATE INDEX IF NOT EXISTS idx_hub_wf_event  ON hub_workflows(enabled, on_event);
+
+-- ── runs: what the engine actually did, step by step ──────────────────────
+CREATE TABLE IF NOT EXISTS hub_runs (
+  id       TEXT PRIMARY KEY,
+  wf_id    TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  event_id TEXT,
+  input    TEXT NOT NULL DEFAULT '{}',
+  state    TEXT NOT NULL DEFAULT 'running', -- running | ok | failed | waiting (approval)
+  steps    TEXT NOT NULL DEFAULT '[]',
+  trace    TEXT NOT NULL,
+  output   TEXT,
+  error    TEXT,
+  started_at INTEGER NOT NULL,
+  ended_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_hub_runs_owner  ON hub_runs(owner_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_hub_runs_wf     ON hub_runs(wf_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_hub_runs_state  ON hub_runs(state, started_at);

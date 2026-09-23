@@ -105,6 +105,12 @@ async function quarterHourly(env: Env, store: Store, ctx: Ctx) {
     }
     await env.DB.prepare(`UPDATE digest_queue SET sent_at=? WHERE id LIKE 'bcast:%'`).bind(Date.now()).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
   }
+
+  // 4. hub connectors: pull whatever changed outside, put it on the bus.
+  //    Imported lazily so the cron path does not drag the whole hub into every
+  //    cold start of the Telegram handler.
+  const { pollDueConnectors } = await import("../features/hubos");
+  await pollDueConnectors(env, new AiBrain(env), tg).catch((e: any) => console.error("hub-poll", String(e?.message ?? e)));
 }
 function ctx_wait(ctx: Ctx, p: Promise<unknown>) { ctx.waitUntil(Promise.resolve(p)); }
 

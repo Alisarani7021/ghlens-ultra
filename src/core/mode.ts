@@ -76,4 +76,6 @@ export const MODE_LABELS: Record<string, string> = {
   "sec:secrets": "جست‌وجوی کلید لو‌رفته",
   "u:ip": "ابزار IP/DNS",
   "u:asn": "ابزار ASN",
+  "hos:mission": "مأموریت هاب",
+  "hos:conn:add": "افزودن کانکتور",
 };

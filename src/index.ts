@@ -44,6 +44,7 @@ import { parseRepoRef } from "./core/repo-ref";
 import { decryptSecret, encryptSecret } from "./core/crypto";
 import { keys as keysFeature } from "./features/keys";
 import { account as accountFeature } from "./features/account";
+import { hubOS } from "./features/hubos";
 
 export { UserSession } from "./core/session";
 
@@ -902,6 +903,8 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
       case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
+      case "hos:mission": return async (t: string) => hubOS.compileMission(h, t.trim().slice(0, 1200));
+      case "hos:conn:add": return async (t: string) => hubOS.connectorAdd(h, String(mode.data?.kind ?? ""), t.trim());
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1570,6 +1573,31 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           await setMode(h.session, "hub_py");
           return multiHub.pySandboxPrompt(h);
         }
+        break;
+
+      // ── Universal Hub OS: the event bus, connectors, content graph ──
+      case "hos":
+        if (action === "home") return hubOS.home(h);
+        if (action === "mission") return hubOS.missionPrompt(h);
+        if (action === "books") return hubOS.books(h);
+        if (action === "book") return hubOS.installBook(h, arg);
+        if (action === "conn") return hubOS.connectors(h);
+        if (action === "connadd") return hubOS.connectorAddPrompt(h, arg);
+        if (action === "conntest") return hubOS.connectorTest(h, arg || "all");
+        if (action === "poll") return hubOS.connectorPoll(h, arg);
+        if (action === "wf") return hubOS.workflows(h);
+        if (action === "wfv") return hubOS.workflowView(h, arg);
+        if (action === "wftog") return hubOS.toggleWorkflow(h, arg);
+        if (action === "wfdel") return hubOS.deleteWorkflow(h, arg);
+        if (action === "wfrun") return hubOS.runWorkflowById(h, arg);
+        if (action === "queue") return hubOS.queue(h);
+        if (action === "view") return hubOS.viewContent(h, arg);
+        if (action === "ok") return hubOS.approve(h, arg);
+        if (action === "no") return hubOS.reject(h, arg);
+        if (action === "graph") return hubOS.graph(h);
+        if (action === "events") return hubOS.events(h);
+        if (action === "runs") return hubOS.runs(h);
+        if (action === "selftest") return hubOS.selfTest(h);
         break;
       // ── admin ──
       case "adm":

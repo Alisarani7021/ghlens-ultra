@@ -273,6 +273,9 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
     ],
     [
+      { text: "🌌 " + (fa ? "هاب جهانی — اتوماسیون و رویدادها" : "Universal Hub — events & automation"), cb: "hos:home" },
+    ],
+    [
       { text: L(loc, "fav"), cb: "f:list" },
       { text: L(loc, "subs"), cb: "sub:list" },
     ],
