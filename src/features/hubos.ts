@@ -18,6 +18,8 @@ import * as KB from "../hub/knowledge";
 import * as FU from "../hub/files";
 import * as MD from "../hub/media";
 import { resumeRun } from "../hub/engine";
+import * as DP from "../hub/deploy";
+import { D1_STATEMENTS } from "../hub/schema.gen";
 import { hubId } from "../hub/event";
 import { MODELS } from "../hub/gateway";
 
@@ -88,6 +90,9 @@ export class HubOS {
         [
           { text: fa ? "📄 کالبدشکافی فایل" : "📄 File dissection", cb: "hos:files" },
           { text: fa ? "🔌 وب‌هوک و گیت‌وی" : "🔌 Webhooks & gateway", cb: "hos:integ" },
+        ],
+        [
+          { text: fa ? "🚀 ساخت نمونهٔ شخصی (یک‌کلیکی)" : "🚀 Self-host a copy", cb: "hos:deploy" },
         ],
       ),
       !!h.cbId,
@@ -908,6 +913,125 @@ export class HubOS {
   }
 
   // ── integrations: webhooks + gateway ────────────────────────────────────
+
+  // ── one-click self-hosting ──────────────────────────────────────────────
+  /**
+   * The screen behind «🚀 ساخت نمونهٔ شخصی».
+   *
+   * It has to answer three questions before anyone will paste a token: what it
+   * is going to do, exactly which permissions the token needs (the link opens
+   * the dashboard with only those boxes ticked), and what it will cost them
+   * (nothing — everything created fits in the free tier).
+   */
+  async deployPrompt(h: H, note?: string) {
+    const fa = h.loc === "fa";
+    const link = DP.tokenLink();
+    const perms = DP.TOKEN_PERMISSIONS.map(
+      (p) => `• <code>${p.key}</code> <i>${p.type}</i> — ${p.why}`,
+    ).join("\n");
+    await setMode(h.session, "hos:deploy", { from: "hos:deploy" });
+    return h.reply(
+      (note ? `${note}\n\n` : "") +
+        `🚀 <b>${fa ? "نمونهٔ شخصی خودت را بالا بیار" : "Self-host your own copy"}</b>\n\n` +
+        `<blockquote>${fa
+          ? "ربات، باندل نسخهٔ فعلی خودش را برمی‌دارد و در حساب کلاودفلر خودت می‌سازد: دیتابیس D1، دو فضای KV، یک صف، همهٔ جدول‌ها، آدرس workers.dev و وبهوک تلگرام. هیچ‌چیز روی کامپیوترت نصب نمی‌کنی و همه‌چیز در پلن رایگان جا می‌شود."
+          : "The bot clones itself into your Cloudflare account."}</blockquote>\n\n` +
+        `<b>${fa ? "۱) توکن بساز" : "1) Create a token"}</b>\n` +
+        (fa ? "دکمهٔ زیر داشبورد را با همین دسترسی‌ها باز می‌کند:\n" : "The button opens the dashboard pre-filled with:\n") +
+        `<blockquote>${perms}</blockquote>\n` +
+        `<b>${fa ? "۲) توکن را همین‌جا بفرست" : "2) Send the token here"}</b>\n` +
+        (fa
+          ? `توکن را در یک پیام بفرست؛ اگر توکن رباتِ خودت را هم در خط دوم بگذاری، وبهوک همان‌جا وصل می‌شود.\n\n`
+          : `Send the token. A bot token on the second line wires the webhook too.\n\n`) +
+        `<code>&lt;CF API token&gt;</code>\n<code>&lt;bot token — اختیاری&gt;</code>`,
+      kb(
+        [{ text: fa ? "🔑 ساخت توکن با همین دسترسی‌ها" : "🔑 Create the token", url: link }],
+        [{ text: fa ? "🔌 یکپارچه‌سازی" : "🔌 Integrations", cb: "hos:integ" }, { text: fa ? "🏠 خانه" : "🏠 Home", cb: "hos:home" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  /**
+   * Run the deployment.
+   *
+   * Progress is a single edited message rather than a stream of sendMessage
+   * calls: this takes half a minute and Cloudflare answers in steps, so one
+   * message that keeps changing says more about where it is than fifteen lines
+   * of history nobody reads. Edits are rate-limited to ~1.2s (Telegram starts
+   * refusing them and the retry loop would stall the deploy).
+   */
+  async deployRun(h: H, input: string) {
+    const fa = h.loc === "fa";
+    const lines = input.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+    const cfToken = lines[0] ?? "";
+    const botToken = lines.find((l) => /^\d{6,}:/.test(l)) ?? "";
+    if (cfToken.length < 20) {
+      return this.deployPrompt(h, `⚠️ ${fa ? "آن پیام شبیه توکن نبود. دوباره:" : "not a token"}`);
+    }
+    await clearMode(h.session);
+    const progress = await h.tg.sendMessage(h.u.id, `🚀 <b>${fa ? "شروع شد…" : "starting…"}</b>`);
+    const msgId = Number((progress as any)?.result?.message_id ?? 0);
+    let lastEdit = 0;
+    const body: string[] = [];
+    const paint = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastEdit < 1200) return;
+      lastEdit = now;
+      if (!msgId) return;
+      await h.tg.editMessageText(
+        h.u.id, msgId,
+        `🚀 <b>${fa ? "ساخت نمونهٔ شخصی" : "provisioning"}</b>\n\n` + body.slice(-12).join("\n"),
+        { parse_mode: "HTML" } as any,
+      ).catch(() => null);
+    };
+    let res: DP.ProvisionResult;
+    try {
+      res = await DP.provision(h.env, {
+        token: cfToken,
+        ownerId: h.u.id,
+        botToken: botToken || undefined,
+        statements: D1_STATEMENTS,
+        onProgress: async (p) => {
+          body.push(p.detail ? `${p.step}\n   <i>${tgEscape(p.detail)}</i>` : p.step);
+          await paint();
+        },
+      });
+    } catch (e: any) {
+      res = { ok: false, steps: body, error: String(e?.message ?? e) };
+    }
+    await paint(true);
+
+    if (!res.ok) {
+      return h.reply(
+        `❌ <b>${fa ? "ساخت نمونه متوقف شد" : "provisioning failed"}</b>\n\n` +
+          `<blockquote>${tgEscape(String(res.error ?? "?").slice(0, 400))}</blockquote>\n\n` +
+          (fa ? "تا اینجا انجام شد:\n" : "steps done:\n") + body.slice(-8).join("\n"),
+        kb([[{ text: fa ? "🔁 تلاش دوباره" : "🔁 Retry", cb: "hos:deploy" }]]),
+        !!h.cbId,
+      );
+    }
+
+    // The health of the copy is already probed inside provision() (with retries —
+    // a worker is not reachable the instant it is uploaded). Report its verdict
+    // from the steps rather than probing a second time and contradicting it.
+    const healthLine = (res.steps ?? []).find((x) => x.includes("نسخهٔ جدید"));
+    const health = healthLine ?? "";
+    await h.reply(
+      `🎉 <b>${fa ? "نمونهٔ شخصی‌ات آماده است" : "your copy is live"}</b>\n\n` +
+        (res.url ? `🌐 <code>${tgEscape(res.url)}</code>\n` : "") +
+        (res.account ? `👤 ${tgEscape(res.account)}\n` : "") +
+        `${health}\n\n` +
+        (((res.steps ?? []).length ? `<blockquote>${res.steps.slice(-6).map((x) => tgEscape(x)).join("\n")}</blockquote>\n\n` : "")) +
+        (fa
+          ? "حالا در همان رباتِ خودت /start را بزن. توکنی که دادی در سکرت‌های همان ورکر ذخیره شده تا نسخهٔ جدید هم بتواند نسخهٔ بعدی را بسازد؛ هر وقت خواستی از داشبورد عوضش کن."
+          : "Open your bot and press /start."),
+      kb(
+        res.url ? [{ text: fa ? "🌐 باز کردن نسخهٔ من" : "Open my copy", url: res.url }] : [{ text: fa ? "🏠 خانه" : "🏠 Home", cb: "hos:home" }],
+        [{ text: fa ? "🔌 یکپارچه‌سازی" : "🔌 Integrations", cb: "hos:integ" }],
+      ),
+    );
+  }
 
   async integrations(h: H) {
     const fa = h.loc === "fa";

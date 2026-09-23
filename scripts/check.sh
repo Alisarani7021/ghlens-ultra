@@ -6,6 +6,10 @@
 # hid two real type errors (and a broken admin button) until CI caught them.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The D1 schema is compiled into the worker for the one-click deploy;
+# regenerate it first so it can never drift from schema/d1.sql.
+node scripts/gen-schema.mjs || exit 1
+
 [ -x node_modules/.bin/tsc ] || { echo "▸ installing dependencies"; npm ci --no-audit --no-fund >/dev/null; }
 echo "▸ typecheck ($(node_modules/.bin/tsc --version))"
 node_modules/.bin/tsc --noEmit

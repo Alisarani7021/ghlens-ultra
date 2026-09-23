@@ -336,12 +336,61 @@ const MS = hubMods.mission, EN = hubMods.engine;
 // ═══════════════════════════════════════════════════════════════════════════
 
 const more = {};
-for (const name of ["files", "knowledge", "media", "hooks", "gateway"]) {
+for (const name of ["files", "knowledge", "media", "hooks", "gateway", "deploy"]) {
   const outFile = join(scratch, `hub2_${name}.mjs`);
   execSync(`npx esbuild src/hub/${name}.ts --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
   more[name] = await import(outFile);
 }
 const FL = more.files, KN = more.knowledge, MDF = more.media, HK = more.hooks, GW = more.gateway;
+const DP = more.deploy;
+
+  // ── one-click deploy: the binding remap and the two bugs that shipped ────
+  const ownSettings = {
+    compatibility_date: "2024-11-06",
+    compatibility_flags: ["nodejs_compat"],
+    bindings: [
+      { type: "d1", name: "DB", id: "old-d1" },
+      { type: "kv_namespace", name: "CACHE", namespace_id: "old-cache" },
+      { type: "kv_namespace", name: "STATE", namespace_id: "old-state" },
+      { type: "queue", name: "JOBS", queue_name: "ghlens-jobs" },
+      // the settings endpoint reports the namespace id, not the class
+      { type: "durable_object_namespace", name: "SESSION", namespace_id: "old-do" },
+      { type: "ai", name: "AI" },
+      { type: "plain_text", name: "WORKER_URL", text: "https://old.example.workers.dev" },
+      { type: "secret_text", name: "BOT_TOKEN" },
+      { type: "r2_bucket", name: "BLOBS" },
+    ],
+  };
+  const { bindings: rb, dropped } = DP.rebind(
+    ownSettings,
+    { d1: "new-d1", cache: "new-cache", state: "new-state", queue: "new-queue" },
+    { WORKER_URL: "https://copy.example.workers.dev", DEFAULT_LOCALE: "fa" },
+    { BOT_TOKEN: "123:abc" },
+    "https://copy.example.workers.dev",
+  );
+  const pick = (name) => rb.find((b) => b.name === name);
+  ok("deploy: d1 binding points at the new database", pick("DB").id === "new-d1");
+  ok("deploy: CACHE and STATE get their own namespaces",
+    pick("CACHE").namespace_id === "new-cache" && pick("STATE").namespace_id === "new-state");
+  ok("deploy: the DO binding carries a class name", pick("SESSION").class_name === "UserSession");
+  ok("deploy: the DO binding does not reference the source namespace",
+    pick("SESSION").namespace_id === undefined && pick("SESSION").script_name === undefined);
+  ok("deploy: WORKER_URL is the copy's, never ours", pick("WORKER_URL").text === "https://copy.example.workers.dev");
+  ok("deploy: secrets come from the input", pick("BOT_TOKEN").text === "123:abc");
+  ok("deploy: unsupported bindings are reported, not guessed", dropped.includes("BLOBS (r2_bucket)"));
+
+  // A DO binding without a migration is rejected by the API, and on a free plan
+  // only sqlite classes are accepted — both learned from a real upload.
+  const doClasses = rb.filter((b) => b.type === "durable_object_namespace").map((b) => b.class_name);
+  ok("deploy: a DO class becomes a migration", doClasses.length === 1 && doClasses[0] === "UserSession");
+
+  // The dangerous one: whatever else changes, the source worker is never the
+  // upload target. This is the bug that took the live bot offline.
+  ok("deploy: the source script can never be the target", DP.DEPLOY_SCRIPT_NAME === "ghlens-ultra");
+  ok("deploy: copy names are per owner", DP.scriptNameFor(1) === "ghlens-ultra-1" && DP.scriptNameFor(987654) === "ghlens-ultra-987654");
+  ok("deploy: the token link pre-fills permissions without an account",
+    DP.tokenLink().includes("permissionGroupKeys=") && DP.tokenLink("acct").includes("accountId=acct"));
+  ok("deploy: generated secrets are hex and unique", /^[0-9a-f]{48}$/.test(DP.randomSecret()) && DP.randomSecret() !== DP.randomSecret());
 const enc = (s) => new TextEncoder().encode(s);
 
 // ── file detection ──────────────────────────────────────────────────────

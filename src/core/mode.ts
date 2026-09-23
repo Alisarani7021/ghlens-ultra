@@ -82,4 +82,5 @@ export const MODE_LABELS: Record<string, string> = {
   "hos:media": "کارخانهٔ رسانه",
   "hos:file": "کالبدشکافی فایل",
   "hos:edit": "ویرایش متن پیش‌نویس",
+  "hos:deploy": "ساخت نمونهٔ شخصی",
 };
