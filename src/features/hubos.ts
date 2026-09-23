@@ -92,6 +92,10 @@ export class HubOS {
           { text: fa ? "🔌 وب‌هوک و گیت‌وی" : "🔌 Webhooks & gateway", cb: "hos:integ" },
         ],
         [
+          { text: fa ? "🖼 کارخانهٔ رسانه" : "🖼 Media factory", cb: "hos:media" },
+          { text: fa ? "📖 راهنما: از کجا چه کاری" : "📖 How to use", cb: "hos:guide" },
+        ],
+        [
           { text: fa ? "🚀 ساخت نمونهٔ شخصی (یک‌کلیکی)" : "🚀 Self-host a copy", cb: "hos:deploy" },
         ],
       ),
@@ -913,6 +917,99 @@ export class HubOS {
   }
 
   // ── integrations: webhooks + gateway ────────────────────────────────────
+
+  // ── the manual ──────────────────────────────────────────────────────────
+  /**
+   * A screen that answers "so how do I actually use this".
+   *
+   * Every feature is described by *where it opens* and *what you do there*, in
+   * the order the console presents them — a list of capabilities without an
+   * entry point is just a press release.
+   */
+  async guide(h: H) {
+    const fa = h.loc === "fa";
+    if (!fa) {
+      return h.reply(
+        `📖 <b>How to use the hub</b>\n\n` +
+          `1. 🧪 <b>New mission</b> — type one sentence; the planner builds and runs a workflow\n` +
+          `2. 📚 <b>Playbooks</b> — three tested workflows, installed with one tap\n` +
+          `3. 🔌 <b>Connectors</b> — add github/rss/http/telegram → test → «Fetch now»\n` +
+          `4. 🎯 <b>Events</b> — everything that arrived from outside\n` +
+          `5. 🕹 <b>Approval queue</b> — ✅ publish / ✏️ edit / 🗑 reject\n` +
+          `6. ⚙️ <b>Workflows</b> — the node graph, on/off, run now\n` +
+          `7. 🕸 <b>Content graph</b> — lineage and DNA of everything produced\n` +
+          `8. 📊 <b>Runs</b> — every node of every run, step by step\n` +
+          `9. 🧠 <b>Knowledge &amp; semantic search</b> — type a sentence, no keyword needed\n` +
+          `10. 📚 <b>Entities</b> — repos, orgs, versions, terms pulled from content\n` +
+          `11. 📄 <b>File dissection</b> — send a file; text, structure, entities, searchable\n` +
+          `12. 🖼 <b>Media factory</b> — a topic in, cover + image prompt out\n` +
+          `13. 🔌 <b>Webhooks &amp; gateway</b> — hook URLs, OpenAI-compatible endpoint, 7-day stats\n` +
+          `14. 🚀 <b>Self-host</b> — your own copy in your own Cloudflare account`,
+        kb([[{ text: "🏠 Home", cb: "hos:home" }, { text: "🔌 Integrations", cb: "hos:integ" }]]),
+        !!h.cbId,
+      );
+    }
+    return h.reply(
+      `📖 <b>راهنمای هاب جهانی</b>\n` +
+        `<blockquote>هر قابلیت با «از کجا باز می‌شود» و «آنجا چه کار کن» نوشته شده. ` +
+        `هر پیام متنی که در یک بخش می‌فرستی، به همان بخش می‌رود — و با زدن دکمهٔ بخش دیگر، از آن بخش بیرون می‌آیی.</blockquote>\n\n` +
+
+        `🧪 <b>مأموریت تازه</b>\n` +
+        `<i>دکمه را بزن و یک جمله بنویس.</i> مثال: «هر وقت نسخهٔ جدید bun منتشر شد، پست فارسی بساز و برای تأیید بفرست».\n` +
+        `خودش گراف ورک‌فلو را می‌سازد، اجرا می‌کند و پیش‌نویس را در صف تأیید می‌گذارد.\n\n` +
+
+        `📚 <b>برنامه‌های آماده</b>\n` +
+        `سه ورک‌فلوی آمادهٔ تست‌شده: <i>انتشار نسخهٔ جدید در کانال</i> · <i>خلاصهٔ RSS</i> · <i>هشدار تغییر صفحه</i>. با یک لمس نصب می‌شوند.\n\n` +
+
+        `🔌 <b>کانکتورها</b> — منبع رویداد\n` +
+        `«افزودن» → نوع (گیت‌هاب / RSS / HTTP / تلگرام) → کانفیگ را بفرست → «تست» (واقعی است: سهمیهٔ گیت‌هاب، دسترسی کانال، …) → «🔄 دریافت الان» تا بدون انتظار کرون، اقلام تازه به رویداد تبدیل شوند.\n\n` +
+
+        `🎯 <b>رویدادها</b>\n` +
+        `هر چه از بیرون رسیده، با نوع و شناسه. دکمهٔ «🧪 رویداد آزمایشی» کل مسیر را با یک رویداد نمونه اجرا می‌کند — برای امتحان‌کردن همه‌چیز، بی‌آنکه منتظر سرویس بیرونی بمانی.\n\n` +
+
+        `🕹 <b>صف تأیید</b> — قلب سیستم\n` +
+        `هیچ‌چیز بدون اجازهٔ تو از مرز بیرون نمی‌رود: <b>✅ تأیید و انتشار</b> (می‌رود در کانال، دقیقاً یک‌بار) · <b>✏️ ویرایش متن</b> (متن تازه بفرست، جایگزین می‌شود و کارت برمی‌گردد) · <b>🗑 رد</b> (مسدود می‌شود و اجرای معلق هم بسته می‌شود).\n\n` +
+
+        `⚙️ <b>ورک‌فلوها</b>\n` +
+        `گراف گره‌ها را می‌بینی: روشن/خاموش کردن، حذف، و «▶️ اجرا» برای اجرای دستی.\n\n` +
+
+        `🕸 <b>گراف محتوا</b> · 📊 <b>اجراها</b>\n` +
+        `اولی نسب و DNA هر محتوا را نشان می‌دهد (والد/فرزند، اطمینان، مدل‌ها)؛ دومی می‌گوید هر اجرا گره‌به‌گره چه کرد، چند میلی‌ثانیه و با چه نتیجه‌ای.\n\n` +
+
+        `🧠 <b>دانش و جست‌وجوی معنایی</b>\n` +
+        `«🔎 جست‌وجوی معنایی» را بزن و یک جملهٔ معمولی بنویس — <i>لازم نیست کلمهٔ مشترکی با متن داشته باشد</i>. کنار هر نتیجه می‌گوید از کدام راه پیدا شده: موجودیت، برداری، یا واژه‌ای.\n\n` +
+
+        `📄 <b>کالبدشکافی فایل</b>\n` +
+        `فایل را بفرست: نوع، متن، ساختار و موجودیت‌هایش استخراج و برای جست‌وجو برداری می‌شود. PDF متنی بله؛ PDF اسکن‌شده صادقانه «متن پیدا نشد»؛ صوت و ویدیو پذیرفته نمی‌شود.\n\n` +
+
+        `🖼 <b>کارخانهٔ رسانه</b>\n` +
+        `یک موضوع بده: کاور ۱۲۰۰×۶۹۰ (فایل SVG) + پرامپت تصویر انگلیسی با سبک و نسبت تصویر + متن جانشین فارسی.\n\n` +
+
+        `🔌 <b>وبهوک و گیت‌وی</b>\n` +
+        `آدرس وبهوک هر کانکتور و دروازهٔ سازگار با OpenAI + مدل‌ها + آمار ۷ روز. (جزئیات فنی در <code>docs/USAGE-FA.md</code> مخزن.)\n\n` +
+
+        `🚀 <b>ساخت نمونهٔ شخصی</b>\n` +
+        `لینکِ توکن با همان هفت دسترسی لازم، بعد توکن را بفرست: ربات خودش را در حساب کلاودفلر خودت می‌سازد.\n\n` +
+
+        `⏱ <b>خودکار، بدون تو:</b> هر ۱۵ دقیقه کانکتورها چک می‌شوند و اقلام تازه رویداد می‌سازند؛ کارهای ساعتی/روزانهٔ نگهداری هم در همان کرون‌ها اجرا می‌شوند.`,
+      kb(
+        [
+          { text: "🧪 مأموریت", cb: "hos:mission" },
+          { text: "📚 برنامه‌های آماده", cb: "hos:books" },
+        ],
+        [
+          { text: "🔌 کانکتورها", cb: "hos:conn" },
+          { text: "🕹 صف تأیید", cb: "hos:queue" },
+        ],
+        [
+          { text: "🧠 دانش و جست‌وجو", cb: "hos:know" },
+          { text: "🖼 کارخانهٔ رسانه", cb: "hos:media" },
+        ],
+        [{ text: "🏠 خانهٔ هاب", cb: "hos:home" }],
+      ),
+      !!h.cbId,
+    );
+  }
 
   // ── one-click self-hosting ──────────────────────────────────────────────
   /**

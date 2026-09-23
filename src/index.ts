@@ -979,6 +979,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hos:edit": return async (t: string) => hubOS.applyEdit(h, String(mode.data?.id ?? ""), t);
       case "hos:media": return async (t: string) => hubOS.buildMedia(h, t);
       case "hos:deploy": return async (t: string) => hubOS.deployRun(h, t);
+      case "hos:guide": return async () => hubOS.guide(h);
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1680,6 +1681,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "media") return hubOS.mediaPrompt(h);
         if (action === "integ") return hubOS.integrations(h);
         if (action === "deploy") return hubOS.deployPrompt(h);
+        if (action === "guide") return hubOS.guide(h);
         break;
       // ── admin ──
       case "adm":
