@@ -16,6 +16,8 @@
 [![D1](https://img.shields.io/badge/D1-33%20tables-0b7285?style=flat-square)](schema/d1.sql)
 [![MIT](https://img.shields.io/badge/license-MIT-2ea043?style=flat-square)](LICENSE)
 
+<img src="docs/assets/hero.jpg" width="620" alt="GitHub Lens Ultra">
+
 **[ربات](https://t.me/Gitguts_bot)** · **[سلامت زنده](https://ghlens-ultra.gitguts.workers.dev/health)** · **[راهنامهٔ فارسی](docs/USAGE-FA.md)** · **[معماری](docs/ARCHITECTURE.md)** · **[هاب](docs/HUB-OS.md)**
 
 </div>
