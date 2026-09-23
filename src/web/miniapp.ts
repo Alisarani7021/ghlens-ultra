@@ -274,11 +274,14 @@ async function home(v) {
 
     section('quick', '🧰', 'بخش‌های دیگر',
       'همه‌ی قابلیت‌های ربات در همین مینی‌اپ خلاصه شده‌اند.',
-      'جعبه‌ابزار: CIDR، کرون، JWT، Base64، هش، IP/DNS/TLS · حساب من: اتصال گیت‌هاب، علاقه‌مندی‌ها، اشتراک‌ها · راهنما: فهرست دستورهای ربات.',
+      'هاب جهانی: رویداد، ورک‌فلو، پیش‌نویس پست و صف تأیید — جایی که ربات بدون اجازهٔ تو چیزی منتشر نمی‌کند. ' +
+      'جعبه‌ابزار: CIDR، کرون، JWT، Base64، هش، IP/DNS/TLS · حساب من: اتصال گیت‌هاب، علاقه‌مندی‌ها، اشتراک‌ها.',
       '<div class="chips" style="flex-wrap:wrap">' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=hub">🌌 هاب جهانی</div>' +
         '<div class="chip" data-go="tools">🧰 جعبه‌ابزار</div>' +
         '<div class="chip" data-go="me">👤 حساب من</div>' +
         '<div class="chip" data-go="about">📚 راهنما</div>' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '">🤖 خود ربات</div>' +
       '</div>');
 
   bind(v);
@@ -298,6 +301,16 @@ function bind(root) {
       haptic();
     }));
   root.querySelectorAll('[data-go]').forEach((el) => el.addEventListener('click', () => go(el.dataset.go)));
+  // [data-open] lives on every screen now (hub, bot, per-repo actions), so the
+  // handler belongs in bind() rather than being attached inside repo() only —
+  // otherwise the chips render and do nothing when tapped.
+  root.querySelectorAll('[data-open]').forEach((el) =>
+    el.addEventListener('click', () => {
+      const url = el.dataset.open;
+      if (!url) return;
+      haptic();
+      try { TG?.openLink ? TG.openLink(url) : window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
+    }));
   root.querySelectorAll('[data-period]').forEach((el) =>
     el.addEventListener('click', () => { S.period = el.dataset.period; S.cache = {}; home(document.getElementById('view')); }));
   root.querySelectorAll('[data-repo]').forEach((el) =>
@@ -381,11 +394,8 @@ async function repo(v) {
         '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('s_' + full) + '">🛰 کاوش عمیق ۱۲ تب</div>' +
         '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('d_' + full) + '">📥 دانلود</div>' +
         '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('t_' + full) + '">📝 ترجمه README</div>' +
+        '<div class="chip" data-open="https://t.me/' + esc(BOT) + '?start=' + encodeURIComponent('c_' + full) + '">🧠 تحلیل AI</div>' +
       '</div>';
-    v.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => {
-      const url = el.dataset.open; haptic();
-      try { TG?.openLink ? TG.openLink(url) : window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
-    }));
   } catch (e) {
     v.querySelector('#rbody').innerHTML = emptyState('🚫', 'مخزن باز نشد', esc(e.message) + ' — لینک را دوباره بچسبان یا در ربات /scout بزن.');
   }
@@ -401,20 +411,17 @@ function tools(v) {
       '</div>' +
       '<p style="color:var(--mut);font-size:13px;line-height:1.9">این ابزارها در ربات با گفت‌وگوی ساده کار می‌کنند: مثلاً <code>/dev</code> را بزن و بعد ورودی را بفرست.</p>');
   bind(v);
-  v.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => {
-    const url = el.dataset.open; try { TG?.openLink ? TG.openLink(url) : window.open(url, '_blank'); } catch (e) {}
-  }));
 }
 
 function about(v) {
   v.innerHTML =
     section('about', '📚', 'راهنمای سریع',
-      'ربات ۷۷ دستور دارد؛ اینها پرکاربردترین‌ها هستند.',
+      'ربات ۹۳ فرمان دارد؛ اینها پرکاربردترین‌ها هستند.',
       'برای فهرست کامل در تلگرام <code>/help</code> را بزن. هر دستور دکمه‌های بازگشت و منو دارد، پس گم نمی‌شوی.',
       '<div class="repo" style="cursor:default;direction:ltr;text-align:left;font-size:13px;line-height:2">' +
         ['/start — منوی اصلی', '/search — جست‌وجوی چندزبانه', '/trending — داغ‌ترین‌ها', '/scout owner/repo — کاوش ۱۲ تب',
          '/compare a/b c/d — مقایسه', '/translate — README فارسی', '/dl — دانلود سورس', '/security — اسکن CVE',
-         '/login — اتصال حساب گیت‌هاب', '/profile — سطح و نشان‌ها'].map((l) => '<div>' + esc(l) + '</div>').join('') +
+         '/connect — اتصال حساب گیت‌هاب', '/profile — سطح و نشان‌ها'].map((l) => '<div>' + esc(l) + '</div>').join('') +
       '</div>');
 }
 
@@ -435,7 +442,7 @@ async function me(v) {
         ? '<div class="repo" style="cursor:default"><span class="n">🐙 ' + esc(d.login || 'linked') + '</span><div class="d">حساب گیت‌هاب وصل است' +
           (d.linked_at ? ' · ' + ago(d.linked_at) : '') + '</div></div>' +
           '<div class="chips"><div class="chip">📦 مخزن‌ها، خصوصی و عمومی</div><div class="chip">📊 زبان‌ها و ستاره‌ها</div><div class="chip">🏢 سازمان‌ها</div></div>'
-        : '<div class="repo err" style="cursor:default"><span class="n">🐙 اتصال برقرار نیست</span><div class="d">در ربات <code>/login</code> را بزن و توکن یا OAuth را انتخاب کن.</div></div>') +
+        : '<div class="repo err" style="cursor:default"><span class="n">🐙 اتصال برقرار نیست</span><div class="d">در ربات <code>/connect</code> را بزن و توکن را بفرست.</div></div>') +
       '<div class="repo" style="cursor:default;margin-top:10px"><span class="n">🤝 موتور هوش مصنوعی</span><div class="d">' +
         esc(ai.ai_state === 'on' ? 'روشن — از استخر کلیدهای اهدایی کار می‌کند'
           : ai.ai_state === 'quota' ? 'سهمیهٔ رایگان تمام شده؛ با اهدای یک کلید فوراً روشن می‌شود'

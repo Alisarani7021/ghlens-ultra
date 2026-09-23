@@ -3,7 +3,7 @@ import { ArchitectureExplainer } from "./features/architecture";
 import { AppGen } from "./features/appgen";
 import { MultiHub } from "./features/multihub";
 import type { Ctx, Env, Job } from "./env";
-import { isAdmin } from "./env";
+import { botUsername, isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
 import type { CallbackQuery, InlineQuery, Message, Update, User } from "./tg/types";
 import { tgEscape } from "./tg/types";
@@ -309,7 +309,7 @@ export default {
 
       // ── mini-app (Telegram Web App) ────────────────────────────────────
       if (url.pathname === "/app" || url.pathname === "/app/") {
-        const html = MINI_APP_HTML.replace(/__BOT_USERNAME__/g, env.BOT_USERNAME ?? "RepoFA").replace(/__API_BASE__/g, env.WORKER_URL ?? "");
+        const html = MINI_APP_HTML.replace(/__BOT_USERNAME__/g, botUsername(env)).replace(/__API_BASE__/g, env.WORKER_URL ?? "");
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" } });
       }
 
@@ -1004,6 +1004,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/start": {
       // mini-app deep links: s_/d_/t_/c_ + owner/repo open the right screen
       if (arg === "k_keys") return keysFeature.home(h);
+      if (arg === "hub" || arg === "cloud") return hubOS.home(h);
       if (arg.startsWith("repo_")) {
         const target = arg.slice(5).replace("_", "/");
         return repoCard(h, target);
@@ -1140,7 +1141,11 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/netradar": case "/vpn": case "/proxy": return netRadar.home(h);
     case "/arch": case "/architecture": return archExplainer.explain(h, arg);
     case "/appgen": case "/createapp": return appGen.prompt(h);
-    case "/hub": case "/cloud": return multiHub.home(h);
+    // "/hub" is the universal hub (events → workflows → approval → publish).
+    // The older cloud/DevOps utilities keep their own name, so nothing is lost
+    // and the command menu is not lying about where "hub" goes.
+    case "/hub": return hubOS.home(h);
+    case "/cloud": return multiHub.home(h);
     case "/gitlab": { await setMode(h.session, "hub_gitlab"); return multiHub.gitlabPrompt(h); }
     case "/postmaker": { await setMode(h.session, "hub_post"); return multiHub.postMakerPrompt(h); }
     case "/py": case "/python": { await setMode(h.session, "hub_py"); return multiHub.pySandboxPrompt(h); }
@@ -1169,7 +1174,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     }
     case "/id": return showIds(h);
     case "/inline": {
-      const username = h.env.BOT_USERNAME ?? "bot";
+      const username = botUsername(h.env);
 
       return h.reply(
         fa
@@ -2098,45 +2103,116 @@ function bindingsReport(env: Env) {
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+/**
+ * The worker's front door.
+ *
+ * It is the page a stranger lands on when someone shares the deployment, so it
+ * has exactly one job: say what the bot is, prove it is alive, and hand over the
+ * bot link. Everything here is server-rendered and dependency-free — no CDN, no
+ * fonts, no build step — and the two images are pulled from the repository so
+ * the deployment gains a face without shipping a static-asset pipeline.
+ */
 function landing(env: Env) {
+  const bot = botUsername(env);
+  const repo = "Alisarani7021/ghlens-ultra";
+  const raw = `https://raw.githubusercontent.com/${repo}/main/docs/assets`;
+  const health = `${env.WORKER_URL ?? ""}/health`;
+  const year = new Date().getFullYear();
+
+  const fa = [
+    ["جستوجوی معنایی", "بدون کلیدواژه: «یک کتابخانهٔ سبک برای صف در Go» را می‌فهمد. بردارها در D1، بدون سرویس بیرونی."],
+    ["کاوش ۱۲ تبی", "رشد، ضریب اتوبوس، نرخ مرج، دارایی‌های انتشار، CI و امنیت — از یک کوئری GraphQL."],
+    ["هوش مصنوعی چندمدلی", "۱۱ مدل در سه رده + ردهٔ چندمدلی (موازی، داور، سنتز). چت با مخزن همراه با استناد."],
+    ["دانلود و امنیت", "دانلود مستقیم با تقسیم جریانی · اسکن وابستگی با OSV · شکار کلید لو‌رفته · هشدار CVE."],
+    ["هاب رویدادمحور", "رویداد می‌گیرد، ورک‌فلو اجرا می‌کند، پیش‌نویس پست می‌سازد و فقط با تأیید تو منتشر می‌کند."],
+    ["۵ زبان، ۹۳ فرمان", "فارسی · انگلیسی · عربی · روسی · چینی — رابط، خطاها و راهنما، همه ترجمه‌شده."],
+  ] as const;
+
+  const en = [
+    ["Semantic search", "No keywords needed — embeddings live in D1, so it works without a vector service."],
+    ["12-tab dossier", "Growth, bus factor, merge rate, release assets, CI and security from one GraphQL query."],
+    ["Multi-model AI", "11 models in three tiers plus a jury tier. Repo chat answers with citations."],
+    ["Download &amp; audit", "Streaming split downloads · OSV dependency scans · leaked-key hunt · CVE alerts."],
+    ["Event-driven hub", "Takes events, runs workflows, drafts the post — and publishes only when you approve."],
+    ["5 languages, 93 commands", "Persian · English · Arabic · Russian · Chinese, UI and errors included."],
+  ] as const;
+
+  const card = (list: readonly (readonly [string, string])[]) =>
+    list.map(([t, d]) =>
+      `<div class="feat"><b>${t}</b><span>${d}</span></div>`).join("");
+
   return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
-<title>GitHub Lens Ultra</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GitHub Lens Ultra — ربات کشف و تحلیل اوپن‌سورس</title>
+<meta name="description" content="ربات تلگرامِ کاوش، تحلیل، ترجمه، امنیت و دانلود اوپن‌سورس + هاب رویدادمحور — کاملاً روی Cloudflare.">
+<meta property="og:title" content="GitHub Lens Ultra">
+<meta property="og:description" content="کاوش، تحلیل، ترجمه و دانلود اوپن‌سورس در تلگرام — با هاب رویدادمحور و دروازهٔ تأیید انسانی.">
+<meta property="og:image" content="${raw}/start-banner.jpg">
+<meta name="theme-color" content="#070b14">
 <style>
-:root{--bg:#0b0f19;--fg:#e6edf3;--acc:#22d3ee;--acc2:#a3e635}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#0e2a3a 0%,var(--bg) 60%);color:var(--fg);
-font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px}
-.card{max-width:860px;width:100%;background:#111827cc;backdrop-filter:blur(8px);border:1px solid #1f2937;border-radius:24px;padding:40px;box-shadow:0 30px 80px #000a}
-h1{margin:0 0 8px;font-size:40px;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
-p.sub{color:#9ca3af;margin:0 0 28px;font-size:17px;line-height:1.8}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:26px}
-.feat{background:#0b1220;border:1px solid #1f2937;border-radius:14px;padding:16px}
-.feat b{color:var(--acc);display:block;margin-bottom:6px}
-.feat span{color:#9ca3af;font-size:14px;line-height:1.6}
-.row{display:flex;gap:12px;flex-wrap:wrap}
-a.btn{flex:1;min-width:200px;text-align:center;padding:14px 18px;border-radius:12px;background:linear-gradient(90deg,var(--acc),var(--acc2));color:#04141a;font-weight:700;text-decoration:none}
-a.btn2{background:#1f2937;color:var(--fg)}
-code{background:#0b1220;padding:2px 6px;border-radius:6px;color:var(--acc2);font-size:13px}
-.foot{margin-top:24px;color:#6b7280;font-size:13px;line-height:1.9}
-</style></head><body><div class="card">
-<h1>GitHub Lens Ultra</h1>
-<p class="sub">ربات تلگرام کشف، تحلیل و دانلود اوپن‌سورس — کاملاً روی لبه Cloudflare.<br>
-نسل بعدی <b>GitHub Lens</b>، با ۱۲۰ قابلیت بیشتر و عمق واقعی داده.</p>
-<div class="grid">
-  <div class="feat"><b>🛰 کاوش عمیق ۱۲ تبی</b><span>نمای کلی، رشد، زبان‌ها، جامعه، ریلیز، ایشو، PR، کامیت، CI، امنیت، چنج‌لاگ، مشارکت</span></div>
-  <div class="feat"><b>🧠 چت با مخزن (RAG)</b><span>پاسخ از README و مستندات با منبع‌دهی و استناد</span></div>
-  <div class="feat"><b>📥 دانلود سورس هوشمند</b><span>کش R2، انتخاب برنچ/تگ، تقسیم خودکار پارت‌ها، آفلاود به Actions</span></div>
-  <div class="feat"><b>🛡 امنیت واقعی</b><span>اسکن وابستگی با OSV، شکار کلید لو رفته، هشدار CVE لحظه‌ای</span></div>
-  <div class="feat"><b>📡 رادار شبکه</b><span>IP، ASN، DNS، TLS، وضعیت تهدید، تبدیل پکیج deb/rpm/arch/apk</span></div>
-  <div class="feat"><b>🎙 پادکست روزانه</b><span>خلاصه صوتی فارسی از پروژه‌های داغ، تولید خودکار با Workers AI</span></div>
+:root{--bg:#070b14;--fg:#e8f0fa;--mut:#93a4bd;--acc:#4de2ff;--acc2:#a6ff6b;--line:#1b2637;--card:#0d1524}
+*{box-sizing:border-box}
+body{margin:0;background:
+  radial-gradient(900px 520px at 88% -8%,rgba(77,226,255,.16),transparent 62%),
+  radial-gradient(760px 520px at 6% 8%,rgba(166,255,107,.12),transparent 60%),var(--bg);
+  color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.85;
+  min-height:100vh;padding:28px 18px 40px}
+.wrap{max-width:900px;margin:0 auto}
+.hero{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.mark{width:76px;height:76px;border-radius:22px;border:1px solid var(--line);background:#0b1220;object-fit:cover}
+h1{margin:0;font-size:clamp(26px,5vw,40px);letter-spacing:-.4px}
+h1 span{background:linear-gradient(96deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.tag{margin:2px 0 0;color:var(--mut);font-size:15px}
+.banner{margin:26px 0 22px;border-radius:20px;border:1px solid var(--line);width:100%;display:block;
+  box-shadow:0 26px 60px rgba(0,0,0,.5)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:12px;margin:22px 0 26px}
+.feat{background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.02));border:1px solid var(--line);
+  border-radius:16px;padding:15px 16px}
+.feat b{display:block;color:var(--acc);font-size:15px;margin-bottom:4px}
+.feat span{color:var(--mut);font-size:13.5px;line-height:1.75}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+a.btn{flex:1 1 240px;text-align:center;padding:15px 20px;border-radius:14px;text-decoration:none;font-weight:800;font-size:16px;
+  background:linear-gradient(96deg,var(--acc),var(--acc2));color:#04141a;transition:transform .15s}
+a.btn.alt{background:var(--card);border:1px solid var(--line);color:var(--fg)}
+a.btn:active{transform:scale(.98)}
+.foot{color:#6d7c92;font-size:13px;border-top:1px solid var(--line);padding-top:16px;display:flex;flex-wrap:wrap;gap:8px 18px}
+a{color:var(--acc)}
+code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radius:6px;font-size:12.5px}
+.en{direction:ltr;text-align:left;margin-top:26px;color:var(--mut);font-size:13.5px}
+.en b{color:var(--fg)}
+</style></head><body><div class="wrap">
+
+<div class="hero">
+  <img class="mark" src="${raw}/avatar-web.png" alt="GitHub Lens Ultra" loading="lazy">
+  <div>
+    <h1>GitHub <span>Lens Ultra</span></h1>
+    <p class="tag">کاوش، تحلیل، ترجمه، امنیت و دانلود اوپن‌سورس — به‌همراه هاب رویدادمحور با دروازهٔ تأیید انسانی.</p>
+  </div>
 </div>
+
+<img class="banner" src="${raw}/start-banner.jpg" alt="GitHub Lens Ultra" loading="lazy">
+
+<div class="grid">${card(fa)}</div>
+
 <div class="row">
-  <a class="btn" href="https://t.me/RepoFA">🚀 باز کردن ربات در تلگرام</a>
-  <a class="btn btn2" href="/app">📊 نسخه وب (Mini App)</a>
+  <a class="btn" href="https://t.me/${bot}">🚀 باز کردن ربات در تلگرام</a>
+  <a class="btn alt" href="/app">📱 نسخهٔ وب (Mini App)</a>
 </div>
+
 <div class="foot">
-نسخه ۱.۰ · ساخته‌شده با Workers · D1 · R2 · Queues · Durable Objects · Vectorize · Workers AI · Browser Rendering<br>
-منابع: <code>/health</code>
+  <span>✅ سرویس‌ورکر فعال — <a href="${health}">${health}</a></span>
+  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۳۶ تست</span>
+  <span>💻 <a href="https://github.com/${repo}">github.com/${repo}</a></span>
+  <span>© ${year}</span>
 </div>
+
+<div class="en">
+  <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
+  multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
+  drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
+  <br>93 commands · 33 D1 tables · 236 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+</div>
+
 </div></body></html>`;
 }
 

@@ -4,7 +4,7 @@ import { tgEscape } from "../tg/types";
 
 /**
  * MultiHub Industrial Suite:
- * 1. Hugging Face AI Architecture Inspector:
+ * 1. GitLab inspector:
  *    - Real safetensors parameter calculation
  *    - Quantization tensor breakdown (FP16, Q8_0, Q4_K_M, AWQ)
  *    - GPU VRAM footprint math: KV-cache buffer + context window weight overhead
@@ -34,10 +34,8 @@ export class MultiHub {
     const fa = h.loc === "fa";
     const title = fa
       ? `🌐 <b>ابر‌مرکز مهندسی، دوآپس و زیرساخت ابری (Enterprise Cloud & AI Hub)</b>\n\n` +
-        `<blockquote>مرکز فرماندهی یکپارچه مهندسی: دیده‌بان تخصصی هاگینگ‌فیس، بازرسی عمیق گیت‌لب، مانیتورینگ دوآپس سرورها، اجرای زنده کد و تولید محتوای مهندسی</blockquote>\n\n` +
+        `<blockquote>مرکز فرماندهی یکپارچه مهندسی: بازرسی عمیق گیت‌لب، پایش زیرساخت، اجرای زندهٔ پایتون و استودیوی نشر کانال</blockquote>\n\n` +
         `🎛 <b>سامانه‌های فعال عملیاتی:</b>\n` +
-        `• 🧠 <b>دیده‌بان مدل‌های هوش مصنوعی Hugging Face</b>\n` +
-        `  تحلیل وزن‌ها، محاسبه دقیق VRAM پردازنده گرافیکی، تگ‌های کوانتایزیشن (GGUF/AWQ/EXL2) و اسنیپت اجرا\n\n` +
         `• 🦊 <b>دیده‌بان و بازرس عمیق GitLab</b>\n` +
         `  تحلیل خطوط لوله CI/CD، تعهدات (کامیت‌ها)، انتشارهای رسمی، بررسی وضعیت امنیت و دریافت آرشیو سورس\n\n` +
         `• ☁️ <b>مرکز پایش زیرساخت ابری و سرور (DevOps Monitor)</b>\n` +
@@ -46,8 +44,8 @@ export class MultiHub {
         `  طراحی پست‌های تحلیلی، ساختاریافته و چشم‌نواز کانال تلگرام به همراه تست، دستورات ترمینال و تحلیل ارزش افزوده\n\n` +
         `• ⚡ <b>ران‌تایم و سندباکس ابری پایتون (Cloud Execution Engine)</b>\n` +
         `  اجرای ایزوله، سنجش مصرف حافظه، زمان اجرای میلی‌ثانیه‌ای (Execution Benchmark) و تحلیل خطاهای Traceback`
-      : `🌐 <b>Enterprise Cloud, DevOps & AI Hub</b>\n\n` +
-        `<blockquote>Beyond GitHub: Deep Hugging Face intelligence, GitLab inspection, DevOps monitoring, and live Python profiling.</blockquote>`;
+      : `🌐 <b>Enterprise Cloud & DevOps Hub</b>\n\n` +
+        `<blockquote>Beyond GitHub: GitLab inspection, DevOps monitoring, and live Python profiling.</blockquote>`;
 
     return h.reply(
       title,
@@ -68,7 +66,7 @@ export class MultiHub {
     );
   }
 
-  /** 1. Hugging Face Deep Model Intelligence */
+  /** 1. GitLab deep inspector */
   async gitlabPrompt(h: H) {
     const fa = h.loc === "fa";
     return h.reply(

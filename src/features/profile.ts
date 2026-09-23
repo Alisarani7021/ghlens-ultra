@@ -1,4 +1,5 @@
 import type { H } from "../core/handler";
+import { botUsername } from "../env";
 import { GithubRest } from "../github/rest";
 import { fmt, rel } from "./cards";
 import { bar } from "../github/rest";
@@ -279,7 +280,7 @@ export class ProfileFeature {
   async referral(h: H) {
     const fa = h.loc === "fa";
     const u = await h.store.user(h.u.id);
-    const link = `https://t.me/${h.env.BOT_USERNAME}?start=ref_${u?.referral_code ?? "code"}`;
+    const link = `https://t.me/${botUsername(h.env)}?start=ref_${u?.referral_code ?? "code"}`;
     const invited = await h.env.DB.prepare(`SELECT COUNT(*) AS c FROM users WHERE referral_by=?`).bind(h.u.id).first<{ c: number }>().catch(() => null);
     await h.reply(
       `🎁 <b>${fa ? "دعوت دوستان" : "Refer friends"}</b>\n\n` +

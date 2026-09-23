@@ -234,7 +234,7 @@ export class BrowseFeature {
       ["facebook", "🔷 Meta"], ["openai", "🧠 OpenAI"], ["vercel", "▲ Vercel"],
       ["github", "🐙 GitHub"], ["mozilla", "🦊 Mozilla"], ["apache", "🪶 Apache"],
       ["Netflix", "🎬 Netflix"], ["Uber", "🚗 Uber"], ["airbnb", "🏠 Airbnb"],
-      ["alibaba", "🅰️ Alibaba"], ["huggingface", "🤗 Hugging Face"], ["supabase", "⚡ Supabase"],
+      ["alibaba", "🅰️ Alibaba"], ["supabase", "⚡ Supabase"],
       ["torvalds", "🐧 Linus Torvalds"], ["sindresorhus", "😺 Sindre Sorhus"], ["antfu", "🎨 Anthony Fu"],
     ];
     await h.reply(

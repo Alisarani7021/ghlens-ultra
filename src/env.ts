@@ -68,3 +68,14 @@ export const num = (v: string | undefined | null, def: number) => {
 
 export const isAdmin = (env: Env, id: number) =>
   (env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(String(id));
+
+/**
+ * The bot's own @username.
+ *
+ * It lives in a secret, and secrets can be empty — an empty string is not null,
+ * so `env.BOT_USERNAME ?? "fallback"` happily produced `https://t.me/` and every
+ * "open in the bot" link in the mini app went nowhere. One helper, used
+ * everywhere, with a default that is at least the right bot.
+ */
+export const botUsername = (env: Env): string =>
+  String((env as any).BOT_USERNAME || "").trim().replace(/^@/, "") || "Gitguts_bot";
