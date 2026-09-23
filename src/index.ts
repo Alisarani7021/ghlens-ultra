@@ -252,7 +252,7 @@ export default {
         );
       }
 
-      // ── public API used by the mini-app + share cards + magic links ────
+      // ── public JSON API (share cards, magic links, integrations) ────────
       // ── file ingest over HTTP ───────────────────────────────────────────
       // The Telegram path can only accept what the Bot API will hand over
       // (20MB, and only from a real chat). This is the same pipeline reachable
@@ -1022,7 +1022,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
 
   switch (cmd) {
     case "/start": {
-      // mini-app deep links: s_/d_/t_/c_ + owner/repo open the right screen
+      // deep links: s_/d_/t_/c_ + owner/repo open the right screen
       if (arg === "k_keys") return keysFeature.home(h);
       if (arg === "hub" || arg === "cloud") return hubOS.home(h);
       if (arg.startsWith("repo_")) {
@@ -2234,10 +2234,6 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
 
 </div></body></html>`;
 }
-
-/** Mini-app: Telegram WebApp dashboard (charts, search, favourites). */
-
-
 
 // ─── GitHub token storage (AES-GCM, never plaintext in D1) ─────────────────
 

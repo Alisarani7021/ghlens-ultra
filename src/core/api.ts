@@ -7,8 +7,8 @@ import { fmt } from "../features/cards";
 
 /**
  * Public JSON API — share cards and read-only integrations (no secrets leaked,
- * CORS-enabled). It is not a web front-end any more: the Mini App was removed,
- * so nothing here is a page a browser is expected to render except the cards.
+ * CORS-enabled). There is no web front-end — the chat is the interface — so the
+ * only thing here a browser is expected to render is a share card.
  *
  *   GET /api/repo?full=owner/repo  — normalised repo JSON
  *   GET /api/card?repo=owner/repo  — standalone HTML share card (screenshot target)
@@ -82,7 +82,8 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
 }
 
 /**
- * Mini-app data.
+ * Public JSON: boards, search, repo cards — anything a share card or an
+  * integration needs.
  *
  * Board periods are served with a graceful fallback: the 15-minute cron writes
  * snapshots for the daily board only, so weekly/monthly growth is computed from
