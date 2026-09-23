@@ -38,6 +38,49 @@ function safeJson(s: any): any {
  *  Everything is reachable from one place on purpose: a control plane with a
  *  treasure map is not a control plane.
  */
+
+/**
+ * Turn a typed line into a connector config — the way a person types it.
+ *
+ * `channel: "@my_channel" | "-100..."` is documentation, not syntax: the pipe
+ * separates alternatives, the quotes are decoration, and `channel:`/`url:` is a
+ * label people copy along with the value. All three were accepted by the hint
+ * and rejected by the parser, which is how a working channel looked like a
+ * missing one.
+ *
+ * For Telegram there is a second, better path: a message forwarded from the
+ * channel already carries its id, so the owner never has to find `-100…`.
+ */
+export function configFor(kind: string, input: string, msg?: any): Record<string, any> {
+  const value = (raw: string) => raw.trim()
+    .replace(/^[a-zA-Z_]+\s*:\s*/, "")          // `channel: x`, `url: x`
+    .replace(/^["'«`]+|["'»`]+$/g, "")            // the hint's quotes
+    .trim();
+
+  // commas and newlines separate fields; `|` separates alternatives — never data
+  const parts = input.split(/[,\n|]/).map(value).filter(Boolean);
+
+  // a forwarded post carries the channel's numeric id, so nothing needs typing
+  const fwd = msg?.forward_from_chat ?? msg?.forward_origin?.chat;
+  if (kind === "telegram" && fwd?.type === "channel" && fwd.id) return { channel: String(fwd.id) };
+
+  if (kind === "telegram") {
+    const looks = /^@[A-Za-z0-9_]{3,}$|^-?\d{6,}$|t\.me\//i;
+    const picked = parts.find((x) => looks.test(x)) ?? "";
+    // https://t.me/name and t.me/name both mean the same channel as @name
+    const channel = picked.replace(/^https?:\/\/t\.me\//i, "@").replace(/^t\.me\//i, "@");
+    return { channel };
+  }
+  if (kind === "github") {
+    return {
+      repos: parts.map((x) => x.replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, ""))
+        .filter((x) => /^[\w.-]+\/[\w.-]+$/.test(x)).slice(0, 25),
+    };
+  }
+  // rss + http: the first thing that is a URL wins, labels and quotes ignored
+  return { url: parts.find((x) => /^https?:\/\//i.test(x)) ?? parts[0] ?? "" };
+}
+
 export class HubOS {
   // ── home ────────────────────────────────────────────────────────────────
   async home(h: H) {
@@ -142,15 +185,21 @@ export class HubOS {
     await setMode(h.session, "hos:conn:add", { kind });
     return h.tg.sendMessage(
       h.chatId,
-      (fa
-        ? `🔌 <b>افزودن کانکتور ${tgEscape(c.label)}</b>\n\n<blockquote>تنظیمات این کانکتور:\n<code>${tgEscape(c.configHint)}</code></blockquote>\n\n` +
-          `مقادیر را در یک خط و با کاما بنویس. مثال:\n`
-        : `🔌 <b>Add ${c.label} connector</b>\n\n<code>${tgEscape(c.configHint)}</code>\n\n`) +
+      (kind === "telegram"
+        ? (fa
+          ? `🔌 <b>افزودن کانکتور تلگرام</b>\n\n` +
+            `<blockquote>این کانکتور «منتشر می‌کند»: پست‌های هاب از اینجا به کانال می‌روند.</blockquote>\n\n` +
+            `<b>راه اول (ساده‌تر):</b> یک پست از کانالت را همین‌جا <b>فوروارد</b> کن — آیدی کانال خودش خوانده می‌شود.\n\n` +
+            `<b>راه دوم:</b> فقط این یک خط را بنویس:\n<code>channel: @your_channel</code>\n\n` +
+            `<b>پیش‌نیاز:</b> ربات باید در آن کانال <b>ادمین</b> باشد (با اجازهٔ ارسال پیام). کانال خصوصی هم می‌شود: آیدی عددی مثل <code>-1001234567890</code>.`
+          : `🔌 <b>Add the Telegram connector</b>\n\nForward any post from your channel, or send <code>channel: @your_channel</code>. The bot must be an admin there.`)
+        : (fa
+          ? `🔌 <b>افزودن کانکتور ${tgEscape(c.label)}</b>\n\n<blockquote>${tgEscape(c.configHint)}</blockquote>\n\n` +
+            `فقط مقدار را در یک خط بنویس؛ برچسب و کوتیشن لازم نیست:\n`
+          : `🔌 <b>Add ${c.label} connector</b>\n\n<code>${tgEscape(c.configHint)}</code>\n\n`) +
         (kind === "github"
           ? `<code>cloudflare/workers-sdk, oven-sh/bun</code>`
-          : kind === "rss"
-            ? `<code>https://blog.cloudflare.com/rss/</code>`
-            : `<code>https://api.github.com/repos/oven-sh/bun/releases/latest</code>`),
+          : `<code>https://blog.cloudflare.com/rss/</code>`)),
       { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:conn" }]]) as any },
     );
   }
@@ -160,11 +209,15 @@ export class HubOS {
     await clearMode(h.session);
     const c = connector(kind);
     if (!c) return h.toast("?");
-    const parts = input.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-    const config: Record<string, any> = {};
-    if (kind === "github") config.repos = parts.map((p) => p.replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "")).slice(0, 25);
-    else if (kind === "rss" || kind === "http") config.url = parts[0] ?? "";
-    const label = parts.length && kind === "github" ? `${config.repos.length} مخزن` : (config.url ?? "").slice(0, 60);
+
+    /* The owner typed the hint back at the bot — `channel: "@x" | "-100..."` —
+       and the connector answered "کانال تنظیم نشده", because there was no
+       telegram branch at all and the config stayed empty. Two lessons are baked
+       into configFor(): the hint's `|` means "or" and its quotes are decoration,
+       and a `key:` prefix is something people copy along with the value. */
+    const config = configFor(kind, input, h.msg);
+    const label = kind === "github" ? `${config.repos.length} مخزن`
+      : (config.channel ? `${config.channel}` : (config.url ?? "")).slice(0, 60);
 
     const id = hubId("con");
     await h.env.DB.prepare(
@@ -175,14 +228,21 @@ export class HubOS {
     // Test immediately — a connector that silently does nothing is worse than
     // one that says why it cannot work yet.
     const test = await c.test?.({ env: h.env, owner_id: h.u.id, config, cursor: null });
-    await h.env.DB.prepare(`UPDATE hub_connectors SET status=?, detail=?, last_poll=? WHERE id=?`)
-      .bind(test?.ok ? "ok" : "error", (test?.detail ?? "").slice(0, 200), Date.now(), id)
+    // the label becomes the channel's real name, so the list reads
+    // «🟢 ما می‌توانیم» instead of a username nobody recognises
+    await h.env.DB.prepare(`UPDATE hub_connectors SET status=?, detail=?, label=COALESCE(?, label), last_poll=? WHERE id=?`)
+      .bind(test?.ok ? "ok" : "error", (test?.detail ?? "").slice(0, 200), test?.title ?? null, Date.now(), id)
       .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
 
+    const hint = !test?.ok && kind === "telegram"
+      ? (fa
+        ? "\n\n👈 ربات را در کانال <b>ادمین</b> کن، بعد دوباره «➕ تلگرام» را بزن — یا یک پست از کانال را همین‌جا فوروارد کن."
+        : "\n\nAdd the bot as an <b>admin</b> of the channel and retry, or forward a post from it here.")
+      : "";
     await h.tg.sendMessage(
       h.chatId,
       (fa ? `✅ کانکتور <b>${tgEscape(c.label)}</b> اضافه شد\n\n` : `✅ ${c.label} connector added\n\n`) +
-        `${test?.ok ? "🟢" : "🔴"} ${tgEscape(test?.detail ?? "—")}`,
+        `${test?.ok ? "🟢" : "🔴"} ${tgEscape(test?.detail ?? "—")}${hint}`,
       { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "🧪 دریافت رویدادها الان" : "🧪 Poll now", cb: `hos:poll:${id}` }]]) as any },
     );
     return this.connectors(h);

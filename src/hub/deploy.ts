@@ -528,7 +528,17 @@ export async function provision(
     await say("⚠️ زیردامنهٔ workers.dev پیدا نشد", "بعداً در داشبورد روشنش کن");
   }
   const sched = await setSchedules(opts.token, account.id, ["*/15 * * * *", "0 * * * *", "0 6 * * *"], scriptName);
-  await say(sched.ok ? "✅ زمان‌بندی‌ها ثبت شد" : "⚠️ زمان‌بندی ثبت نشد", sched.ok ? "۳ کرون" : sched.error);
+  /* Free plans cap cron triggers per ACCOUNT (5), and other projects on the same
+     account usually own them all. That is a limit on *automatic* polling — the
+     copy still answers every command, receives webhooks instantly, and can pull
+     events by hand. So the failure is reported as exactly that, with the two
+     ways out, instead of a bare API error. */
+  await say(
+    sched.ok ? "✅ زمان‌بندی‌ها ثبت شد" : "⚠️ زمان‌بندی خودکار ثبت نشد (ربات کار می‌کند)",
+    sched.ok
+      ? "۳ کرون"
+      : `${String(sched.error).slice(0, 120)} — این فقط «زمان‌بندی خودکار» را خاموش می‌کند: فرمان‌ها و وبهوک‌ها کار می‌کنند و می‌توانی با دکمهٔ «دریافت رویدادها الان» دستی بکشی. برای روشن‌کردنش یا یک اسلات کرون از این حساب را آزاد کن، یا نسخه را با توکن یک حساب کلودفلر دیگر بساز (هر حساب سهمیهٔ خودش را دارد).`,
+  );
 
   // Without a consumer the queue fills up and nothing ever runs it.
   const cons = await cf(opts.token, `/accounts/${account.id}/queues/${queue.id}/consumers`, {

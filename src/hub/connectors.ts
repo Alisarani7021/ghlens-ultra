@@ -41,7 +41,7 @@ export interface Connector {
   actions: string[];
   /** human-readable description of what config it needs */
   configHint: string;
-  test?(ctx: ConnectorCtx): Promise<{ ok: boolean; detail: string }>;
+  test?(ctx: ConnectorCtx): Promise<{ ok: boolean; detail: string; title?: string }>;
   poll?(ctx: ConnectorCtx): Promise<ConnectorResult>;
   act?(ctx: ConnectorCtx, action: string, args: Record<string, any>): Promise<any>;
   /** parse a raw inbound body into events (webhook-shaped connectors) */
@@ -292,10 +292,36 @@ export const CONNECTORS: Record<string, Connector> = {
     async test(ctx) {
       const channel = ctx.config.channel;
       if (!channel) return { ok: false, detail: "کانال تنظیم نشده" };
-      const res: any = await fetch(`https://api.telegram.org/bot${ctx.env.BOT_TOKEN}/getChat?chat_id=${encodeURIComponent(channel)}`).then((r) => r.json()).catch(() => null);
-      return res?.ok
-        ? { ok: true, detail: `دسترسی تأیید شد — ${res.result?.title ?? channel} (${res.result?.type ?? "?"})` }
-        : { ok: false, detail: `ربات به این کانال دسترسی ندارد: ${res?.description ?? "خطای شبکه"}` };
+      const api = (m: string, q = "") =>
+        fetch(`https://api.telegram.org/bot${ctx.env.BOT_TOKEN}/${m}${q}`).then((r) => r.json()).catch(() => null);
+
+      /* getChat alone answers for any *public* channel, member or not — which is
+         how this test reported «دسترسی تأیید شد» for a channel the bot could not
+         post in. The only honest check is the bot's own membership: a bot can
+         publish to a channel if and only if it is an administrator there with
+         can_post_messages. */
+      const chat: any = await api("getChat", `?chat_id=${encodeURIComponent(channel)}`);
+      if (!chat?.ok) return { ok: false, detail: `کانال پیدا نشد: ${chat?.description ?? "خطای شبکه"}` };
+
+      const me: any = await api("getMe");
+      const member: any = me?.ok
+        ? await api("getChatMember", `?chat_id=${encodeURIComponent(channel)}&user_id=${me.result.id}`)
+        : null;
+      const status = member?.result?.status;
+      const canPost = member?.result?.can_post_messages !== false;
+      const title = chat.result?.title ?? channel;
+
+      if (status === "administrator" && canPost) {
+        return { ok: true, title: String(title), detail: `دسترسی تأیید شد — «${title}» (ادمین، اجازهٔ ارسال)` };
+      }
+      if (status === "administrator") {
+        return { ok: false, title: String(title), detail: `ربات ادمین «${title}» است ولی اجازهٔ «ارسال پیام» ندارد — در تنظیمات ادمین تیکش را بزن` };
+      }
+      return {
+        ok: false,
+        title: String(title),
+        detail: `ربات در «${title}» ادمین نیست — در کانال: تنظیمات → ادمین‌ها → افزودن ادمین → @${me?.result?.username ?? "Gitguts_bot"} با اجازهٔ ارسال پیام`,
+      };
     },
     async act(ctx, action, args) {
       const channel = args.channel ?? ctx.config.channel;
