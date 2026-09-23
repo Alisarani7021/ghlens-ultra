@@ -266,12 +266,11 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: L(loc, "devutils"), cb: "dvu:home" },
     ],
     [
-      { text: "👻 " + (fa ? "کارخانه بایپس و فرانتینگ ملی" : "Ghost Tunnel & Bypass"), cb: "gt:home" },
+      { text: L(loc, "contribute"), cb: "c:home" },
       { text: "📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), cb: "nr:home" },
     ],
     [
       { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
-      { text: L(loc, "contribute"), cb: "c:home" },
     ],
     [
       { text: L(loc, "fav"), cb: "f:list" },

@@ -53,11 +53,10 @@ export class MultiHub {
       title,
       kb(
         [
-          { text: "👻 " + (fa ? "کارخانه بایپس و تونل‌های نامرئی" : "Ghost Tunnel Lab"), cb: "gt:home" },
           { text: "🦊 " + (fa ? "کاوشگر و بازرس GitLab" : "GitLab Deep Inspector"), cb: "hub:gitlab" },
+          { text: "☁️ " + (fa ? "پایش زنده سرور و زیرساخت" : "DevOps Live Monitor"), cb: "hub:cloud" },
         ],
         [
-          { text: "☁️ " + (fa ? "پایش زنده سرور و زیرساخت" : "DevOps Live Monitor"), cb: "hub:cloud" },
           { text: "📢 " + (fa ? "استودیوی نشر تخصصی کانال" : "Channel Editorial Studio"), cb: "hub:postmaker" },
         ],
         [
@@ -400,15 +399,21 @@ export class MultiHub {
   /** 5. Python Sandbox & Execution Profiler */
   async pySandboxPrompt(h: H) {
     const fa = h.loc === "fa";
-    return h.reply(
+    // Send as fresh new message instead of editMessageText so Telegram client immediately focuses input
+    return h.tg.sendMessage(
+      h.chatId,
       fa
-        ? `⚡ <b>ران‌تایم و سندباکس ابری پایتون (Python Execution & Profiling Engine)</b>\n\n` +
-          `<blockquote>کد یا الگوریتم پایتون خود را بفرستید تا علاوه بر اجرای دقیق کنسول، تحلیل پیچیدگی زمانی (Big-O)، حافظه مصرفی و زمان اجرای میلی‌ثانیه‌ای (Benchmark) محاسبه شود.</blockquote>\n\n` +
-          `یک قطعه کد پایتون بفرستید (مثلاً:\n` +
-          `<code>def fib(n):\n    return n if n <= 1 else fib(n-1) + fib(n-2)\nprint([fib(i) for i in range(8)])</code>)`
-        : `⚡ <b>Python Execution Sandbox</b>\n\nSend Python code to execute and profile.`,
-      kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]),
-      !!h.cbId,
+        ? `⚡ <b>محیط اجرای زنده و بنچمارک پایتون (Python Cloud Engine)</b>\n\n` +
+          `<blockquote>آمادهٔ دریافت کد: کد یا اسکریپت پایتون خود را در کادر پیام زیر بنویس و ارسال کن تا در کانتینر ابری اجرا و بنچمارک شود:</blockquote>\n\n` +
+          `📝 <b>نمونه کدهایی که می‌توانی بفرستی:</b>\n` +
+          `<code>print("Hello World!")</code>\n` +
+          `یا\n` +
+          `<code>import math\nprint(math.factorial(10))</code>`
+        : `⚡ <b>Python Cloud Engine</b>\n\nSend any Python code snippet to execute and profile.`,
+      {
+        parse_mode: "HTML",
+        reply_markup: kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]) as any,
+      }
     );
   }
 

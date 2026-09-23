@@ -2,7 +2,6 @@ import { NetRadar } from "./features/netradar";
 import { ArchitectureExplainer } from "./features/architecture";
 import { AppGen } from "./features/appgen";
 import { MultiHub } from "./features/multihub";
-import { GhostTunnel } from "./features/ghosttunnel";
 import type { Ctx, Env, Job } from "./env";
 import { isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
@@ -65,7 +64,6 @@ const netRadar = new NetRadar();
 const archExplainer = new ArchitectureExplainer();
 const appGen = new AppGen();
 const multiHub = new MultiHub();
-const ghostTunnel = new GhostTunnel();
 
 export default {
   async fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> {
@@ -904,9 +902,6 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
       case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
-      case "gt_autotoken": return async (t: string) => { await clearMode(h.session); return ghostTunnel.deployWithToken(h, t); };
-      case "gt_build": return async (t: string) => { await clearMode(h.session); return ghostTunnel.generateForUser(h, t); };
-      case "gt_frag": return async (t: string) => { await clearMode(h.session); return ghostTunnel.injectFragment(h, t); };
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1093,7 +1088,6 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/arch": case "/architecture": return archExplainer.explain(h, arg);
     case "/appgen": case "/createapp": return appGen.prompt(h);
     case "/hub": case "/cloud": return multiHub.home(h);
-    case "/ghost": case "/bypass": return ghostTunnel.home(h);
     case "/hf": return multiHub.hfRadar(h);
     case "/gitlab": { await setMode(h.session, "hub_gitlab"); return multiHub.gitlabPrompt(h); }
     case "/postmaker": { await setMode(h.session, "hub_post"); return multiHub.postMakerPrompt(h); }
@@ -1552,23 +1546,6 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "prompt") {
           await setMode(h.session, "appgen");
           return appGen.prompt(h);
-        }
-        break;
-
-      // ── ghost tunnel & bypass lab ──
-      case "gt":
-        if (action === "home") return ghostTunnel.home(h);
-        if (action === "autotoken") {
-          await setMode(h.session, "gt_autotoken");
-          return ghostTunnel.autoTokenPrompt(h);
-        }
-        if (action === "build") {
-          await setMode(h.session, "gt_build");
-          return ghostTunnel.buildPrompt(h);
-        }
-        if (action === "frag") {
-          await setMode(h.session, "gt_frag");
-          return ghostTunnel.fragmentPrompt(h);
         }
         break;
 
