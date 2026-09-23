@@ -1,6 +1,7 @@
 import { NetRadar } from "./features/netradar";
 import { ArchitectureExplainer } from "./features/architecture";
 import { AppGen } from "./features/appgen";
+import { MultiHub } from "./features/multihub";
 import type { Ctx, Env, Job } from "./env";
 import { isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
@@ -62,6 +63,7 @@ const admin = new Admin();
 const netRadar = new NetRadar();
 const archExplainer = new ArchitectureExplainer();
 const appGen = new AppGen();
+const multiHub = new MultiHub();
 
 export default {
   async fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> {
@@ -897,6 +899,9 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "tr": return (t) => assistant.translateReadme(h, t.trim());
       case "wf": return (t) => assistant.workflow(h, t);
       case "appgen": return async (t: string) => { await clearMode(h.session); return appGen.build(h, t); };
+      case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
+      case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
+      case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1082,6 +1087,11 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/netradar": case "/vpn": case "/proxy": return netRadar.home(h);
     case "/arch": case "/architecture": return archExplainer.explain(h, arg);
     case "/appgen": case "/createapp": return appGen.prompt(h);
+    case "/hub": case "/cloud": return multiHub.home(h);
+    case "/hf": return multiHub.hfRadar(h);
+    case "/gitlab": { await setMode(h.session, "hub_gitlab"); return multiHub.gitlabPrompt(h); }
+    case "/postmaker": { await setMode(h.session, "hub_post"); return multiHub.postMakerPrompt(h); }
+    case "/py": case "/python": { await setMode(h.session, "hub_py"); return multiHub.pySandboxPrompt(h); }
     case "/contribute": return contribute.home(h);
     case "/issues": return contribute.issues(h);
     case "/firstpr": return contribute.firstpr(h);
@@ -1536,6 +1546,29 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "prompt") {
           await setMode(h.session, "appgen");
           return appGen.prompt(h);
+        }
+        break;
+
+      // ── multi-cloud and ai hub ──
+      case "hub":
+        if (action === "home") return multiHub.home(h);
+        if (action === "hf") return multiHub.hfRadar(h);
+        if (action === "gitlab") {
+          await setMode(h.session, "hub_gitlab");
+          return multiHub.gitlabPrompt(h);
+        }
+        if (action === "cloud") return multiHub.cloudMonitor(h);
+        if (action === "postmaker") {
+          await setMode(h.session, "hub_post");
+          return multiHub.postMakerPrompt(h);
+        }
+        if (action === "repost") {
+          const q = decodeURIComponent(args[0] ?? "");
+          return multiHub.buildChannelPost(h, q);
+        }
+        if (action === "pyrun") {
+          await setMode(h.session, "hub_py");
+          return multiHub.pySandboxPrompt(h);
         }
         break;
       // ── admin ──

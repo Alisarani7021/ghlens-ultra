@@ -165,14 +165,30 @@ export class Assistant {
     // question — say so plainly and point at the original text, instead of
     // showing an empty answer over the word "پیدا نشد".
     const header = mode === "extractive"
-      ? `📑 <b>${tgEscape(full)}</b>\n<i>${fa ? "سؤال" : "Q"}: ${tgEscape(truncate(question, 140))}</i>\n` +
+      ? `📑 <b>${tgEscape(full)}</b>\n<blockquote>❓ <b>${fa ? "سؤال" : "Question"}:</b> ${tgEscape(truncate(question, 140))}</blockquote>\n` +
         `<i>${fa ? "هوش مصنوعی در دسترس نبود؛ این‌ها مرتبط‌ترین بخش‌های مستندات خود مخزن‌اند (عین متن)." : "AI unavailable — these are the most relevant passages from the repo's own docs."}</i>\n\n`
-      : `🧠 <b>${tgEscape(full)}</b>\n<i>${fa ? "سؤال" : "Q"}: ${tgEscape(truncate(question, 140))}</i>\n\n`;
+      : `🧠 <b>${tgEscape(full)}</b>\n<blockquote>❓ <b>${fa ? "سؤال" : "Question"}:</b> ${tgEscape(truncate(question, 140))}</blockquote>\n\n`;
+
+    // Filter out corrupted/binary/mojibake sources
+    const validSources = sources
+      .map(s => {
+        // clean any control characters or non-printable mojibake
+        const cleanExcerpt = s.excerpt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim();
+        return { ...s, excerpt: cleanExcerpt };
+      })
+      .filter(s => s.excerpt.length > 10 && !/^[\s\W_]+$/.test(s.excerpt))
+      .slice(0, 3);
+
+    const sourcesBlock = validSources.length > 0
+      ? `\n\n<blockquote>📚 <b>${fa ? "منابع ارجاع‌شده در مستندات مخزن" : "Referenced Passages"}:</b>\n` +
+        validSources.map(s => `• <b>[${s.n}]</b> <code>${tgEscape(truncate(s.excerpt.replace(/\s+/g, " "), 90))}</code>`).join("\n") +
+        `</blockquote>`
+      : "";
+
     await h.reply(
       header +
-        truncate(answer, 3300) +
-        `\n\n──────────\n<b>${fa ? "منابع" : "Sources"}</b>\n` +
-        sources.slice(0, 4).map((s) => `[${s.n}] ${i(truncate(s.excerpt, 120))} (${s.score})`).join("\n"),
+        truncate(answer, 3100) +
+        sourcesBlock,
       kb(
         [
           { text: "🔁 " + (fa ? "سؤال بعدی" : "Next question"), cb: `a:repochat:${full}` },
@@ -487,8 +503,14 @@ export class Assistant {
 }
 
 // helpers
-export function decodeB64(s: string) {
-  try { return atob(s.replace(/\s/g, "")); } catch { return ""; }
+export function decodeB64(s: string): string {
+  try {
+    const bin = atob(s.replace(/\s/g, ""));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    try { return atob(s.replace(/\s/g, "")); } catch { return ""; }
+  }
 }
 function splitMd(md: string, size: number): string[] {
   const out: string[] = [];

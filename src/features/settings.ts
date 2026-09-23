@@ -270,6 +270,9 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: "📡 " + (fa ? "رادار اینترنت آزاد" : "Net Radar"), cb: "nr:home" },
     ],
     [
+      { text: "🌐 " + (fa ? "ابر‌مرکز دوآپس و هوش مصنوعی" : "Cloud & AI Hub"), cb: "hub:home" },
+    ],
+    [
       { text: L(loc, "fav"), cb: "f:list" },
       { text: L(loc, "subs"), cb: "sub:list" },
     ],

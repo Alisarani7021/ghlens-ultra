@@ -48,21 +48,25 @@ export class ArchitectureExplainer {
     const items = Array.isArray(rootFiles) ? rootFiles : [];
     const files = items.slice(0, 40).map((t: any) => `${t.type === "dir" ? "📁" : "📄"} ${t.path}`);
     const fileListSnippet = files.join("\n");
-    const readmeSnippet = readmeRaw?.content ? atob(readmeRaw.content.replace(/\s/g, "")).slice(0, 2000) : "";
+    const readmeSnippet = readmeRaw?.content ? new TextDecoder("utf-8").decode(Uint8Array.from(atob(readmeRaw.content.replace(/\s/g, "")), (c: string) => c.charCodeAt(0))).slice(0, 2000) : "";
 
     const prompt =
-      `You are a senior software architect. Analyze the repository "${full}" based on its file tree and description.\n` +
+      `You are a principal software architect.\n` +
+      `Provide a high-end, clean architectural blueprint for the repository "${full}".\n` +
       `Description: ${repo.description ?? "none"}\n` +
       `Primary Language: ${repo.language ?? "unknown"}\n` +
-      `File paths (sample):\n${fileListSnippet}\n\n` +
+      `File paths:\n${fileListSnippet}\n\n` +
       `Readme excerpt:\n${readmeSnippet}\n\n` +
-      `Provide a clear, crisp architecture breakdown in ${fa ? "fluent Persian" : "English"}:\n` +
-      `1. 🎯 Entrypoint & Core: Where execution starts (main files)\n` +
-      `2. 🔄 Data Flow: How requests/data flow from input to output\n` +
-      `3. 🧩 Key Modules: Roles of major directories/files\n` +
-      `4. ⚡ Tech Stack & Architecture Pattern (e.g. Clean Arch, Monolith, MVC, Microservice)\n` +
-      `5. 💡 Summary for newcomers (1 sentence)\n\n` +
-      `Keep it structured with clean bullet points and emojis. Do not exceed 3200 characters.`;
+      `Language of response: ${fa ? "Fluent Persian (فارسی روان و تمیز مهندسی)" : "English"}.\n` +
+      `IMPORTANT FORMATTING RULES:\n` +
+      `- DO NOT use Markdown tables (no '|' pipes or table bars). Use clean bullet points instead.\n` +
+      `- Use Telegram blockquote (starting with '> ') for the high-level summary/verdict.\n` +
+      `- Organize cleanly into 4 distinct sections with bold titles:\n` +
+      `  🎯 **هسته و نقطه ورود** (Entrypoint & Core Execution)\n` +
+      `  🔄 **جریان داده و چرخه حیات** (Data & Request Lifecycle)\n` +
+      `  🧩 **ماژول‌ها و ساختار پوشه‌ها** (Core Modules & Directory Map)\n` +
+      `  ⚡ **الگوی معماری و استک** (Architectural Pattern & Tech Stack)\n` +
+      `- Total length strictly under 2800 characters.`;
 
     const analysis = await h.ai.chat(prompt, {
       tier: "smart",
@@ -71,10 +75,11 @@ export class ArchitectureExplainer {
       feature: "architecture",
     });
 
+    const formattedAnalysis = markdownToTelegramHtml(analysis || (fa ? "تحلیل هوش مصنوعی در دسترس نبود." : "Analysis unavailable."));
     const body =
-      `🗺 <b>${fa ? "معماری و ساختار پروژه" : "Project Architecture & Code Flow"}</b>\n` +
-      `📦 <b>${tgEscape(full)}</b> · ⭐ ${repo.stargazers_count ?? 0} · 🧩 ${repo.language ?? "—"}\n\n` +
-      (analysis || (fa ? "تحلیل هوش مصنوعی در دسترس نبود." : "Analysis unavailable."));
+      `🗺 <b>${fa ? "معماری و مهندسی پروژه" : "Project Architecture & Engineering"}</b>\n` +
+      `📦 <b>${tgEscape(full)}</b> · ⭐ <b>${(repo.stargazers_count ?? 0).toLocaleString()}</b> · 🧩 <code>${repo.language ?? "—"}</code>\n\n` +
+      formattedAnalysis;
 
     return h.reply(
       body,
@@ -88,4 +93,63 @@ export class ArchitectureExplainer {
       true,
     );
   }
+}
+
+export function markdownToTelegramHtml(md: string): string {
+  if (!md) return "";
+  let text = md.trim();
+
+  // Escape HTML entities first to avoid broken tags
+  text = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks ```lang\ncode\n```
+  text = text.replace(/```(?:[a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_m, code) => {
+    return `<pre><code>${code.trim()}</code></pre>`;
+  });
+
+  // Inline code `code`
+  text = text.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+  // Bold & Italic ***text***
+  text = text.replace(/\*\*\*([^\*\n]+)\*\*\*/g, "<b><i>$1</i></b>");
+
+  // Bold **text**
+  text = text.replace(/\*\*([^\*\n]+)\*\*/g, "<b>$1</b>");
+
+  // Italic *text* or _text_
+  text = text.replace(/\*([^\*\n]+)\*/g, "<i>$1</i>");
+  text = text.replace(/(^|\s)_([^_]+)_(?=\s|$)/g, "$1<i>$2</i>");
+
+  // Markdown links [text](url)
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Strip markdown table separator lines |---|---|
+  text = text.replace(/^[ \t]*\|?[-:\s|]{3,}\|?[ \t]*$/gm, "");
+
+  // Convert table rows to neat bullet lines
+  text = text.replace(/^[ \t]*\|(.+)\|[ \t]*$/gm, (_m, row) => {
+    const cols = row.split("|").map((c: string) => c.trim().replace(/^<b>(.*)<\/b>$/, "$1")).filter(Boolean);
+    if (cols.length === 0) return "";
+    if (cols.length === 1) return `• ${cols[0]}`;
+    return `• <b>${cols[0]}:</b> ${cols.slice(1).join(" — ")}`;
+  });
+
+  // Headers ### Header -> <b>Header</b>
+  text = text.replace(/^#{1,6}\s*(.+)$/gm, "\n<b>$1</b>");
+
+  // Markdown lists - item or * item
+  text = text.replace(/^[*-]\s+(.+)$/gm, "• $1");
+
+  // Blockquotes > quote -> <blockquote>quote</blockquote>
+  text = text.replace(/^(?:&gt;|>)[ \t]?(.*)$/gm, "<blockquote>$1</blockquote>");
+  // Merge adjacent blockquotes
+  text = text.replace(/<\/blockquote>\n<blockquote>/g, "\n");
+
+  // Clean up excess newlines
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  return text.trim();
 }
