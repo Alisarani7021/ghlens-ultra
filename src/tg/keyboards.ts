@@ -111,7 +111,7 @@ export const kb = (...rows: BtnArg[]): InlineKeyboardMarkup => {
 
 export const L = (loc: Loc | string, key: string) => (LBL[(loc as Loc)] ?? LBL.en)[key] ?? LBL.en[key] ?? key;
 
-export const mainMenu = (loc: Loc, isAdmin = false, miniAppUrl?: string) =>
+export const mainMenu = (loc: Loc, isAdmin = false) =>
   kb(
     [
       { text: "🤝 " + (loc === "fa" ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
@@ -147,7 +147,7 @@ export const mainMenu = (loc: Loc, isAdmin = false, miniAppUrl?: string) =>
     ],
     [
       { text: L(loc, "profile"), cb: "me:home" },
-      { text: L(loc, "dashboard"), ...(miniAppUrl ? { web: miniAppUrl } : { cb: "me:dash" }) },
+      { text: L(loc, "dashboard"), cb: "me:dash" },
     ],
     [
       { text: L(loc, "lang"), cb: "lang:menu" },

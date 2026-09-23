@@ -17,3 +17,4 @@ echo "▸ tests"
 node scripts/sqlcheck.mjs | tail -1
 node scripts/check-dup-keys.mjs | tail -1
 node scripts/selftest.mjs | tail -1
+node scripts/test-rich.mjs | tail -1

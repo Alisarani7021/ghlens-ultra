@@ -27,6 +27,12 @@ export interface H {
   msg?: Message;
   /** Edits the current message if we're in a callback, otherwise sends. */
   reply(body: string, keyboard?: InlineKeyboardMarkup, edit?: boolean): Promise<void>;
+  /**
+   * Sends (or edits into) a *rich* message — headings, tables, collapsible
+   * blocks. Degrades to a normal HTML message by itself, so callers never have
+   * to care whether the API in front of them supports Bot API 10.3 formatting.
+   */
+  replyRich(html: string, keyboard?: InlineKeyboardMarkup, edit?: boolean): Promise<void>;
   toast(text: string, alert?: boolean): Promise<void>;
   loading(label?: string): Promise<void>;
   /** Session DO for wizards + hot cache. */

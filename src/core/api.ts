@@ -6,10 +6,10 @@ import { KeyPool } from "../ai/keypool";
 import { fmt } from "../features/cards";
 
 /**
- * Public JSON API — powers the Telegram Mini App, share cards and any
- * external integration (all read-only, no secrets leaked, CORS-enabled).
+ * Public JSON API — share cards and read-only integrations (no secrets leaked,
+ * CORS-enabled). It is not a web front-end any more: the Mini App was removed,
+ * so nothing here is a page a browser is expected to render except the cards.
  *
- *   GET /api/miniapp?kind=…        — data for the WebApp
  *   GET /api/repo?full=owner/repo  — normalised repo JSON
  *   GET /api/card?repo=owner/repo  — standalone HTML share card (screenshot target)
  *   GET /api/compare-card?a=&b=    — HTML comparison card
@@ -28,7 +28,6 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
 
   try {
     switch (url.pathname) {
-      case "/api/miniapp": return json(await miniapp(url, env, store), 200, cors);
       case "/api/gems": return json(await gemsFor(env, store), 200, cors);
       case "/api/me": {
         // Telegram WebApp initData is trusted only when its HMAC validates
@@ -75,7 +74,7 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
         return json({ total: res?.total_count ?? 0, items: (res?.items ?? []).map(brief) }, 200, cors);
       }
       default:
-        return json({ error: "unknown endpoint", endpoints: ["/api/miniapp", "/api/repo", "/api/card", "/api/compare-card", "/api/stats", "/api/search"] }, 404, cors);
+        return json({ error: "unknown endpoint", endpoints: ["/api/repo", "/api/card", "/api/compare-card", "/api/stats", "/api/search", "/api/gems"] }, 404, cors);
     }
   } catch (e: any) {
     return json({ error: String(e?.message ?? e) }, 500, cors);
@@ -91,43 +90,6 @@ export async function handleApi(request: Request, env: Env, ctx: Ctx): Promise<R
  * all-time board with an explicit note — the app never shows an empty feed for
  * a period just because the cron has not matured yet.
  */
-async function miniapp(url: URL, env: Env, store: Store) {
-  const kind = url.searchParams.get("kind") ?? "trending";
-  const period = (url.searchParams.get("period") ?? "daily") as "daily" | "weekly" | "monthly" | "all";
-  const q = url.searchParams.get("q") ?? "";
-
-  if (kind === "ai") {
-    const halted = await env.CACHE.get("ai:halt").catch(() => null);
-    const stats = await new KeyPool(env).stats().catch(() => ({ total: 0, ok: 0 }));
-    return {
-      ai_state: stats.ok > 0 ? "on" : halted ? "quota" : "idle",
-      pooled_keys: stats.total, healthy_keys: stats.ok,
-      hint: stats.total === 0 ? "donate a key to light up translation, summaries and repo chat" : undefined,
-    };
-  }
-  if (kind === "trending" || period !== "daily") {
-    const board = await boardFor(env, store, period);
-    return board;
-  }
-  switch (kind) {
-    case "search": {
-      const res = await new GithubRest(env).searchRepos(q || "stars:>5000", "stars", "desc", 15).catch(() => null);
-      return { items: (res?.items ?? []).map(fromGh) };
-    }
-    case "weekly": return boardFor(env, store, "weekly");
-    case "gems": {
-      const res = await new GithubRest(env).searchRepos("stars:100..1200 pushed:>2026-06-01 archived:false", "updated", "desc", 15).catch(() => null);
-      return { items: (res?.items ?? []).map((r: any) => ({ ...fromGh(r), health: healthScore({ stars: r.stargazers_count, forks: r.forks_count, open_issues: r.open_issues_count, pushed_at: r.pushed_at, created_at: r.created_at, license: r.license?.spdx_id, description: r.description, has_readme: true }) })) };
-    }
-    case "favorites": case "subs": {
-      // the mini-app sends Telegram initData; for the public read-only build we
-      // return a curated sample when identity cannot be verified
-      const rows = await store.board("daily", "all", 10);
-      return { items: rows.map(fromBoard), note: "sign in via the bot for your personal list" };
-    }
-    default: return boardFor(env, store, "daily");
-  }
-}
 
 const PERIOD_LABEL: Record<string, string> = { daily: "۲۴ ساعت", weekly: "۷ روز", monthly: "۳۰ روز", all: "کل تاریخ" };
 const PERIOD_DAYS: Record<string, number> = { weekly: 7, monthly: 30 };

@@ -174,9 +174,11 @@ Caps enforced by the API: `description` ≤ 512 characters, `short_description`
 > **Measured, not assumed:** the chat menu button next to the message box cannot
 > be a Web App on this API version. `setChatMenuButton` answers `true` and
 > `getChatMenuButton` still reports `commands` (it *does* work per-chat, which is
-> how the limit was isolated). The reliable route into the mini app is the
-> "📱 اپلیکیشن (نسخهٔ وب)" button in the bot's main menu — `mainMenuKb` gets
-> `${WORKER_URL}/app` — plus the landing page's own button.
+> how the limit was isolated).
+>
+> The Telegram Mini App was **removed from this project** by owner request: no
+> `/app` route, no web app button, no `src/web/`. The bot's interface is the chat
+> itself, and the worker's only web surface is the landing page at `/`.
 
 ## 7. The heavy-work helper repo (optional, for 1 GB+ repos)
 

@@ -3,6 +3,7 @@ import type { Env } from "../env";
 import { fmt } from "./cards";
 import { code, i, tgEscape } from "../tg/types";
 import { kb, L, type Loc } from "../tg/keyboards";
+import { aside, details, footer, h1, hr, p, table, ul } from "../tg/rich";
 
 /** Language, help, about and inline-mode. */
 export class Settings {
@@ -76,83 +77,104 @@ export class Settings {
 
     // The owner's ask for this screen: bolder, wider, worth reading. Six equal
     // bullets said what the bot has; this says what it is for.
-    const capabilities = fa
-      ? [
-          "🔍 <b>جست‌وجوی چندزبانه</b> — فارسی، انگلیسی، هر زبانی؛ آن‌قدر می‌گردم تا همان را پیدا کنم که منظورت بود",
-          "🛰 <b>کاوش عمیق، ۱۲ تب</b> — رشد ستاره‌ها، جامعه، انتشارها، PRها، کامیت‌ها، CI، امنیت، چنج‌لاگ",
-          "🧠 <b>هوش مصنوعی چندمدلی</b> — ترجمهٔ README، خلاصه، چت با مخزن، بازبینی PR، ساخت ورک‌فلو، توضیح کد",
-          "📥 <b>دانلود مستقیم</b> — زیپ یا تار، با تقسیم خودکار برای مخزن‌های بزرگ",
-          "🛡 <b>امنیت</b> — اسکن وابستگی‌ها (OSV)، شکار کلید لو‌رفته، هشدار CVE",
-          "🧰 <b>جعبه‌ابزار</b> — IP/DNS/ASN، JWT، هش، کرون، CIDR، رجکس و ۱۵ ابزار دیگر",
-          "📡 <b>رادار اینترنت آزاد</b> · ⭐ <b>فید شخصی</b> · 🏆 لیدربورد و نشان",
-          "🌌 <b>هاب جهانی</b> — خودش رویداد می‌گیرد، ورک‌فلو می‌سازد، پست کانال را آماده می‌کند و بعد از تأیید تو منتشر می‌کند",
-        ].join("\n")
-      : [
-          "🔍 <b>Multilingual search</b> — any language in, the repo you meant out",
-          "🛰 <b>Deep scout, 12 tabs</b> — growth, community, releases, PRs, commits, CI, security",
-          "🧠 <b>Multi-model AI</b> — README translation, summaries, repo chat, PR review, workflows",
-          "📥 <b>Direct downloads</b> — zip or tar, auto-split for big repos",
-          "🛡 <b>Security</b> — OSV dependency scan, leaked-key hunt, CVE alerts",
-          "🧰 <b>Toolbox</b> — IP/DNS/ASN, JWT, hashes, cron, CIDR, regex and 15 more",
-          "📡 <b>Net Radar</b> · ⭐ <b>Personal feed</b> · 🏆 leaderboard and badges",
-          "🌌 <b>Universal hub</b> — reacts to events, builds workflows, drafts the channel post, publishes on your word",
-        ].join("\n");
+    // ── the welcome card, as a rich message ────────────────────────────────
+    // Tables and collapsible blocks are what make this screen scannable: eight
+    // capability lines become a two-column table, and the deeper material folds
+    // away until someone wants it. `replyRich` degrades on its own if the API
+    // in front of the bot cannot render rich messages.
+    const capTable = table(
+      [
+        [fa ? "بخش" : "Area", fa ? "چه می‌کند" : "What it does"],
+        ["🔍 " + (fa ? "جست‌وجو" : "Search"), fa
+          ? "معنایی + متنی، هر زبانی؛ «یک کتابخانهٔ سبک برای صف در Go» را می‌فهمد"
+          : "Semantic + lexical, any language — describe it the way you'd say it"],
+        ["🛰 " + (fa ? "کاوش" : "Scout"), fa
+          ? "۱۲ تب: رشد، ضریب اتوبوس، نرخ مرج، ریلیزها، CI، امنیت، چنج‌لاگ"
+          : "12 tabs: growth, bus factor, merge rate, releases, CI, security"],
+        ["🧠 " + (fa ? "هوش مصنوعی" : "AI"), fa
+          ? "۱۱ مدل؛ چت با مخزن با استناد، ترجمهٔ README، بازبینی PR، ورک‌فلو"
+          : "11 models; repo chat with citations, README translation, PR review"],
+        ["📥 " + (fa ? "دانلود" : "Download"), fa
+          ? "زیپ یا تار، کش، تقسیم خودکار برای مخزن‌های بزرگ"
+          : "zip or tar, cached, auto-split for large repositories"],
+        ["🛡 " + (fa ? "امنیت" : "Security"), fa
+          ? "اسکن وابستگی با OSV، شکار کلید لو‌رفته، هشدار CVE"
+          : "OSV dependency scan, leaked-key hunt, CVE alerts"],
+        ["🧰 " + (fa ? "ابزار" : "Toolbox"), fa
+          ? "IP/DNS/ASN/TLS، JWT، هش، کرون، CIDR، رجکس و ۱۵ ابزار دیگر"
+          : "IP/DNS/ASN/TLS, JWT, hashes, cron, CIDR, regex and 15 more"],
+        ["🌌 " + (fa ? "هاب جهانی" : "Universal hub"), fa
+          ? "رویداد می‌گیرد، ورک‌فلو می‌سازد، پست را آماده می‌کند و با تأیید تو منتشر می‌کند"
+          : "Takes events, runs workflows, drafts the post, publishes on your word"],
+      ],
+      { caption: fa ? "⚡ چه کارهایی از دستم برمی‌آید" : "⚡ What I can do" },
+    );
 
-    // the persistent bottom keyboard was retired: the inline menu is enough and
-    // the owner does not want two keyboards on screen
-    await stripReplyKeyboard(h);
+    const startHere = details(
+      fa ? "🎯 از کجا شروع کنیم؟" : "🎯 Start here",
+      ul(
+        fa
+          ? [
+              "یک موضوع بنویس → <i>جست‌وجوی معنایی</i>",
+              "یک <code>owner/repo</code> بفرست → <i>پروندهٔ کامل مخزن</i>",
+              "<code>/help</code> → همهٔ ۹۳ فرمان، دسته‌بندی‌شده",
+            ]
+          : [
+              "Type a topic → <i>semantic search</i>",
+              "Send an <code>owner/repo</code> → <i>the full dossier</i>",
+              "<code>/help</code> → all 93 commands, grouped",
+            ],
+      ),
+      true,
+    );
 
-    if (!linked && !opts?.force) {
-      // step one, and only step one: link GitHub. Nothing else competes for
-      // attention, and the card ends by telling them to press /start again
-      await h.tg.sendMessage(h.chatId, githubSetupCard(fa, aiState), {
-        parse_mode: "HTML",
-        reply_markup: githubSetupKb(fa) as any,
-        disable_web_page_preview: true,
-      });
-      return;
-    }
+    const hubCard = details(
+      fa ? "🌌 هاب جهانی چطور کار می‌کند؟" : "🌌 How the hub works",
+      p(fa
+        ? "یک رویداد از بیرون می‌آید (انتشار، پست RSS، تغییر یک API)، ورک‌فلو اجرا می‌شود، " +
+          "متن پست ساخته می‌شود و <b>هیچ‌چیز بدون تأیید تو منتشر نمی‌شود</b>. " +
+          "دسترسی: <code>/hub</code>"
+        : "An event arrives (a release, an RSS item, an API change), a workflow runs, the post is drafted, " +
+          "and <b>nothing is published without your approval</b>. Open it with <code>/hub</code>."),
+    );
 
-    const login = String((u as any)?.github_login ?? "");
-    const hello = fa
-      ? `👋 <b>سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b> — به <b>GitHub Lens Ultra</b> خوش آمدی.\n\n` +
-        `<blockquote>اینجا ایستگاهِ کاوشِ اوپن‌سورس است: گیت‌هاب را می‌کاوم، فارسی‌اش می‌کنم، ` +
-        `امنیتش را چک می‌کنم، دانلودش می‌کنم — و اگر چیزی ارزش گفتن داشت، خودش می‌فهمد و می‌آورد.</blockquote>\n\n` +
-        `<b>⚡ چه کارهایی از دستم برمی‌آید</b>\n${capabilities}\n\n` +
-        `🎯 <b>از کجا شروع کنیم؟</b>\n` +
-        `• یک موضوع بنویس → <i>جست‌وجوی معنایی</i>\n` +
-        `• یک <code>owner/repo</code> بفرست → <i>پروندهٔ کامل مخزن</i>\n` +
-        `• <code>/help</code> → همهٔ دستورها، دسته‌بندی‌شده\n\n` +
-        `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}\n` +
-        `<i>منوی زیر، نقشهٔ همهٔ ۲۷ صفحه است.</i>`
-      : `👋 <b>Hello${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b> — welcome to <b>GitHub Lens Ultra</b>.\n\n` +
-        `<blockquote>An open-source observatory: I search GitHub, translate it, audit it and download it — ` +
-        `and when something deserves telling, the hub notices on its own.</blockquote>\n\n` +
-        `<b>⚡ What I can do</b>\n${capabilities}\n\n` +
-        `🎯 <b>Start here:</b> send a topic for semantic search, an <code>owner/repo</code> for the full dossier, ` +
-        `or <code>/help</code> for every command.\n\n` +
-        `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}`;
+    const privacy = details(
+      fa ? "🔐 حساب، کلید و زبان" : "🔐 Account, keys and language",
+      ul(
+        fa
+          ? [
+              `<code>/connect</code> — وصل‌کردن گیت‌هاب با توکن کم‌دسترسی (سقف ۵٬۰۰۰ درخواست در ساعت)`,
+              `<code>/keys</code> — اهدای کلید هوش مصنوعی؛ با هم استفاده می‌شود و کلید مرده خودکار حذف می‌شود`,
+              `<code>/language</code> — فارسی · انگلیسی · عربی · روسی · چینی`,
+            ]
+          : [
+              `<code>/connect</code> — link GitHub with a least-privilege token (5,000 requests/hour)`,
+              `<code>/keys</code> — donate an AI key; the pool is shared and dead keys are evicted`,
+              `<code>/language</code> — Persian · English · Arabic · Russian · Chinese`,
+            ],
+      ),
+    );
 
-    // Art first, then the card. The banner is decoration and must never be the
-    // reason a user sees nothing, so a failure here is swallowed on purpose.
-    await h.tg.sendPhoto(
-      h.chatId,
-      Settings.START_BANNER,
-      fa ? Settings.START_CAPTION_FA : Settings.START_CAPTION_EN,
-      { parse_mode: "HTML" } as any,
-    ).catch((e: any) => console.error("start-banner", String(e?.message ?? e)));
+    const login = String((u as any)?.github_login ?? "") || (fa ? "وصل نشده" : "not linked");
 
-    await h.tg.sendMessage(h.chatId, hello, {
-      parse_mode: "HTML",
-      reply_markup: mainMenuKb(
-        lang,
-        u?.plan === "admin",
-        // the mini app is served by this same worker; without this the
-        // keyboard falls back to a callback and /app stays unreachable
-        h.env.WORKER_URL ? `${h.env.WORKER_URL}/app` : undefined,
-      ) as any,
-      disable_web_page_preview: true,
-    });
+    const helloRich =
+      h1("🔭 GitHub Lens Ultra") +
+      aside(fa
+        ? `سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}! ایستگاهِ کاوشِ اوپن‌سورس — گیت‌هاب را می‌کاوم، فارسی‌اش می‌کنم، امنیتش را چک می‌کنم، دانلودش می‌کنم.`
+        : `Welcome${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""} — an open-source observatory: search it, translate it, audit it, download it.`) +
+      capTable +
+      startHere + hubCard + privacy +
+      hr() +
+      footer(
+        `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState} · ` +
+        (fa ? "۹۳ فرمان" : "93 commands") +
+        ` · <a href="https://github.com/Alisarani7021/ghlens-ultra">github.com/Alisarani7021/ghlens-ultra</a>`,
+      );
+
+    await h.replyRich(
+      helloRich,
+      mainMenuKb(lang, u?.plan === "admin") as any,
+    );
   }
 
   /** /help — the honest, complete command reference. */
@@ -289,43 +311,49 @@ export class Settings {
     ];
 
     const sections = fa ? FA : EN;
-    const LIMIT = 3500;
 
-    // Pack sections into messages, splitting only between sections.
-    const parts: string[] = [];
-    let cur = "";
-    for (const sec of sections) {
-      if (cur && cur.length + sec.length + 2 > LIMIT) { parts.push(cur); cur = sec; }
-      else cur = cur ? `${cur}\n\n${sec}` : sec;
-    }
-    if (cur) parts.push(cur);
+    // One rich message instead of two paginated ones: the title is a heading,
+    // every section folds into `<details>`, and the first two are open so the
+    // message still reads as a page rather than a pile of collapsed rows.
+    const rich =
+      h1(fa ? "📚 راهنمای کامل" : "📚 Complete reference") +
+      p(fa
+        ? "همهٔ ۹۳ فرمان، دسته‌بندی‌شده. هر بخش را باز کن؛ عنوانش را لمس کن."
+        : "All 93 commands, grouped. Tap a section title to unfold it.") +
+      sections
+        .map((sec, i) => {
+          // "**title**\n…" → <details><summary>title</summary>body</details>
+          const m = sec.match(/^(?:<b>)?([^<\n]+)(?:<\/b>)?\n?([\s\S]*)$/);
+          const title = (m?.[1] ?? "").trim();
+          const body = (m?.[2] ?? "").replace(/\n/g, "<br>").trim();
+          return details(title, body ? `<p>${body}</p>` : "", i < 2);
+        })
+        .join("") +
+      hr() +
+      footer(fa
+        ? `۹۳ فرمان · ۵ زبان · <a href="https://github.com/Alisarani7021/ghlens-ultra">ghlens-ultra</a>`
+        : `93 commands · 5 languages · <a href="https://github.com/Alisarani7021/ghlens-ultra">ghlens-ultra</a>`);
 
-    for (let i = 0; i < parts.length; i++) {
-      const last = i === parts.length - 1;
-      const body = last ? parts[i] : `${parts[i]}\n\n<i>… ادامه در پیام بعد</i>`;
-      await h.reply(
-        body,
-        last
-          ? kb(
-              [
-                { text: "🔍 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" },
-                { text: "🔥 " + (fa ? "داغ‌ترین" : "Trending"), cb: "t:menu" },
-                { text: "🛰 " + (fa ? "کاوش" : "Scout"), cb: "s:home" },
-              ],
-              [
-                { text: "🤖 AI", cb: "a:home" },
-                { text: "📥 " + (fa ? "دانلود" : "Download"), cb: "d:home" },
-                { text: "🧰 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" },
-              ],
-              [
-                { text: "🌌 " + (fa ? "هاب جهانی" : "Universal hub"), cb: "hos:home" },
-                { text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" },
-              ],
-            )
-          : undefined,
-        i === 0 && !!h.cbId,
-      );
-    }
+    await h.replyRich(
+      rich,
+      kb(
+        [
+          { text: "🔍 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" },
+          { text: "🔥 " + (fa ? "داغ‌ترین" : "Trending"), cb: "t:menu" },
+          { text: "🛰 " + (fa ? "کاوش" : "Scout"), cb: "s:home" },
+        ],
+        [
+          { text: "🤖 AI", cb: "a:home" },
+          { text: "📥 " + (fa ? "دانلود" : "Download"), cb: "d:home" },
+          { text: "🧰 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" },
+        ],
+        [
+          { text: "🌌 " + (fa ? "هاب جهانی" : "Universal hub"), cb: "hos:home" },
+          { text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" },
+        ],
+      ),
+      !!h.cbId,
+    );
   }
 
 
@@ -361,7 +389,7 @@ All numbers come from GitHub's and OSV's real APIs; AI only summarises.`) +
   }
 }
 
-function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
+function mainMenuKb(loc: Loc, isAdmin: boolean) {
   const fa = loc === "fa";
   return kb(
     // The donated-key engine sits at the top: it is the one thing that turns
@@ -408,9 +436,6 @@ function mainMenuKb(loc: Loc, isAdmin: boolean, miniAppUrl?: string) {
       { text: L(loc, "profile"), cb: "me:home" },
       { text: L(loc, "dashboard"), cb: "me:dash" },
     ],
-    ...(miniAppUrl
-      ? [[{ text: "📱 " + (fa ? "اپلیکیشن (نسخهٔ وب)" : "Mini App (web)"), web: miniAppUrl }]]
-      : []),
     [
       { text: L(loc, "lang"), cb: "lang:menu" },
       { text: L(loc, "help"), cb: "h:main" },

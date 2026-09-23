@@ -100,6 +100,30 @@ export class Telegram {
     return this.call("deleteMessage", { chat_id, message_id });
   }
 
+  /**
+   * Rich messages (Bot API 10.3): headings, tables, collapsible blocks, pull
+   * quotes, footnotes. The caller passes the HTML body; `rich_message_extras`
+   * is a local convention carrying `is_rtl` so the layout follows the language.
+   */
+  sendRichMessage(chat_id: number | string, html: string, opts: SendMessageOpts & { rich_message_extras?: { is_rtl?: boolean } } = {}) {
+    const { rich_message_extras, ...rest } = opts as any;
+    return this.call<{ message_id: number }>("sendRichMessage", {
+      chat_id,
+      rich_message: { html, ...(rich_message_extras ?? {}) },
+      ...rest,
+    });
+  }
+
+  /** Edit an existing message into a rich one. */
+  editRichMessage(chat_id: number | string, message_id: number, html: string, opts: SendMessageOpts & { rich_message_extras?: { is_rtl?: boolean } } = {}) {
+    const { rich_message_extras, ...rest } = opts as any;
+    return this.call("editMessageText", {
+      chat_id, message_id,
+      rich_message: { html, ...(rich_message_extras ?? {}) },
+      ...rest,
+    });
+  }
+
   setMyCommands(commands: { command: string; description: string }[], scope?: Record<string, unknown>, language_code?: string) {
     return this.call("setMyCommands", { commands, scope, language_code });
   }

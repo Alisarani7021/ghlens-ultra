@@ -74,7 +74,7 @@ export const isAdmin = (env: Env, id: number) =>
  *
  * It lives in a secret, and secrets can be empty — an empty string is not null,
  * so `env.BOT_USERNAME ?? "fallback"` happily produced `https://t.me/` and every
- * "open in the bot" link in the mini app went nowhere. One helper, used
+ * "open in the bot" links went nowhere. One helper, used
  * everywhere, with a default that is at least the right bot.
  */
 export const botUsername = (env: Env): string =>

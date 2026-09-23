@@ -35,7 +35,6 @@ import { runCron } from "./core/cron";
 import { consumeQueue } from "./core/queue";
 import { handleApi } from "./core/api";
 import { audioBytes, describe } from "./ai/brain";
-import { MINI_APP_HTML } from "./web/miniapp";
 import { aiDownNotice, aiHalted } from "./ai/brain";
 import { readMode, touchMode, clearMode, modeKeeps, setMode } from "./core/mode";
 import { parseRepoRef } from "./core/repo-ref";
@@ -307,12 +306,6 @@ export default {
         return handleApi(request, env, ctx);
       }
 
-      // ── mini-app (Telegram Web App) ────────────────────────────────────
-      if (url.pathname === "/app" || url.pathname === "/app/") {
-        const html = MINI_APP_HTML.replace(/__BOT_USERNAME__/g, botUsername(env)).replace(/__API_BASE__/g, env.WORKER_URL ?? "");
-        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" } });
-      }
-
       // ── health & metrics ───────────────────────────────────────────────
       if (url.pathname === "/health" && url.searchParams.get("ai") === "reset") {
         const secret = url.searchParams.get("deep");
@@ -575,6 +568,19 @@ async function buildH(
         return;
       }
       await tg.sendLong(chatId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
+    },
+    async replyRich(html, keyboard, edit = false) {
+      if (guard) guard.settled = true;
+      const { editRich, sendRich } = await import("./tg/rich");
+      const extras = { reply_markup: keyboard, disable_web_page_preview: true } as any;
+      const rtl = loc === "fa" || loc === "ar";
+      if (edit && h.cbId && msgId) {
+        const how = await editRich(tg, chatId, msgId, html, { extra: extras, rtl })
+          .catch(async () => { await sendRich(tg, chatId, html, { extra: extras, rtl }); return "legacy" as const; });
+        if (how === "legacy") return;
+        return;
+      }
+      await sendRich(tg, chatId, html, { extra: extras, rtl });
     },
     async toast(text, alert = false) {
       if (guard) guard.settled = true;
@@ -1921,7 +1927,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     type: "article", id: "trending",
     title: "🔥 داغ‌ترین‌های امروز گیت‌هاب",
     description: "GitHub Lens Ultra trending board",
-    input_message_content: { message_text: `🔥 داغ‌ترین‌های امروز — GitHub Lens Ultra\n${env.WORKER_URL}/app`, parse_mode: "HTML" },
+    input_message_content: { message_text: `🔥 داغ‌ترین‌های امروز — GitHub Lens Ultra\n${env.WORKER_URL}`, parse_mode: "HTML" },
   } as any);
 
   return tg.answerInlineQuery(q.id, results.slice(0, 20), 20);
@@ -2196,7 +2202,6 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
 
 <div class="row">
   <a class="btn" href="https://t.me/${bot}">🚀 باز کردن ربات در تلگرام</a>
-  <a class="btn alt" href="/app">📱 نسخهٔ وب (Mini App)</a>
 </div>
 
 <div class="foot">

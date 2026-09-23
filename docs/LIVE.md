@@ -24,7 +24,7 @@
 | ❤️ سلامت سریع | `https://ghlens-ultra.gitguts.workers.dev/health` |
 | 🩺 سلامت عمیق | `.../health?deep=<TELEGRAM_WEBHOOK_SECRET>` |
 | ⏱ ضربان زمان‌بند | `.../health?cron=1` |
-| 📱 مینی‌اپ تلگرام | `.../app` |
+| 📱 مینی‌اپ تلگرام | ⛔ حذف شد (به درخواست مالک) — دیگر مسیر `/app` وجود ندارد |
 | 🖼 کارت اشتراک‌گذاری | `.../api/card?repo=react/react` |
 | 🧪 خودآزمای مسیر آپدیت | `.../selfcheck?deep=<SECRET>&text=/start&uid=1` |
 | 🪝 وبهوک تلگرام | `.../tg/<TELEGRAM_WEBHOOK_SECRET>` |

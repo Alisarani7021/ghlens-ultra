@@ -39,7 +39,7 @@ vuejs/core                  →  پرونده: ۱۲ تب · امنیت · جام
 | **دانلود و امنیت** | دانلود مستقیم با کش و تقسیم جریانی · اسکن وابستگی با OSV · شکار کلید لو‌رفته · CVE · تبدیل پکیج (deb ⇄ rpm ⇄ pacman ⇄ apk) |
 | **ابزار** | IP/DNS/ASN/TLS، CIDR، JWT، هش، UUID، کرون، رجکس، SemVer · رادار شبکه |
 | **حساب** | پروفایل، XP، نشان، رتبهٔ هفتگی، ارجاع، داشبورد ۳۰ روزه · `/keys` استخر کلیدهای اهدایی (تست قبل از پذیرش، حذف خودکار کلید مرده) · `/connect` اتصال گیت‌هاب با توکن کم‌دسترسی |
-| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · Mini App |
+| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · پیام‌های Rich (جدول، تیتر، بخش بازشو) |
 
 ## هاب رویدادمحور
 
@@ -83,7 +83,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  TG["Telegram<br/>/tg/&lt;secret&gt; · inline · Mini App"] --> W
+  TG["Telegram<br/>/tg/&lt;secret&gt; · inline"] --> W
   GH["GitHub<br/>/hooks/github/&lt;key&gt;"] --> W
   EXT["سایر سرویس‌ها<br/>/hooks/&lt;source&gt; · /hub/ingest"] --> W
   W["Worker — TypeScript · ۹۳ فرمان · ۴۰۵ کلید · ۵ زبان"]

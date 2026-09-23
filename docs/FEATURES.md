@@ -178,7 +178,7 @@ Counts: **77 commands · 137 callback actions · 12 dossier tabs · 20 D1 tables
 132. ETag conditional requests (304s don't consume GitHub quota)
 133. Vector indexing cron: README digests embedded, incremental (`indexed_at`)
 134. Public JSON API: `/api/miniapp`, `/api/repo`, `/api/card`, `/api/compare-card`, `/api/stats`, `/api/search`
-135. Telegram **Mini App** (WebApp): tabs for trending/weekly/gems/favourites/subs + live search
+135. ~~Telegram Mini App~~ — **removed by owner request**; the bot's interface is the chat. The read-only JSON API (`/api/repo`, `/api/card`, `/api/stats`) stays for share cards and integrations
 136. Landing page with health endpoint
 137. Landing/share cards rendered as standalone HTML (screenshot-ready at 1200×630)
 
