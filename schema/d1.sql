@@ -392,3 +392,97 @@ CREATE TABLE IF NOT EXISTS hub_runs (
 CREATE INDEX IF NOT EXISTS idx_hub_runs_owner  ON hub_runs(owner_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_hub_runs_wf     ON hub_runs(wf_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_hub_runs_state  ON hub_runs(state, started_at);
+
+
+-- ── knowledge graph: entities, mentions, searchable documents ─────────────
+-- The content graph says "what came from what"; this says "what is it about".
+-- Every artefact contributes entities, and every searchable thing gets one
+-- embedded document so a phrase like «اون پست آپدیت فلان پروژه» can find it.
+CREATE TABLE IF NOT EXISTS hub_entities (
+  id         TEXT PRIMARY KEY,
+  owner_id   INTEGER,
+  kind       TEXT NOT NULL,            -- repo | org | version | topic | file | language | person | url | term
+  key        TEXT NOT NULL,            -- canonical, lower-cased
+  label      TEXT NOT NULL,            -- what a human calls it
+  mentions   INTEGER NOT NULL DEFAULT 1,
+  first_seen INTEGER NOT NULL,
+  last_seen  INTEGER NOT NULL,
+  meta       TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_hub_ent_key     ON hub_entities(key);
+CREATE INDEX IF NOT EXISTS idx_hub_ent_owner   ON hub_entities(owner_id, mentions);
+CREATE INDEX IF NOT EXISTS idx_hub_ent_kind    ON hub_entities(kind, mentions);
+
+CREATE TABLE IF NOT EXISTS hub_mentions (
+  content_id TEXT NOT NULL,
+  entity_id  TEXT NOT NULL,
+  weight     REAL NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (content_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hub_men_entity  ON hub_mentions(entity_id);
+CREATE INDEX IF NOT EXISTS idx_hub_men_content ON hub_mentions(content_id);
+
+-- One row per searchable artefact. `embedding` is NULL whenever the AI pass
+-- did not run (quota spent, Vectorize unbound) — stored either way, so a write
+-- is never lost because it could not be embedded, and lexical search still
+-- finds it.
+CREATE TABLE IF NOT EXISTS hub_docs (
+  id         TEXT PRIMARY KEY,
+  owner_id   INTEGER,
+  kind       TEXT NOT NULL DEFAULT 'post',
+  title      TEXT,
+  body       TEXT NOT NULL DEFAULT '',
+  lang       TEXT NOT NULL DEFAULT 'fa',
+  source_ref TEXT,
+  embedding  TEXT,
+  dim        INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_docs_owner ON hub_docs(owner_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_hub_docs_kind  ON hub_docs(owner_id, kind, created_at);
+
+-- ── file universe: every file that came through the hub ───────────────────
+CREATE TABLE IF NOT EXISTS hub_files (
+  id              TEXT PRIMARY KEY,
+  owner_id        INTEGER NOT NULL,
+  name            TEXT NOT NULL,
+  mime            TEXT,
+  size            INTEGER NOT NULL DEFAULT 0,
+  kind            TEXT NOT NULL DEFAULT 'unknown',
+  lang            TEXT,
+  bytes_hash      TEXT,                 -- sample hash + length: spots the same file twice
+  extracted_chars INTEGER NOT NULL DEFAULT 0,
+  facts           TEXT NOT NULL DEFAULT '[]',
+  note            TEXT,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_files_owner ON hub_files(owner_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_hub_files_hash  ON hub_files(owner_id, bytes_hash);
+
+-- ── inbound webhook log (one row per accepted delivery) ───────────────────
+CREATE TABLE IF NOT EXISTS hub_webhooks (
+  id       TEXT PRIMARY KEY,
+  owner_id INTEGER,
+  source   TEXT NOT NULL,
+  type     TEXT NOT NULL,
+  event_id TEXT,
+  status   TEXT NOT NULL,               -- accepted | duplicate
+  ts       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_wh_owner ON hub_webhooks(owner_id, ts);
+
+-- ── AI gateway usage (so "what did this cost, and who spent it" is answerable)
+CREATE TABLE IF NOT EXISTS hub_gateway_log (
+  id                TEXT PRIMARY KEY,
+  who               TEXT NOT NULL,
+  model             TEXT NOT NULL,
+  chosen            TEXT NOT NULL,
+  task              TEXT NOT NULL,
+  prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  ms                INTEGER NOT NULL DEFAULT 0,
+  ok                INTEGER NOT NULL DEFAULT 1,
+  ts                INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hub_gw_ts ON hub_gateway_log(ts);

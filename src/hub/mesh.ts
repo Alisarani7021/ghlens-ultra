@@ -92,19 +92,62 @@ export interface MeshOpts {
 }
 
 /**
- * Compare answers when we have no ground truth.
+ * How much two answers agree.
  *
- * Word-overlap is crude but it is *honest*: agreement 1.0 means the two
- * answers literally say the same things, and it never pretends to know more
- * than it does. A false 0.9 would be worse than a true 0.5.
+ * Word overlap is crude but *honest*: 1.0 means they literally say the same
+ * things, and it never pretends to know more than it does. A false 0.9 would
+ * be worse than a true 0.5.
+ *
+ * Two grounding decisions came from watching it fail on real output:
+ *
+ *  • **Short tokens count.** Dropping words of ≤2 characters — a sensible
+ *    stop-word filter for prose — reduced two *identical* JSON answers
+ *    (`{"a": 7, "b": 4}`) to zero overlap, because every token in them was
+ *    short. Structure is signal, and JSON keys are structure. The filter is
+ *    now "drop English stop-words by name", not "drop short words".
+ *
+ *  • **Very short answers compare as characters.** When both sides have fewer
+ *    than four tokens there is nothing for a word metric to work with, so the
+ *    comparison falls back to character trigrams — which is exactly right for
+ *    a number, a version or a single identifier, the shapes models disagree
+ *    about most.
  */
-export function agreement(a: string, b: string): number {
-  const tok = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
-  const A = tok(a), B = tok(b);
+const STOP = new Set([
+  "the", "and", "for", "with", "that", "this", "from", "was", "were", "are", "you", "your",
+  "but", "not", "have", "has", "had", "its", "it's", "as", "at", "by", "of", "on", "or", "in",
+  "به", "از", "با", "که", "این", "آن", "را", "در", "است", "برای", "هم", "یا",
+]);
+
+function wordSet(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/)
+      .filter((w) => w.length > 0 && !STOP.has(w)),
+  );
+}
+
+function trigrams(s: string): Set<string> {
+  // Strip whitespace and punctuation entirely: a trigram like "a b" or "ta "
+  // is a word boundary, not content, and two unrelated sentences share plenty
+  // of those — which is how a "completely different answers" pair scored 0.08.
+  const t = s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const out = new Set<string>();
+  for (let i = 0; i + 3 <= t.length; i++) out.add(t.slice(i, i + 3));
+  if (!out.size && t) out.add(t);
+  return out;
+}
+
+function jaccard(A: Set<string>, B: Set<string>): number {
   if (!A.size || !B.size) return 0;
   let shared = 0;
-  for (const w of A) if (B.has(w)) shared++;
+  for (const x of A) if (B.has(x)) shared++;
   return shared / Math.min(A.size, B.size);
+}
+
+export function agreement(a: string, b: string): number {
+  const A = wordSet(a), B = wordSet(b);
+  if (A.size >= 4 && B.size >= 4) return jaccard(A, B);
+  // short answers: word overlap is meaningless, characters are not
+  return jaccard(trigrams(a), trigrams(b));
 }
 
 const stripFence = (s: string) => s.replace(/^\s*```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();

@@ -124,7 +124,7 @@ export async function planMission(
   return {
     name: "مأموریت دستی", on_event: "", nodes: [{ id: "in", kind: "trigger", next: ["done"] }, { id: "done", kind: "stop" }],
     entry: "in", requires: [], source: "playbook",
-    notes: "نتوانستم از این جمله یک ورک‌فلو بسازم — با گزینه‌های آماده یا جملهٔ دقیق‌ترتر试试.",
+    notes: "نتوانستم از این جمله یک ورک‌فلو بسازم — با گزینه‌های آماده یا یک جملهٔ دقیق‌تر دوباره امتحان کن.",
   };
 }
 

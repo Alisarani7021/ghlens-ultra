@@ -78,4 +78,8 @@ export const MODE_LABELS: Record<string, string> = {
   "u:asn": "ابزار ASN",
   "hos:mission": "مأموریت هاب",
   "hos:conn:add": "افزودن کانکتور",
+  "hos:search": "جست‌وجوی معنایی",
+  "hos:media": "کارخانهٔ رسانه",
+  "hos:file": "کالبدشکافی فایل",
+  "hos:edit": "ویرایش متن پیش‌نویس",
 };

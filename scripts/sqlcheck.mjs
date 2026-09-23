@@ -39,6 +39,45 @@ function countArgs(src) {
 }
 
 /** Extract the balanced argument list that starts right after an opening paren. */
+/**
+ * Remove `//` and `/* *​/` comments, respecting string literals.
+ *
+ * Added after a real miss: bind arguments annotated inline
+ * (`id,  // the row id`) made the trailing comment look like an eleventh
+ * argument, so a correct 12-value bind reported as a 13-value mismatch. The
+ * fix is here rather than in the source because annotating a bind list one
+ * value per line is the style that prevents the bug this script hunts.
+ */
+function stripComments(src) {
+  let out = "", i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === "`") {
+      const q = c;
+      out += c; i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === "\\") { out += src[i] + (src[i + 1] ?? ""); i += 2; continue; }
+        out += src[i]; i++;
+      }
+      out += src[i] ?? "";
+      i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 function argsAfter(src, openIdx) {
   let depth = 0, i = openIdx;
   for (; i < src.length; i++) {
@@ -55,6 +94,7 @@ function argsAfter(src, openIdx) {
 }
 
 const problems = [];
+const dynamic = [];   // `.bind(...args)` — arity cannot be checked statically
 let checked = 0;
 
 for (const file of files) {
@@ -70,9 +110,16 @@ for (const file of files) {
     const semi = after.indexOf(";");
     const bind = after.indexOf(".bind(");
     if (bind === -1 || (semi !== -1 && semi < bind)) continue; // bound elsewhere
-    const args = argsAfter(after, bind + ".bind".length);
+    const args = stripComments(argsAfter(after, bind + ".bind".length));
     const spread = /\.\.\./.test(args);
-    if (spread) continue; // dynamic arity — cannot check statically
+    if (spread) {
+      // Not checkable, but *not* silent. A spread bind hides exactly the bug
+      // this script exists to catch (values drifting out of column order), so
+      // every one is listed and counted rather than quietly skipped.
+      const line = src.slice(0, m.index).split("\n").length;
+      dynamic.push(`${file}:${line}`);
+      continue;
+    }
     const n = countArgs(args);
     checked++;
     if (n !== holders) {
@@ -83,6 +130,10 @@ for (const file of files) {
 }
 
 console.log(`SQL guard: checked ${checked} prepared statement(s) across ${files.length} file(s)`);
+if (dynamic.length) {
+  console.log(`\n⚠️  ${dynamic.length} unverifiable spread bind(s) — column order is unchecked here:`);
+  for (const d of dynamic) console.log("  " + d);
+}
 if (problems.length) {
   console.log(`\n❌ ${problems.length} mismatch(es):\n`);
   for (const p of problems) console.log("  " + p + "\n");

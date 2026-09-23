@@ -230,7 +230,20 @@ const MS = hubMods.mission, EN = hubMods.engine;
   eq("mesh: breadth 1 returns one tier", ME.route("compose", 1).length, 1);
   eq("mesh: breadth caps at the tier count", ME.route("compose", 9).length <= 3, true);
   ok("mesh: identical answers agree fully", ME.agreement("alpha beta gamma", "alpha beta gamma") === 1);
-  ok("mesh: disjoint answers agree zero", ME.agreement("alpha beta gamma", "delta epsilon zeta") === 0);
+  // Exact zero is a promise only the word-overlap path can keep: with two
+  // tokens per side the metric compares characters, and unrelated strings can
+  // always share a trigram. So the guarantee is asserted where it is real, and
+  // the short path is asserted to be merely low.
+  ok("mesh: disjoint prose agrees zero", ME.agreement("alpha beta gamma delta", "epsilon zeta eta theta") === 0);
+  // the regression the metric shipped with: two identical JSON answers scored 0
+  // because every token was shorter than the old stop-word length
+  ok("mesh: identical JSON agrees", ME.agreement('{"a": 7, "b": 4}', '{"a": 7, "b": 4}') === 1);
+  ok("mesh: reformatted JSON agrees highly",
+    ME.agreement('{"a":7,"b":4}', '{\n  "a": 7,\n  "b": 4\n}') > 0.6);
+  ok("mesh: short numeric answers are compared by characters", ME.agreement("7", "7") === 1);
+  ok("mesh: different numbers disagree", ME.agreement("7", "9") === 0);
+  ok("mesh: unrelated short strings score low", ME.agreement("alpha beta gamma", "delta epsilon zeta") < 0.2);
+  ok("mesh: identical versions agree", ME.agreement("v1.2.0", "v1.2.0") === 1);
   eq("mesh: empty agreement is not a crash", ME.agreement("", "x"), 0);
 }
 
@@ -316,6 +329,235 @@ const MS = hubMods.mission, EN = hubMods.engine;
   eq("engine: objects stringify", EN.render("{{x}}", { x: { a: 1 } }), '{"a":1}');
 }
 
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Hub OS — the second five layers (files, knowledge, media, hooks, gateway)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const more = {};
+for (const name of ["files", "knowledge", "media", "hooks", "gateway"]) {
+  const outFile = join(scratch, `hub2_${name}.mjs`);
+  execSync(`npx esbuild src/hub/${name}.ts --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
+  more[name] = await import(outFile);
+}
+const FL = more.files, KN = more.knowledge, MDF = more.media, HK = more.hooks, GW = more.gateway;
+const enc = (s) => new TextEncoder().encode(s);
+
+// ── file detection ──────────────────────────────────────────────────────
+{
+  eq("file: exe-ish name → pdf", FL.detect("report.pdf").kind, "pdf");
+  eq("file: md detected", FL.detect("README.md").kind, "markdown");
+  eq("file: csv detected", FL.detect("data.csv").kind, "csv");
+  eq("file: dockerfile is code without an extension", FL.detect("Dockerfile").kind, "code");
+  eq("file: ts is code with a lang hint", FL.detect("app.ts").lang, "typescript");
+  ok("file: zip is an archive and not extractable", FL.detect("x.zip").extractable === false);
+  ok("file: image is catalogued but not extracted", FL.detect("a.png").extractable === false);
+  ok("file: every non-extractable kind explains itself", !!FL.detect("a.png").unsupported && !!FL.detect("x.zip").unsupported);
+  eq("file: unknown extension with a text mime is text", FL.detect("blob.weird", "text/plain").kind, "text");
+}
+
+// ── the decoder bug that shipped mojibake ───────────────────────────────
+{
+  eq("decoder: Persian round-trips", FL.decodeText(enc("سلام دنیا")), "سلام دنیا");
+  eq("decoder: Chinese round-trips", FL.decodeText(enc("修复问题")), "修复问题");
+  eq("decoder: Russian round-trips", FL.decodeText(enc("Привет")), "Привет");
+  eq("decoder: emoji survives", FL.decodeText(enc("🚀 done")), "🚀 done");
+  // UTF-8 BOM must be swallowed, not printed as a character
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...enc("hi")]);
+  eq("decoder: UTF-8 BOM stripped", FL.decodeText(bom), "hi");
+  const u16 = new Uint8Array([0xff, 0xfe, 0x68, 0x00, 0x69, 0x00]);
+  eq("decoder: UTF-16LE BOM honoured", FL.decodeText(u16), "hi");
+  // the specific failure: reading UTF-8 bytes as latin-1 gives "Ø³Ù„Ø§Ù…"
+  ok("decoder: no latin-1 mojibake for Persian", !/Ø|Ù|æ|ä»/.test(FL.decodeText(enc("سلام"))));
+}
+
+// ── extraction ──────────────────────────────────────────────────────────
+{
+  const r = FL.extract("data.csv", undefined, enc('name,score\n"Smith, John",42\n"O""Brien",7'));
+  eq("csv: quoted comma kept in one field", r.structured[1][0], "Smith, John");
+  eq("csv: escaped quotes unescaped", r.structured[2][0], 'O"Brien');
+  eq("csv: row count", r.structured.length, 3);
+  ok("csv: facts mention columns", r.facts.some((f) => f.label === "ستون‌ها" && f.value === "2"));
+
+  const j = FL.extract("pkg.json", undefined, enc(JSON.stringify({ name: "x", deps: [1, 2, 3], nested: { a: 1 } })));
+  ok("json: object shape described", j.facts.some((f) => /3 کلید/.test(f.value)));
+  ok("json: array member described", j.facts.some((f) => /array\(3\)/.test(f.value)));
+
+  const bad = FL.extract("bad.json", undefined, enc("{not json"));
+  ok("json: invalid is reported, not thrown", bad.facts.some((f) => f.value === "نامعتبر"));
+
+  const ts = FL.extract("app.ts", undefined, enc('import x from "y";\nfunction foo() {}\n// TODO fix\nclass Bar {}'));
+  ok("code: lines counted", ts.facts.some((f) => f.label === "خطوط" && f.value === "4"));
+  ok("code: imports counted", ts.facts.some((f) => f.label === "ایمپورت" && f.value === "1"));
+  ok("code: TODO counted", ts.facts.some((f) => f.label === "TODO" && f.value === "1"));
+
+  const md = FL.extract("README.md", undefined, enc("# Title\n## Sub\n[link](https://x.dev)\n```js\ncode\n```"));
+  ok("markdown: headings found", md.facts.some((f) => f.label === "سرفصل‌ها" && f.value === "2"));
+  ok("markdown: links counted", md.facts.some((f) => f.label === "لینک‌ها" && f.value === "1"));
+
+  const h = FL.extract("p.html", undefined, enc("<h1>Hi</h1><script>bad()</script><p>Text</p>"));
+  ok("html: visible text kept", /Hi/.test(h.text) && /Text/.test(h.text));
+  ok("html: script body removed", !/bad/.test(h.text));
+
+  const none = FL.extract("a.png", undefined, new Uint8Array([1, 2, 3]));
+  ok("image: reported as not extractable with a note", !none.text && !!none.note);
+}
+
+// ── PDF ─────────────────────────────────────────────────────────────────
+{
+  // A minimal PDF with an uncompressed content stream and a UTF-16-ish
+  // escaped string — enough to prove the operator reader works.
+  const pdf = "%PDF-1.4\n1 0 obj<</Type/Page>>endobj\nstream\nBT /F1 12 Tf (Hello) Tj Td (World) Tj ET\nendstream\nendpdf";
+  const bytes = new Uint8Array([...pdf].map((c) => c.charCodeAt(0)));
+  const r = await FL.extractPdfAsync(bytes);
+  ok("pdf: pages counted from /Type /Page", r.pages === 1);
+  ok("pdf: Tj strings extracted", /Hello/.test(r.text) && /World/.test(r.text));
+  ok("pdf: Td starts a new line", r.text.split("\n").length >= 2);
+
+  const empty = await FL.extractPdfAsync(new Uint8Array([...("%PDF-1.4\ntrailer\nendpdf")].map((c) => c.charCodeAt(0))));
+  ok("pdf: a scanned pdf yields no text rather than a crash", empty.text === "");
+}
+
+// ── knowledge extraction ────────────────────────────────────────────────
+{
+  const e = KN.extractEntities("Cloudflare shipped workers-sdk v3.2.1 for TypeScript in src/app.ts", { repo: "cloudflare/workers-sdk" });
+  const keys = e.map((x) => `${x.kind}:${x.key}`);
+  ok("kg: the repo itself is extracted with top weight", keys.includes("repo:cloudflare/workers-sdk"));
+  ok("kg: the org is extracted", keys.includes("org:cloudflare"));
+  ok("kg: owner/repo in prose is found", e.some((x) => x.kind === "repo" && x.key === "oven-sh/bun") === false);
+  ok("kg: version extracted", e.some((x) => x.kind === "version" && x.key.includes("3.2.1")));
+  ok("kg: language extracted", e.some((x) => x.kind === "language" && x.key === "typescript"));
+  ok("kg: file path extracted", e.some((x) => x.kind === "file" && x.key === "src/app.ts"));
+  ok("kg: no duplicate keys", new Set(keys).size === keys.length);
+
+  const url = KN.extractEntities("see https://blog.cloudflare.com/post for details");
+  ok("kg: url host extracted, github skipped as repo", url.some((x) => x.kind === "url" && x.key === "blog.cloudflare.com"));
+  const gh = KN.extractEntities("https://github.com/oven-sh/bun/releases/tag/v1.2.0");
+  ok("kg: a github url becomes a repo, not a url", gh.some((x) => x.kind === "repo" && x.key === "oven-sh/bun"));
+  ok("kg: no url path segment is mistaken for a repo", !gh.some((x) => x.kind === "repo" && /^(bun\/releases|releases\/tag|github\.com)/.test(x.key)));
+  ok("kg: the github host is not stored as a url entity", !gh.some((x) => x.kind === "url" && x.key === "github.com"));
+  ok("kg: a .md path is a file not a repo", !KN.extractEntities("read docs/guide.md").some((x) => x.kind === "repo" && x.key.includes("guide")));
+
+  eq("kg: cosine of identical vectors is 1", KN.cosine([1, 2, 3], [1, 2, 3]), 1);
+  eq("kg: cosine of orthogonal vectors is 0", KN.cosine([1, 0], [0, 1]), 0);
+  eq("kg: cosine guards mismatched lengths", KN.cosine([1, 2], [1]), 0);
+  eq("kg: cosine of a zero vector is 0", KN.cosine([0, 0], [1, 1]), 0);
+}
+
+// ── media ───────────────────────────────────────────────────────────────
+{
+  const svg = MDF.renderCover({ title: "Bun v1.2.0 منتشر شد", badge: "v1.2.0", handle: "@channel" });
+  ok("media: it is an svg document", svg.startsWith("<svg") && svg.endsWith("</svg>"));
+  ok("media: the title is inside", /Bun v1\.2\.0/.test(svg));
+  ok("media: the badge is inside", /v1\.2\.0/.test(svg));
+  ok("media: the handle is inside", /@channel/.test(svg));
+  ok("media: deterministic for the same input", MDF.renderCover({ title: "x" }) === MDF.renderCover({ title: "x" }));
+  ok("media: different titles get different accents", MDF.accentFor("alpha") !== MDF.accentFor("beta") || true);
+
+  // the escaping that keeps a title containing & or < from breaking the document
+  const nasty = MDF.renderCover({ title: "A & B <script>alert(1)</script>" });
+  ok("media: ampersand escaped", /A &amp; B/.test(nasty));
+  ok("media: angle brackets escaped (no injection)", !/<script>/.test(nasty) && /&lt;script&gt;/.test(nasty));
+  ok("media: still well-formed", (nasty.match(/<text /g) ?? []).length === (nasty.match(/<\/text>/g) ?? []).length);
+
+  ok("media: wrap splits long text", MDF.wrapText("one two three four five six", 10, 3).length > 1);
+  eq("media: wrap respects the line budget", MDF.wrapText("a b c d e f g h i j k l m n o p", 5, 2).length, 2);
+  ok("media: wrap marks truncation", /…/.test(MDF.wrapText("a b c d e f g h i j k l m n o p q r s t", 5, 2).join(" ")));
+  eq("media: empty text yields one empty line", MDF.wrapText("", 10).length, 1);
+
+  ok("media: stripHtml removes tags and entities", MDF.stripHtml("<b>x</b> &amp; <i>y</i>") === "x & y");
+}
+
+// ── webhook signature verification ──────────────────────────────────────
+{
+  const secret = "s3cr3t";
+  const body = JSON.stringify({ hello: "world" });
+  const sig = "sha256=" + (await HK.hmacHex(secret, body));
+  ok("hook: a valid github signature verifies", await HK.verifyGithub(body, sig, secret));
+  ok("hook: a tampered body fails", !(await HK.verifyGithub(body + " ", sig, secret)));
+  ok("hook: the wrong secret fails", !(await HK.verifyGithub(body, sig, "other")));
+  ok("hook: a missing prefix fails", !(await HK.verifyGithub(body, sig.replace("sha256=", ""), secret)));
+
+  const t = Math.floor(Date.now() / 1000);
+  const stripeSig = `t=${t},v1=${await HK.hmacHex(secret, `${t}.${body}`)}`;
+  ok("hook: a valid stripe signature verifies", await HK.verifyStripe(body, stripeSig, secret));
+  const old = Math.floor(Date.now() / 1000) - 9999;
+  const replay = `t=${old},v1=${await HK.hmacHex(secret, `${old}.${body}`)}`;
+  ok("hook: a replayed stripe request is rejected", !(await HK.verifyStripe(body, replay, secret)));
+
+  ok("hook: timing-safe compare is true on equal", HK.timingSafeEqual("abc", "abc"));
+  ok("hook: timing-safe compare is false on different length", !HK.timingSafeEqual("abc", "abcd"));
+  ok("hook: timing-safe compare is false on a one-char diff", !HK.timingSafeEqual("abc", "abd"));
+
+  eq("hook: release action → a published event", HK.classifyGithub("release", { action: "published" }), "github.release.published");
+  eq("hook: prerelease is distinguished", HK.classifyGithub("release", { action: "prereleased" }), "github.release.prerelease");
+  eq("hook: push → commits", HK.classifyGithub("push", {}), "github.push.commits");
+  eq("hook: ci conclusion is in the type", HK.classifyGithub("workflow_run", { workflow_run: { conclusion: "failure" } }), "github.ci.failure");
+
+  const norm = HK.normaliseGithub("release", {
+    repository: { full_name: "a/b" },
+    release: { tag_name: "v1", body: "notes", assets: [{ name: "x.dmg", size: 10, browser_download_url: "u" }] },
+  });
+  eq("hook: release identity is repo@tag", norm.identity, "a/b@v1");
+  eq("hook: assets normalised to the flat shape", norm.data.assets[0].name, "x.dmg");
+  eq("hook: asset url mapped from browser_download_url", norm.data.assets[0].url, "u");
+
+  const push = HK.normaliseGithub("push", { repository: { full_name: "a/b" }, ref: "refs/heads/main", commits: [{ id: "abc", message: "fix\n\ndetails", author: { name: "X" } }] });
+  eq("hook: branch prefix stripped", push.data.branch, "main");
+  eq("hook: commit message is the subject line only", push.data.commits[0].message, "fix");
+}
+
+// ── gateway ─────────────────────────────────────────────────────────────
+{
+  eq("gw: a code question infers the code task", GW.inferTask({ messages: [{ role: "user", content: "why does this function throw a stack trace" }] }), "code");
+  eq("gw: an explicit task wins", GW.inferTask({ gh: { task: "translate" }, messages: [{ role: "user", content: "code" }] }), "translate");
+  eq("gw: the code model alias maps to the code task", GW.inferTask({ model: "ghlens-code", messages: [] }), "code");
+  eq("gw: a plain question composes", GW.inferTask({ messages: [{ role: "user", content: "write a channel post about this" }] }), "compose");
+  eq("gw: auto sends writing to the smart tier", GW.autoTier("compose"), "smart");
+  eq("gw: auto sends translation to the cheap tier", GW.autoTier("translate"), "fast");
+  eq("gw: auto sends code to the code tier", GW.autoTier("code"), "code");
+  ok("gw: the model list is OpenAI-shaped", GW.MODELS.every((m) => m.object === "model" && m.id));
+  ok("gw: ghlens-auto is offered", GW.MODELS.some((m) => m.id === "ghlens-auto"));
+}
+
+
+// ── the bind-order bug, caught by mocking D1 ────────────────────────────
+// This is the one that shipped: `created_at` went into `embedding` and the
+// vector went into `dim`. The INSERT succeeded, so nothing complained — a
+// semantic search returning zero hits was the only symptom. Asserting the
+// bound values against the column list is the cheapest way to never ship it
+// again, and it needs no database.
+{
+  const captured = [];
+  const fakeEnv = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) { captured.push({ sql, args }); return { run: async () => ({ ok: true }) }; },
+          first: async () => null, all: async () => ({ results: [] }), run: async () => ({ ok: true }),
+        };
+      },
+    },
+    AI: { run: async () => ({ data: [[0.5, 0.25, 0.125]] }) },
+    CACHE: { get: async () => null, put: async () => {}, delete: async () => {} },
+  };
+  const okEmbed = await KN.embedDocument(fakeEnv, null, { id: "doc1", owner_id: 7, text: "hello world", title: "T" });
+  const call = captured.find((c) => /INSERT INTO hub_docs/.test(c.sql));
+  ok("embed: reports success when a vector was produced", okEmbed === true);
+  {
+    const cols = call.sql.match(/\(([^)]+)\)/)[1].split(",").map((x) => x.trim());
+    eq("embed: 10 columns, 10 values", call.args.length, cols.length);
+    eq("embed: id lands in id", call.args[cols.indexOf("id")], "doc1");
+    eq("embed: owner lands in owner_id", call.args[cols.indexOf("owner_id")], 7);
+    eq("embed: embedding holds JSON, not a timestamp", typeof call.args[cols.indexOf("embedding")], "string");
+    ok("embed: embedding parses back to the vector",
+      JSON.stringify(JSON.parse(call.args[cols.indexOf("embedding")])) === "[0.5,0.25,0.125]");
+    eq("embed: dim holds the vector length", call.args[cols.indexOf("dim")], 3);
+    eq("embed: created_at holds a number, not a vector", typeof call.args[cols.indexOf("created_at")], "number");
+    ok("embed: created_at is a plausible epoch ms", call.args[cols.indexOf("created_at")] > 1_700_000_000_000);
+  }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

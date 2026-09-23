@@ -17,14 +17,18 @@
 | 4 | **Content Graph + DNA** | ✅ زنده | `src/hub/content.ts` |
 | 5 | **Workflow Engine (App Composer)** | ✅ زنده (۱۳ نوع گره) | `src/hub/engine.ts` |
 | 6 | **Mission Mode** | ✅ زنده | `src/hub/mission.ts` |
-| 7 | **AI Mesh** | ✅ زنده | `src/hub/mesh.ts` |
+| 7 | **AI Mesh** (چندمدلی + داور + سنتز) | ✅ زنده | `src/hub/mesh.ts` |
 | 8 | **Editor** (پست کانال) | ✅ زنده | `src/hub/editor.ts` |
 | 9 | **Playbooks** | ✅ زنده (۳ عدد) | `src/hub/playbooks.ts` |
-| 10 | **Webhook Receiver چندسرویسی** | 🔜 بعدی | — |
-| 11 | **File Universe** (OCR/Transcript) | 🔜 بعدی | — |
-| 12 | **Media Factory** (تصویر/ویدیو) | 🔜 بعدی | — |
-| 13 | **Knowledge Graph + Semantic Search** | 🔜 بعدی | — |
-| 14 | **AI Gateway** (`/v1/chat/completions`) | 🔜 بعدی | — |
+| 10 | **Webhook Receiver** (HMAC هر سرویس) | ✅ زنده | `src/hub/hooks.ts` |
+| 11 | **File Universe** | ✅ زنده (بدون صوت) | `src/hub/files.ts` |
+| 12 | **Media Factory** (تصویر) | ✅ زنده (بدون صوت) | `src/hub/media.ts` |
+| 13 | **Knowledge Graph + Semantic Search** | ✅ زنده | `src/hub/knowledge.ts` |
+| 14 | **AI Gateway** (`/v1/chat/completions`) | ✅ زنده | `src/hub/gateway.ts` |
+| 15 | **File ingest over HTTP** | ✅ زنده | `POST /hub/ingest` |
+
+خارج از دامنه، به‌عمد: **صوت و ویدیو** (طبق درخواست صریح — هیچ مسیر صوتی در ربات نیست)،
+**OCR روی PDF اسکن‌شده** (صادقانه «متن پیدا نشد» گزارش می‌شود)، **ترنسکریپت** و **گویندگی**.
 
 ---
 
@@ -219,3 +223,56 @@ github.release.published
 ```
 
 و ارسال دوبارهٔ همان ریلیز: `🔁 این رویداد قبلاً پردازش شده بود`.
+
+---
+
+## ۱۶. چه چیزی واقعاً زنده تست شد (نه ادعا)
+
+هر مورد زیر با یک فراخوانی واقعی روی دیپلویِ جاری تأیید شده است:
+
+```
+# وب‌هوک: امضای غلط رد می‌شود، امضای درست رویداد می‌سازد
+POST /hooks/github/hk_secret_demo_1   sha256=deadbeef  → HTTP 401
+POST /hooks/github/hk_secret_demo_1   sha256=<real>    → {ok, type: github.release.published, runs:[…]}
+POST (همان بدنه، بار دوم)                               → duplicate: true, runs: []   ← idempotency
+POST با مخزن غیرمشترک                                   → ignored: "repo not watched"
+
+# فایل: بدون تلگرام هم قابل تست است
+POST /hub/ingest?name=guide.md      → markdown · ۸۱ نویسه · ۴ موجودیت · برداری شد
+POST /hub/ingest?name=build.pdf     → pdf · ۶۴ نویسه · ۳ موجودیت · برداری شد
+POST /hub/ingest?name=runtime.pdf   → pdf · «متن پیدا نشد — احتمالاً اسکن‌شده» (صادقانه)
+
+# مسیر تأیید و انتشار (کامل، از دکمه تا کانال)
+press hos:ok:<run_id> → run از فرانتیر ادامه می‌یابد → نود connector منتشر می‌کند
+                      → ۱ پست در کانال، ۵ دکمهٔ دانلود (هر دارایی یکی) + لینک پروژه در متن
+                      → run.state = ok، گام‌ها: send | connector ✓ · done | stop
+
+# دروازهٔ AI (سازگار با OpenAI)
+GET  /v1/models                → ۵ شناسه
+POST /v1/chat/completions      → بدون کلید/کلید غلط: 401
+                             → ghlens-fast: پاسخ فارسی، usage 19/25/44، routing {chosen:fast, task:compose}
+                             → ghlens-mesh: دو پاسخ یکسان JSON → agreement 1.0 (قبلاً 0.0 — باگ توکنایزر)
+                             → stream: true → chat.completion.chunk … [DONE]
+
+# گراف دانش و جست‌وجو
+hos:search «…نسخه جدید رانتایم جاوااسکریپت…» (بدون کلمهٔ مشترک) → «Bun v1.2.0» ۵۵٪ · via: semantic
+```
+
+### باگ‌هایی که همین تست‌ها پیدا کردند و بسته شدند
+
+- **`embedDocument` ترتیب bind را عوض می‌کرد** — وکتور در ستون `dim`، تایم‌استمپ در `embedding`،
+  و INSERT موفق می‌شد. حالا مقادیر موقعیتی و یک‌به‌یک به ستون‌ها bind می‌شوند و یک رگرسیون با D1 تقلبی
+  ستون‌ها را با مقادیر تطبیق می‌دهد. (قاعده: هیچ‌وقت spread نکن وقتی مقادیر و placeholderها از یک آرایه نمی‌آیند.)
+- **`agreement()` دو پاسخ یکسان را ۰ می‌داد** — توکنایزر کلمات ≤۲ حرف را دور می‌ریخت و `{"a": 7, "b": 4}`
+  تمامش همین بود. حالا فهرست stop-word اسمی + مقایسهٔ کاراکتری برای پاسخ‌های کوتاه.
+- **تأیید از کارت ورک‌فلو دکمهٔ مرده بود** — دکمه `hos:ok:<run_id>` می‌فرستاد و هندلر آن را
+  شناسهٔ محتوا فرض می‌کرد → `?`. حالا run→content حل می‌شود و گره تأیید واقعاً از سر گرفته می‌شود.
+- **تأیید دو بار منتشر می‌کرد** — هندلر خودش منتشر می‌کرد و run ادامه‌یافته هم نود connector خودش را
+  دوباره اجرا می‌کرد؛ کانال دو پست یکسان گرفت (زنده اندازه‌گیری شد). حالا فقط run منتشر می‌کند و
+  هندلر تنها وقتی منتشر می‌کند که run چیزی منتشر نکرده باشد.
+- **متن منتشرشدهٔ اجرای ادامه‌یافته ممکن بود نصفه باشد** — `trimBag` هر مقدار ذخیره‌شده را در
+  ۱۲۰۰ نویسه می‌بُرد. حالا متن و کیبورد از ردیف محتوا بازخوانی می‌شوند (محتوا منبع حقیقت است، bag فقط کش).
+- **`hos:edit` هیچ هندلری نداشت** — دکمه بود و کار نمی‌کرد. حالا حالت ورودی می‌شود و پس از جایگزینی
+  متن، هم دوباره برداری می‌شود هم کارت تأیید برمی‌گردد.
+- **رد کردن، run را معلق می‌گذاشت** — کارت «رد» پیش‌نویس را blocked می‌کرد ولی run تا ابد `waiting`
+  می‌ماند. حالا رد کردن، run را با یک گام صادقانه می‌بندد.

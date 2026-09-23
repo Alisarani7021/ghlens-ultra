@@ -14,7 +14,16 @@ import {
 import { CONNECTORS, connector, connectorKinds } from "../hub/connectors";
 import { recentEvents, markEvent } from "../hub/event";
 import * as CG from "../hub/content";
+import * as KB from "../hub/knowledge";
+import * as FU from "../hub/files";
+import * as MD from "../hub/media";
+import { resumeRun } from "../hub/engine";
 import { hubId } from "../hub/event";
+import { MODELS } from "../hub/gateway";
+
+function safeJson(s: any): any {
+  try { return JSON.parse(String(s ?? "{}")); } catch { return {}; }
+}
 
 /**
  *  The Hub OS console — the face of the bus, the connectors and the workflows.
@@ -71,6 +80,14 @@ export class HubOS {
         [
           { text: fa ? "🕸 گراف محتوا" : "🕸 Content graph", cb: "hos:graph" },
           { text: fa ? "📊 اجراها" : "📊 Runs", cb: "hos:runs" },
+        ],
+        [
+          { text: fa ? "🧠 دانش و جست‌وجوی معنایی" : "🧠 Knowledge & search", cb: "hos:know" },
+          { text: fa ? "📚 کاوش موجودیت‌ها" : "📚 Entities", cb: "hos:ents" },
+        ],
+        [
+          { text: fa ? "📄 کالبدشکافی فایل" : "📄 File dissection", cb: "hos:files" },
+          { text: fa ? "🔌 وب‌هوک و گیت‌وی" : "🔌 Webhooks & gateway", cb: "hos:integ" },
         ],
       ),
       !!h.cbId,
@@ -448,10 +465,84 @@ export class HubOS {
     );
   }
 
+  /**
+   * Approve a draft and put it on the channel.
+   *
+   * Two id spaces land here. A card in the queue carries a **content id**
+   * (`hos:ok:cnt_…`) and has nothing to resume. A card posted by a workflow's
+   * approval gate carries a **run id** (`hos:ok:run_…`), and that run is
+   * sitting parked in `hub_runs` with a frontier waiting behind the gate.
+   *
+   * Exactly one of them may publish. The first version of this resumed the run
+   * *and* published here, and the channel received the same release twice
+   * (verified live — two identical `sendMessage` calls, one from each path).
+   * The run owns its publish step: it knows the channel, the markup, the asset
+   * buttons and it records `published` in its bag. So this resumes first, looks
+   * at what the run did, and only publishes itself when the run did not — which
+   * is the queue case, and the case of a workflow whose gate sits *after* its
+   * connector node.
+   */
   async approve(h: H, contentId: string) {
     const fa = h.loc === "fa";
+    let runId: string | null = null;
+
+    if (contentId.startsWith("run_")) {
+      runId = contentId;
+      const row = await h.env.DB.prepare(`SELECT output FROM hub_runs WHERE id=?`)
+        .bind(runId).first<any>().catch(() => null);
+      if (!row) return h.toast("?");
+      const out = safeJson(row.output) as any;
+      const cid = String(out?.bag?.content_id ?? out?.bag?.id ?? "");
+      if (!cid) {
+        // A gate whose content node never ran has nothing to publish — but the
+        // run still deserves to move on, or it waits forever.
+        const moved = await resumeRun(
+          { env: h.env, ai: h.ai, tg: h.tg, owner_id: h.u.id, trace: `tr_resume${runId.slice(-6)}` },
+          runId, { approved: true },
+        ).catch(() => null);
+        return h.reply(
+          moved
+            ? `✅ <b>${fa ? "تأیید شد" : "approved"}</b>\n\n<i>${fa ? "این ورک‌فلو محتوایی برای انتشار نداشت؛ اجرا ادامه یافت." : "no content to publish; run resumed"}</i>`
+            : `⚠️ <b>${fa ? "چیزی برای تأیید نبود" : "nothing to approve"}</b>`,
+          kb([[{ text: fa ? "🕹 صف" : "🕹 Queue", cb: "hos:queue" }]]),
+          !!h.cbId,
+        );
+      }
+      contentId = cid;
+    }
+
     const c = await CG.getContent(h.env, contentId);
-    if (!c) return h.toast("?");
+    if (!c) {
+      // A run can outlive its draft — the row was cleared, or deleted from the
+      // queue. Answering "?" left the card dead *and* the run parked, which is
+      // how a queue fills with gates that can never be answered. Close it and
+      // say so.
+      if (runId) await this.closeRun(h, runId, "🗑 پیش‌نویس پیدا نشد (پاک‌شده)");
+      return h.reply(
+        `⚠️ <b>${fa ? "پیش‌نویس این تأیید دیگر وجود ندارد" : "draft is gone"}</b>\n\n` +
+          (fa ? "محتوا حذف شده، پس چیزی برای انتشار نیست. اجرای معلق هم بسته شد." : ""),
+        kb([[{ text: fa ? "🕹 صف" : "🕹 Queue", cb: "hos:queue" }, { text: fa ? "🏃 اجراها" : "🏃 Runs", cb: "hos:runs" }]]),
+        !!h.cbId,
+      );
+    }
+
+    // ── hand the decision to the run, which publishes as its own step ──────
+    if (runId) {
+      const r = await resumeRun(
+        { env: h.env, ai: h.ai, tg: h.tg, owner_id: h.u.id, trace: `tr_resume${runId.slice(-6)}` },
+        runId,
+        { approved: true, content_id: contentId },
+      ).catch(() => null);
+      const pub = r?.bag?.published;
+      if (pub?.message_id) {
+        await CG.markPublished(h.env, contentId, String(pub.chat ?? ""), Number(pub.message_id));
+        await h.toast(fa ? "✅ منتشر شد" : "✅ published");
+        return this.viewContent(h, contentId);
+      }
+      // The run either had nothing left to do or stopped short of publishing;
+      // fall through and publish here, once.
+    }
+
     const cfg = await loadConnectorConfig(h.env, h.u.id, "telegram");
     if (!cfg.channel) {
       await CG.setState(h.env, contentId, "approved");
@@ -473,10 +564,94 @@ export class HubOS {
     }
   }
 
-  async reject(h: H, contentId: string) {
-    await CG.setState(h.env, contentId, "blocked");
+  /**
+   * The «✏️ ویرایش متن» button had no handler at all: the keyboard offered it
+   * and tapping it did nothing. It now parks the content id in the input mode
+   * and asks for the replacement body — the same mode mechanism every other
+   * text entry in the hub uses, so a stray message cannot edit a draft by
+   * accident (the mode expires on its own).
+   */
+  async editPrompt(h: H, contentId: string) {
+    const fa = h.loc === "fa";
+    const c = await CG.getContent(h.env, contentId);
+    if (!c) return h.toast("?");
+    await setMode(h.session, "hos:edit", { id: contentId });
+    return h.reply(
+      `✏️ <b>${fa ? "ویرایش متن" : "Edit body"}</b>\n\n` +
+        `<i>${tgEscape(String(c.title ?? c.kind))}</i>\n\n` +
+        (fa
+          ? "متن جدید را بفرست. متن فعلی جایگزین می‌شود و همان درخواست تأیید دوباره می‌آید."
+          : "Send the new body. It replaces the current one and the approval card comes back."),
+      kb([[{ text: fa ? "✖️ انصراف" : "✖️ Cancel", cb: `hos:view:${contentId}` }]]),
+      !!h.cbId,
+    );
+  }
+
+  /** Apply a typed body to the draft that is in edit mode. */
+  async applyEdit(h: H, contentId: string, text: string) {
+    const fa = h.loc === "fa";
+    const body = text.trim();
+    if (!body) return h.toast("?");
+    const c = await CG.getContent(h.env, contentId);
+    if (!c) return h.toast("?");
+    const prev = c.body ?? "";
+    await h.env.DB.prepare(`UPDATE hub_content SET body=?, version=version+1, updated_at=? WHERE id=?`)
+      .bind(body.slice(0, 8000), Date.now(), contentId)
+      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    await clearMode(h.session);
+    // An edit changes the text that was embedded and indexed, so both indexes
+    // are refreshed — otherwise the search layer keeps serving the old body.
+    await KB.embedDocument(h.env, h.ai, { id: contentId, owner_id: h.u.id, text: body, title: c.title ?? undefined, kind: c.kind, lang: c.lang })
+      .catch(() => false);
+    return h.reply(
+      `✅ <b>${fa ? "متن جایگزین شد" : "body replaced"}</b>\n` +
+        `<i>${fa ? `نسخهٔ قبلی ${prev.length} کاراکتر بود، نسخهٔ جدید ${body.length} کاراکتر` : `${prev.length} → ${body.length} chars`}</i>\n\n` +
+        body.slice(0, 3000),
+      kb(
+        [{ text: fa ? "✅ تأیید و انتشار" : "✅ Approve & publish", cb: `hos:ok:${contentId}` }],
+        [{ text: fa ? "🕸 گراف" : "🕸 Graph", cb: "hos:graph" }, { text: fa ? "🕹 صف" : "🕹 Queue", cb: "hos:queue" }],
+      ),
+    );
+  }
+
+  /**
+   * Rejecting is a decision too: the draft is blocked, and a workflow sitting
+   * on the same gate is closed out with an honest step instead of staying in
+   * `waiting` for an answer that already arrived. Left as it was, the queue
+   * filled up with runs nobody could ever approve.
+   */
+  async reject(h: H, id: string) {
+    const fa = h.loc === "fa";
+    let runId: string | null = null;
+    if (id.startsWith("run_")) {
+      runId = id;
+      const row = await h.env.DB.prepare(`SELECT output FROM hub_runs WHERE id=?`)
+        .bind(runId).first<any>().catch(() => null);
+      const bag = safeJson(row?.output)?.bag ?? {};
+      id = String(bag.content_id ?? bag.id ?? "");
+      if (!id) {
+        await this.closeRun(h, runId, "🗑 رد شد توسط مالک");
+        await h.toast("🗑");
+        return this.runs(h);
+      }
+    }
+    await CG.setState(h.env, id, "blocked");
+    if (runId) await this.closeRun(h, runId, "🗑 رد شد توسط مالک");
     await h.toast("🗑");
     return this.queue(h);
+  }
+
+  /** Mark a parked run as finished because the owner declined it. */
+  private async closeRun(h: H, runId: string, why: string) {
+    const row = await h.env.DB.prepare(`SELECT steps FROM hub_runs WHERE id=?`)
+      .bind(runId).first<any>().catch(() => null);
+    const steps = safeJson(row?.steps);
+    const list = Array.isArray(steps) ? steps : [];
+    list.push({ node: "gate", kind: "approval", ms: 0, summary: why, ok: true });
+    await h.env.DB.prepare(`UPDATE hub_runs SET state='ok', steps=?, ended_at=? WHERE id=?`)
+      .bind(JSON.stringify(list).slice(0, 12000), Date.now(), runId)
+      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    return true;
   }
 
   // ── graph & runs ────────────────────────────────────────────────────────
@@ -540,6 +715,233 @@ export class HubOS {
         }).join("\n\n")
       : (fa ? "<i>اجرایی ثبت نشده.</i>" : "<i>No runs.</i>");
     return h.reply(`📊 <b>${fa ? "اجراها" : "Runs"}</b>\n\n${body}`, kb([[{ text: fa ? "🎯 رویدادها" : "🎯 Events", cb: "hos:events" }]]), !!h.cbId);
+  }
+
+  // ── knowledge graph & semantic search ───────────────────────────────────
+
+  async knowledge(h: H) {
+    const fa = h.loc === "fa";
+    const [ents, docs] = await Promise.all([
+      KB.topEntities(h.env, h.u.id, 8),
+      h.env.DB.prepare(`SELECT COUNT(*) n FROM hub_docs WHERE owner_id=?`).bind(h.u.id).first<any>().catch(() => null),
+    ]);
+    const embedded = await h.env.DB.prepare(`SELECT COUNT(*) n FROM hub_docs WHERE owner_id=? AND embedding IS NOT NULL`).bind(h.u.id).first<any>().catch(() => null);
+    const list = ents.length
+      ? ents.map((e) => `${ENTITY_ICON[e.kind] ?? "•"} <b>${tgEscape(e.label)}</b> <i>${e.kind}</i> · ${e.mentions}×`).join("\n")
+      : (fa ? "<i>هنوز چیزی استخراج نشده.</i>" : "<i>nothing indexed yet</i>");
+    return h.reply(
+      `🧠 <b>${fa ? "گراف دانش و جست‌وجوی معنایی" : "Knowledge graph & semantic search"}</b>\n\n` +
+        `<blockquote>${fa
+          ? "هر نوشته به موجودیت‌ها تجزیه می‌شود و به‌صورت برداری ذخیره می‌شود. جست‌وجو با معنا کار می‌کند، نه با کلمه."
+          : "Artefacts become entities and vectors. Search works on meaning, not substrings."}</blockquote>\n\n` +
+        `<b>${fa ? "پرتکرارترین موجودیت‌ها" : "Top entities"}</b>\n${list}\n\n` +
+        `📄 ${fa ? "اسناد" : "docs"}: <b>${docs?.n ?? 0}</b> · ${fa ? "برداری‌شده" : "embedded"}: <b>${embedded?.n ?? 0}</b>`,
+      kb(
+        [{ text: fa ? "🔎 جست‌وجوی معنایی" : "🔎 Semantic search", cb: "hos:search" }],
+        [{ text: fa ? "📚 همهٔ موجودیت‌ها" : "📚 All entities", cb: "hos:ents" }, { text: fa ? "🕸 گراف" : "🕸 Graph", cb: "hos:graph" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  async entities(h: H) {
+    const fa = h.loc === "fa";
+    const rows = await KB.topEntities(h.env, h.u.id, 24);
+    const byKind = new Map<string, string[]>();
+    for (const e of rows) {
+      const arr = byKind.get(e.kind) ?? [];
+      arr.push(`${ENTITY_ICON[e.kind] ?? "•"} ${e.label} <i>${e.mentions}</i>`);
+      byKind.set(e.kind, arr);
+    }
+    const body = [...byKind.entries()].map(([k, arr]) => `<b>${k}</b>\n${arr.join(" · ")}`).join("\n\n") || (fa ? "<i>خالی</i>" : "<i>empty</i>");
+    return h.reply(`📚 <b>${fa ? "موجودیت‌ها" : "Entities"}</b>\n\n${body}`, kb([[{ text: "◀️", cb: "hos:know" }]]), !!h.cbId);
+  }
+
+  async searchPrompt(h: H) {
+    const fa = h.loc === "fa";
+    await setMode(h.session, "hos:search");
+    return h.tg.sendMessage(
+      h.chatId,
+      fa
+        ? `🔎 <b>جست‌وجوی معنایی</b>\n\n<blockquote>هر چه یادت هست بنویس — لازم نیست کلمهٔ دقیق را بدانی. «اون پست مربوط به آپدیت کلادفلر ورکرز که هفته پیش ساختیم» کافی است.</blockquote>\n\n` +
+          `سه مسیر جست‌وجو به ترتیب: <b>موجودیت</b> (اگر اسمی در گراف باشد) → <b>برداری</b> (معنا) → <b>کلیدواژه</b>. و همیشه می‌گوید از کدام مسیر جواب داده.`
+        : `🔎 <b>Semantic search</b>`,
+      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:know" }]]) as any },
+    );
+  }
+
+  async search(h: H, query: string) {
+    const fa = h.loc === "fa";
+    await clearMode(h.session);
+    const q = query.trim();
+    if (!q) return h.toast(fa ? "چیزی بنویس" : "type something");
+    await h.loading(fa ? "🧠 در حال جست‌وجو…" : "Searching…");
+    const r = await KB.search(h.env, h.ai, h.u.id, q, { limit: 6 });
+
+    const viaLabel = r.via === "entity" ? "🧠 گراف دانش" : r.via === "semantic" ? "🧬 برداری (معنایی)" : "🔤 کلیدواژه";
+    if (!r.hits.length) {
+      return h.reply(
+        `🔎 <b>${tgEscape(q)}</b>\n\n${fa ? "چیزی پیدا نشد." : "no hits."}\n\n` +
+          `<i>${fa ? "مسیر جست‌وجو" : "via"}: ${viaLabel}</i>`,
+        kb([[{ text: fa ? "📚 برنامه‌های آماده" : "📚 Playbooks", cb: "hos:books" }, { text: fa ? "🧠 دانش" : "🧠 Knowledge", cb: "hos:know" }]]),
+        !!h.cbId,
+      );
+    }
+    const hits = r.hits.map((hit, i) => {
+      const preview = MD.stripHtml(hit.body ?? "").replace(/\s+/g, " ").slice(0, 140);
+      return `<b>${i + 1}.</b> ${tgEscape(hit.title ?? hit.kind)}\n   <i>${tgEscape(preview)}…</i>\n   <code>${hit.id.slice(-8)}</code> · ${(hit.score * 100).toFixed(0)}٪`;
+    }).join("\n\n");
+    return h.reply(
+      `🔎 <b>${tgEscape(q)}</b>\n\n${hits}\n\n<i>${fa ? "مسیر" : "via"}: ${viaLabel}${r.entity ? ` · ${tgEscape(r.entity.label)}` : ""}</i>`,
+      kb(
+        ...r.hits.slice(0, 3).map((hit) => [{ text: `👁 ${(hit.title ?? hit.kind).slice(0, 28)}`, cb: `hos:view:${hit.id}` }]),
+        [{ text: fa ? "🎯 رویدادها" : "🎯 Events", cb: "hos:events" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  // ── file universe ───────────────────────────────────────────────────────
+
+  async filePrompt(h: H) {
+    const fa = h.loc === "fa";
+    const { results } = await h.env.DB.prepare(
+      `SELECT name, kind, size, extracted_chars, created_at FROM hub_files WHERE owner_id=? ORDER BY created_at DESC LIMIT 8`,
+    ).bind(h.u.id).all<any>().catch(() => ({ results: [] as any[] }));
+    const list = (results ?? []).length
+      ? (results ?? []).map((r) => `${FILE_ICON[r.kind] ?? "📄"} <b>${tgEscape(r.name)}</b>\n   <code>${r.kind}</code> · ${FU.humanBytes(r.size)} · ${r.extracted_chars ? `${FU.fmtNum(r.extracted_chars)} ${fa ? "نویسه" : "chars"}` : fa ? "بدون متن" : "no text"}`).join("\n\n")
+      : (fa ? "<i>هنوز فایلی نفرستاده‌ای.</i>" : "<i>no files yet</i>");
+
+    await setMode(h.session, "hos:file");
+    return h.tg.sendMessage(
+      h.chatId,
+      (fa
+        ? `📄 <b>کالبدشکافی فایل</b>\n\n` +
+          `<blockquote>هر فایل متنی، PDF، CSV، JSON، XML، کد یا آرشیو را بفرست: نوعش تشخیص داده می‌شود، متن و ساختارش استخراج می‌شود، موجودیت‌هایش به گراف دانش می‌رود و قابل جست‌وجو می‌شود.</blockquote>\n\n` +
+          `<b>پشتیبانی می‌شود:</b> txt · md · csv · json · xml · yaml · html · PDF (متنی) · همهٔ زبان‌های کد\n` +
+          `<b>پشتیبانی نمی‌شود:</b> صوت و ویدیو (طبق درخواست خودت، هیچ بخش صوتی در ربات نیست)\n\n`
+        : `📄 <b>File dissection</b>\n\nSend a document and I will extract, index and graph it.\n\n`) +
+        `<b>${fa ? "آخرین فایل‌ها" : "Recent"}</b>\n${list}`,
+      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "◀️" : "◀️", cb: "hos:home" }]]) as any },
+    );
+  }
+
+  /**
+   * A document arriving in chat, run through the whole pipeline at once.
+   *
+   * The result is reported as *facts*, not as a wall of text: the owner asked
+   * to dissect a file, and "1,284 lines, 12 imports, 3 TODOs, 47 entities
+   * linked" answers that better than the first 4000 characters do.
+   */
+  async ingestFile(h: H, doc: { file_name?: string; mime_type?: string; file_id: string; file_size?: number }) {
+    const fa = h.loc === "fa";
+    const name = doc.file_name ?? "file.bin";
+    await h.loading(fa ? `📄 در حال کالبدشکافی ${name}…` : `Dissecting ${name}…`);
+    try {
+      const bytes = await downloadTelegramFile(h, doc.file_id);
+      if (!bytes) return h.reply(`❌ ${fa ? "دریافت فایل از تلگرام ناموفق بود (فایل بزرگ‌تر از ۲۰MB یا منقضی شده)" : "could not fetch file"}`, kb([[{ text: "◀️", cb: "hos:files" }]]));
+
+      const r = await FU.ingest(h.env, h.ai, {
+        name, mime: doc.mime_type, bytes, owner_id: h.u.id,
+        skipEmbed: await aiHaltedSafe(h),
+      });
+
+      const facts = r.facts.map((f) => `• <b>${tgEscape(f.label)}</b>: ${tgEscape(f.value)}`).join("\n");
+      const preview = r.preview.replace(/\s+/g, " ").slice(0, 400);
+      return h.reply(
+        `📄 <b>${tgEscape(name)}</b>\n\n` +
+          `<blockquote>${facts}</blockquote>\n\n` +
+          (r.note ? `⚠️ ${tgEscape(r.note)}\n\n` : "") +
+          `🧠 ${fa ? "موجودیت‌های پیوند‌خورده" : "entities linked"}: <b>${r.entities}</b>` +
+          (r.embedded ? ` · 🧬 ${fa ? "برداری شد" : "embedded"}` : ` · <i>${fa ? "بدون بردار (سهمیه)" : "not embedded"}</i>`) +
+          (preview ? `\n\n<b>${fa ? "پیش‌نمایش" : "preview"}</b>\n<code>${tgEscape(preview)}</code>` : ""),
+        kb(
+          [{ text: fa ? "🔎 جست‌وجو در محتوا" : "🔎 Search inside", cb: "hos:search" }],
+          [{ text: fa ? "📄 فایل دیگر" : "📄 Another file", cb: "hos:files" }, { text: fa ? "🧠 دانش" : "🧠 Knowledge", cb: "hos:know" }],
+        ),
+        !!h.cbId,
+      );
+    } catch (e: any) {
+      return h.reply(`❌ <code>${tgEscape(String(e?.message ?? e).slice(0, 200))}</code>`, kb([[{ text: "◀️", cb: "hos:files" }]]));
+    }
+  }
+
+  // ── media factory ───────────────────────────────────────────────────────
+
+  async mediaPrompt(h: H) {
+    const fa = h.loc === "fa";
+    await setMode(h.session, "hos:media");
+    return h.tg.sendMessage(
+      h.chatId,
+      fa
+        ? `🖼 <b>کارخانهٔ رسانه</b>\n\n` +
+          `<blockquote>موضوع یا متن پست را بفرست. یک کاور برداری (SVG) می‌سازم که برای عنوان یکسان همیشه یکسان است، و یک پرامپت هنری دقیق برای تولید تصویر.</blockquote>\n\n` +
+          `<i>کاور رندر می‌شود نه تولید: برداری، شارپ در هر اندازه، با فارسی درست (نویسندهٔ تصویر نمی‌تواند متن فارسی را سالم بنویسد) و بدون هزینهٔ نورون.</i>`
+        : `🖼 <b>Media factory</b>`,
+      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:home" }]]) as any },
+    );
+  }
+
+  async buildMedia(h: H, subject: string) {
+    const fa = h.loc === "fa";
+    await clearMode(h.session);
+    const s = subject.trim();
+    if (!s) return h.toast("?");
+    await h.loading(fa ? "🖼 در حال ساخت کیت رسانه…" : "Building media kit…");
+
+    const firstLine = s.split("\n")[0].slice(0, 120);
+    const spec = { title: firstLine, subtitle: s.split("\n")[1]?.slice(0, 90), badge: undefined as string | undefined, handle: undefined as string | undefined, theme: "dark" as const };
+    const kit = await MD.mediaKit(h.env, h.ai, { title: spec.title, body: s, badge: spec.badge, handle: spec.handle }, { withPrompt: true });
+
+    const svgBytes = new TextEncoder().encode(kit.cover);
+    await h.tg.sendDocument(h.chatId, `${slug(firstLine)}.svg`, new Blob([svgBytes], { type: "image/svg+xml" }), undefined, {})
+      .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+
+    return h.reply(
+      MD.mediaKitCaption(spec as any, kit.prompt, fa),
+      kb(
+        [{ text: fa ? "🖼 موضوع دیگر" : "🖼 Another", cb: "hos:media" }],
+        [{ text: fa ? "🕸 گراف" : "🕸 Graph", cb: "hos:graph" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  // ── integrations: webhooks + gateway ────────────────────────────────────
+
+  async integrations(h: H) {
+    const fa = h.loc === "fa";
+    const base = String(h.env.WORKER_URL ?? "").replace(/\/+$/, "");
+    const hooks = await h.env.DB.prepare(
+      `SELECT id, kind, json_extract(config,'$.hook_key') hk FROM hub_connectors WHERE owner_id=? LIMIT 6`,
+    ).bind(h.u.id).all<any>().catch(() => ({ results: [] as any[] }));
+    const gw = await h.env.DB.prepare(
+      `SELECT COUNT(*) n, COALESCE(SUM(prompt_tokens+completion_tokens),0) tok FROM hub_gateway_log WHERE ts > ?`,
+    ).bind(Date.now() - 7 * 86400000).first<any>().catch(() => null);
+
+    const hookLines = (hooks.results ?? []).length
+      ? (hooks.results ?? []).map((r) => {
+          const url = `${base}/hooks/${r.kind}/${r.hk ?? r.id}`;
+          return `• <b>${tgEscape(r.kind)}</b>\n  <code>${tgEscape(url)}</code>`;
+        }).join("\n\n")
+      : (fa ? "<i>برای هر کانکتور یک آدرس هوم‌هوک ساخته می‌شود.</i>" : "<i>connect a connector first</i>");
+
+    return h.reply(
+      `🔌 <b>${fa ? "یکپارچه‌سازی: وب‌هوک و گیت‌وی" : "Integrations"}</b>\n\n` +
+        `<b>${fa ? "آدرس‌های دریافت رویداد" : "Hook endpoints"}</b>\n` +
+        `<blockquote>${fa ? "این آدرس را در تنظیمات وب‌هوک سرویس بیرونی بگذار. کلید داخل مسیر هم شناسه است و هم رمز — گیت‌هاب امضای HMAC را هم جدا بررسی می‌کند." : "Paste these into the provider's webhook settings."}</blockquote>\n\n` +
+        hookLines +
+        `\n\n<b>${fa ? "دروازهٔ هوش مصنوعی (سازگار با OpenAI)" : "AI gateway (OpenAI-compatible)"}</b>\n` +
+        `<code>POST ${tgEscape(base)}/v1/chat/completions</code>\n` +
+        `<code>GET  ${tgEscape(base)}/v1/models</code>\n\n` +
+        `<blockquote>${fa ? "هر اپلیکیشنی که OpenAI را صدا می‌زند، می‌تواند آدرسش را به اینجا عوض کند و از مسیریابی خودکار، چندمدلی و گزارش توافق استفاده کند — بدون تغییر کد." : "Point any OpenAI client here."}</blockquote>\n\n` +
+        (fa ? "مدل‌های در دسترس" : "Models") + `: ${MODELS.map((m) => `<code>${m.id}</code>`).join(" · ")}\n` +
+        `📊 ${fa ? "۷ روز اخیر" : "last 7d"}: <b>${gw?.n ?? 0}</b> ${fa ? "درخواست" : "calls"} · ${FU.fmtNum(Number(gw?.tok ?? 0))} token`,
+      kb(
+        [{ text: fa ? "🔌 کانکتورها" : "🔌 Connectors", cb: "hos:conn" }, { text: fa ? "📊 اجراها" : "📊 Runs", cb: "hos:runs" }],
+      ),
+      !!h.cbId,
+    );
   }
 
   /**
@@ -649,4 +1051,45 @@ export async function pollDueConnectors(env: any, ai: any, tg: any, limit = 8) {
     }
   }
   return { connectors: (results ?? []).length, events, runs };
+}
+
+
+const ENTITY_ICON: Record<string, string> = {
+  repo: "📦", org: "🏢", version: "🏷", topic: "🎯", file: "📄",
+  language: "⌨️", person: "👤", url: "🌐", term: "🔖",
+};
+
+const FILE_ICON: Record<string, string> = {
+  text: "📃", markdown: "📘", csv: "📊", json: "🧾", xml: "🧩", yaml: "⚙️",
+  html: "🌐", code: "⌨️", pdf: "📕", archive: "🗜", image: "🖼", binary: "🧱", unknown: "📄",
+};
+
+function slug(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "cover";
+}
+
+/** The AI circuit breaker, without importing the whole brain into this file. */
+async function aiHaltedSafe(h: H): Promise<boolean> {
+  try {
+    const { aiHalted } = await import("../ai/brain");
+    return await aiHalted(h.env);
+  } catch { return false; }
+}
+
+/**
+ * Fetch a Telegram file into memory.
+ *
+ * The Bot API caps `getFile` downloads at 20MB, so the size is checked first
+ * and a refusal is reported as a refusal rather than as a mysterious empty
+ * buffer. Same translator rule as everywhere else: no shortcuts through
+ * `atob`, which is what mangled non-ASCII text in the previous generation.
+ */
+async function downloadTelegramFile(h: H, fileId: string): Promise<Uint8Array | null> {
+  const meta: any = await fetch(`https://api.telegram.org/bot${h.env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`)
+    .then((r) => r.json()).catch(() => null);
+  if (!meta?.ok || !meta.result?.file_path) return null;
+  if ((meta.result.file_size ?? 0) > 20 * 1024 * 1024) return null;
+  const res = await fetch(`https://api.telegram.org/file/bot${h.env.BOT_TOKEN}/${meta.result.file_path}`).catch(() => null);
+  if (!res?.ok) return null;
+  return new Uint8Array(await res.arrayBuffer());
 }

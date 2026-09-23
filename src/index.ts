@@ -45,6 +45,8 @@ import { decryptSecret, encryptSecret } from "./core/crypto";
 import { keys as keysFeature } from "./features/keys";
 import { account as accountFeature } from "./features/account";
 import { hubOS } from "./features/hubos";
+import { handleHook } from "./hub/hooks";
+import { authorise, chatCompletion, modelsResponse, streamResponse } from "./hub/gateway";
 
 export { UserSession } from "./core/session";
 
@@ -249,6 +251,60 @@ export default {
       }
 
       // ── public API used by the mini-app + share cards + magic links ────
+      // ── file ingest over HTTP ───────────────────────────────────────────
+      // The Telegram path can only accept what the Bot API will hand over
+      // (20MB, and only from a real chat). This is the same pipeline reachable
+      // programmatically, which is what makes the file universe testable and
+      // what lets an owner pipe a build artefact in from CI.
+      //
+      //   POST /hub/ingest?name=report.pdf&uid=1&key=<secret>   (body = bytes)
+      if (url.pathname === "/hub/ingest" && request.method === "POST") {
+        const key = url.searchParams.get("key") ?? request.headers.get("x-hub-key") ?? "";
+        if (!env.TELEGRAM_WEBHOOK_SECRET || key !== env.TELEGRAM_WEBHOOK_SECRET) {
+          return json({ ok: false, error: "forbidden" }, 403);
+        }
+        const name = url.searchParams.get("name") ?? "upload.bin";
+        const uid = Number(url.searchParams.get("uid") ?? 0);
+        if (!uid) return json({ ok: false, error: "uid required" }, 400);
+        const bytes = new Uint8Array(await request.arrayBuffer());
+        if (!bytes.length) return json({ ok: false, error: "empty body" }, 400);
+        if (bytes.length > 20 * 1024 * 1024) return json({ ok: false, error: "over 20MB" }, 413);
+        const ingestAi = new (await import("./ai/brain")).AiBrain(env);
+        const { ingest } = await import("./hub/files");
+        const r = await ingest(env, ingestAi, {
+          name, mime: request.headers.get("content-type") ?? undefined,
+          bytes, owner_id: uid, skipEmbed: url.searchParams.get("embed") === "0",
+        });
+        return json({
+          ok: true, doc_id: r.doc_id, kind: r.detected.kind, lang: r.detected.lang,
+          extractable: r.detected.extractable, chars: r.chars,
+          entities: r.entities, embedded: r.embedded,
+          facts: r.facts, note: r.note, preview: r.preview.slice(0, 800),
+        });
+      }
+
+      // ── inbound webhooks: one endpoint per source, one shared pipeline ──
+      if (url.pathname.startsWith("/hooks/") && request.method === "POST") {
+        const source = url.pathname.split("/")[2] ?? "generic";
+        const hookAi = new (await import("./ai/brain")).AiBrain(env);
+        return handleHook(request, env, ctx, hookAi, source);
+      }
+
+      // ── AI gateway: OpenAI-compatible, authenticated ────────────────────
+      if (url.pathname === "/v1/models" && request.method === "GET") return modelsResponse();
+      if (url.pathname.startsWith("/v1/") && request.method === "POST") {
+        const auth = await authorise(env, request);
+        if (!auth.ok) return json({ error: { message: "invalid api key", type: "auth_error", code: 401 } }, 401);
+        if (url.pathname === "/v1/chat/completions") {
+          const body = await request.json().catch(() => null) as any;
+          if (!body) return json({ error: { message: "invalid JSON body", type: "invalid_request_error", code: 400 } }, 400);
+          const gwAi = new (await import("./ai/brain")).AiBrain(env);
+          const result = await chatCompletion(env, gwAi, body, auth.who);
+          return body.stream && result.status === 200 ? streamResponse(result.body) : json(result.body, result.status);
+        }
+        return json({ error: { message: `unknown endpoint ${url.pathname}`, type: "invalid_request_error", code: 404 } }, 404);
+      }
+
       if (url.pathname.startsWith("/api/")) {
         return handleApi(request, env, ctx);
       }
@@ -573,10 +629,24 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     return assistant.voice(h, msg.voice.file_id);
   }
 
-  // documents (e.g. package files) → inspect
+  // documents → the file pipeline.
+  //
+  // Behaviour depends on where the user is standing:
+  //   • inside the hub's file screen (or any hub mode) → full dissection:
+  //     detect, extract, index entities, embed, report facts
+  //   • anywhere else → the package inspector, which is what a stray
+  //     Dockerfile or package-lock.json in a normal conversation means
+  // Routing on the session mode rather than on the file type is deliberate:
+  // the same JSON is a package manifest or a dataset depending on intent.
   if (msg.document?.file_name) {
-    const h = await buildH(msg, env, ctx, tg, store, ai, card, opts({ }));
-    return tools.pkg(h);
+    const hDoc = await buildH(msg, env, ctx, tg, store, ai, card, opts({}));
+    const m = await readMode(hDoc.session);
+    const hubish = m?.kind === "hos:file" || m?.kind?.startsWith("hos:") || /^(hos|hub):/.test(String(m?.data?.from ?? ""));
+    if (hubish) {
+      await clearMode(hDoc.session);
+      return hubOS.ingestFile(hDoc, msg.document);
+    }
+    return tools.pkg(hDoc);
   }
 
   if (!text) return;
@@ -905,6 +975,9 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
       case "hos:mission": return async (t: string) => hubOS.compileMission(h, t.trim().slice(0, 1200));
       case "hos:conn:add": return async (t: string) => hubOS.connectorAdd(h, String(mode.data?.kind ?? ""), t.trim());
+      case "hos:search": return async (t: string) => hubOS.search(h, t);
+      case "hos:edit": return async (t: string) => hubOS.applyEdit(h, String(mode.data?.id ?? ""), t);
+      case "hos:media": return async (t: string) => hubOS.buildMedia(h, t);
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
       case "code": return (t) => assistant.code(h, t);
       case "review": return (t) => assistant.review(h, t);
@@ -1593,11 +1666,18 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "queue") return hubOS.queue(h);
         if (action === "view") return hubOS.viewContent(h, arg);
         if (action === "ok") return hubOS.approve(h, arg);
+        if (action === "edit") return hubOS.editPrompt(h, arg);
         if (action === "no") return hubOS.reject(h, arg);
         if (action === "graph") return hubOS.graph(h);
         if (action === "events") return hubOS.events(h);
         if (action === "runs") return hubOS.runs(h);
         if (action === "selftest") return hubOS.selfTest(h);
+        if (action === "know") return hubOS.knowledge(h);
+        if (action === "ents") return hubOS.entities(h);
+        if (action === "search") return hubOS.searchPrompt(h);
+        if (action === "files") return hubOS.filePrompt(h);
+        if (action === "media") return hubOS.mediaPrompt(h);
+        if (action === "integ") return hubOS.integrations(h);
         break;
       // ── admin ──
       case "adm":

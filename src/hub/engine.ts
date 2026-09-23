@@ -9,6 +9,7 @@ import { evaluate, type PolicySubject } from "./policy";
 import * as CG from "./content";
 import { mesh, meshConfidence, type TaskKind } from "./mesh";
 import { composeReleasePost, type Asset } from "./editor";
+import { indexEntities, embedDocument } from "./knowledge";
 
 /**
  *  THE ENGINE
@@ -184,16 +185,27 @@ export async function runWorkflow(
 }
 
 async function persistRun(ctx: EngineCtx, wf: Workflow, id: string, input: any, r: RunResult, started: number) {
-  const sql =
+  // Values are bound positionally, one per line, against the column list right
+  // above them. No spread: a `[...args]` here would be invisible to the SQL
+  // guard and to a reader, and this is the exact shape that silently put
+  // vectors in the wrong column of `hub_docs` (see knowledge.ts).
+  const res = await ctx.env.DB.prepare(
     `INSERT INTO hub_runs (id, wf_id, owner_id, event_id, input, state, steps, trace, output, error, started_at, ended_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`;
-  const args = [
-    id, wf.id, ctx.owner_id, ctx.event?.id ?? null, JSON.stringify(input).slice(0, 4000),
-    r.state, JSON.stringify(r.steps).slice(0, 12000), ctx.trace,
-    JSON.stringify({ bag: trimBag(r.bag), waiting: r.waiting ?? null }).slice(0, 12000),
-    r.error ?? null, started, Date.now(),
-  ];
-  const res = await ctx.env.DB.prepare(sql).bind(...args).run().catch((e: any) => {
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).bind(
+    id,                                                              // id
+    wf.id,                                                           // wf_id
+    ctx.owner_id,                                                    // owner_id
+    ctx.event?.id ?? null,                                           // event_id
+    JSON.stringify(input).slice(0, 4000),                            // input
+    r.state,                                                         // state
+    JSON.stringify(r.steps).slice(0, 12000),                         // steps
+    ctx.trace,                                                       // trace
+    JSON.stringify({ bag: trimBag(r.bag), waiting: r.waiting ?? null }).slice(0, 12000), // output
+    r.error ?? null,                                                 // error
+    started,                                                         // started_at
+    Date.now(),                                                      // ended_at
+  ).run().catch((e: any) => {
     console.error("hub-run-insert", String(e?.message ?? e));
     return null;
   });
@@ -384,7 +396,35 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
       });
       // Wire the graph: this post derives from whatever the run was triggered by.
       if (bag.source_content_id) await CG.link(ctx.env, cid, String(bag.source_content_id), "derived_from");
-      return { patch: { content_id: cid }, summary: `محتوا ثبت شد (${cid.slice(-6)})` };
+
+      // …and feed the *knowledge* layer, which is the half that makes the
+      // content findable later. Both passes are best-effort: a post that was
+      // written is worth keeping even when the AI quota is spent, so a failure
+      // here degrades search rather than losing the artefact.
+      let entities = 0;
+      if (body) {
+        entities = await indexEntities(ctx.env, ctx.owner_id, cid, body, {
+          repo: String(bag.event?.payload?.repo ?? "") || undefined,
+          source: bag.event?.source ? String(bag.event.source) : undefined,
+        }).catch(() => 0);
+        await embedDocument(ctx.env, ctx.ai, {
+          id: cid, owner_id: ctx.owner_id, text: body, title,
+          kind: "post", lang: String(cfg.lang ?? "fa"),
+          source_ref: String(bag.source_ref ?? ""),
+        }).catch(() => false);
+      }
+      // The markup (one download button per release asset) is part of the
+      // artefact, not part of the run's working memory: `trimBag` cuts any
+      // stored bag value at 1200 chars, and a release with eight assets has a
+      // keyboard longer than that. Keeping it on the content row is what lets
+      // an approval resumed an hour later publish the *same* buttons instead of
+      // a truncated string Telegram would reject.
+      if (bag.markup) {
+        await ctx.env.DB.prepare(`UPDATE hub_content SET dna = json_set(COALESCE(NULLIF(dna,''),'{}'), '$.markup', json(?)) WHERE id=?`)
+          .bind(JSON.stringify(bag.markup), cid)
+          .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      }
+      return { patch: { content_id: cid }, summary: `محتوا ثبت شد (${cid.slice(-6)}) · ${entities} موجودیت` };
     }
 
     case "approval": {
@@ -399,6 +439,10 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
         {
           parse_mode: "HTML",
           reply_markup: kb(
+            // The run id, not the content id: approving has to resume *this*
+            // run, and the run is what knows which content it produced. The
+            // handler resolves run→content before publishing, so both buttons
+            // on this card still address the same draft.
             [{ text: "✅ تأیید و انتشار", cb: `hos:ok:${bag.run_id ?? ""}` }],
             [{ text: "✏️ ویرایش متن", cb: `hos:edit:${bag.content_id ?? ""}` }, { text: "🗑 رد کردن", cb: `hos:no:${bag.content_id ?? ""}` }],
           ) as any,
@@ -451,6 +495,54 @@ function safeParse(s: string): any {
 }
 
 /** The stored connector row for this owner+kind (config only, never secrets). */
+/**
+ * Resume a run that parked itself on an approval gate.
+ *
+ * The whole point of persisting the frontier is that approval is a *pause*, not
+ * a re-run: the bag already contains the post that was written, the entities
+ * that were indexed and the ids of what was stored, so replaying the DAG from
+ * the top would write a second draft of the same release. This restores the bag
+ * from the stored run and starts walking at the node recorded in `waiting`.
+ *
+ * The same run id is reused, which is why `persistRun` falls back to an UPDATE
+ * when the INSERT hits the primary key — a resumed run is the same run.
+ */
+export async function resumeRun(
+  ctx: EngineCtx,
+  runId: string,
+  extra: Record<string, any> = {},
+): Promise<RunResult | null> {
+  const row = await ctx.env.DB.prepare(
+    `SELECT wf_id, input, output, state FROM hub_runs WHERE id=?`,
+  ).bind(runId).first<any>().catch(() => null);
+  if (!row || row.state !== "waiting") return null;
+  const wf = await getWorkflow(ctx.env, row.wf_id);
+  if (!wf) return null;
+  const bag: Record<string, any> = safeParse(row.output)?.bag ?? {};
+  const remaining: string[] = safeParse(row.output)?.waiting?.remaining ?? [];
+  if (!remaining.length) return null;
+
+  // Storage trims long bag values (see `trimBag`), so what comes back can be a
+  // cut-off copy of what went in — and the nodes behind a gate publish, so a
+  // trimmed body would be published trimmed. The content row is the source of
+  // truth for both halves of the post; the bag is a cache. Re-read them.
+  const cid = String(bag.content_id ?? "");
+  if (cid) {
+    const stored = await ctx.env.DB.prepare(
+      `SELECT body, dna FROM hub_content WHERE id=?`,
+    ).bind(cid).first<any>().catch(() => null);
+    if (stored) {
+      const body = String(stored.body ?? "");
+      if (body.length > String(bag.post ?? "").length) bag.post = body;
+      const markup = safeParse(stored.dna)?.markup;
+      if (markup) bag.markup = markup;
+    }
+  }
+
+  const input = { ...(safeParse(row.input) ?? {}), ...bag, ...extra };
+  return runWorkflow({ ...ctx, resumeFrom: remaining[0] }, wf, input, runId);
+}
+
 export async function loadConnectorConfig(env: Env, ownerId: number, kind: string): Promise<Record<string, any>> {
   const r = await env.DB.prepare(
     `SELECT config FROM hub_connectors WHERE owner_id=? AND kind=? AND enabled=1 ORDER BY created_at DESC LIMIT 1`,
