@@ -160,6 +160,11 @@ export default {
             home: !!(s.body?.reply_markup?.keyboard),
             kb: s.body?.reply_markup?.inline_keyboard?.length ?? 0,
             doc: s.body?.document ?? s.body?.photo ?? undefined,
+            // rich messages: keep the payload so an audit can check the shape
+            // (blocks, rtl flag) instead of trusting that a new API worked
+            rich: typeof s.body?.rich_message?.html === "string" ? s.body.rich_message.html : undefined,
+            rtl: s.body?.rich_message?.is_rtl === true ? true : undefined,
+            rich_len: typeof s.body?.rich_message?.html === "string" ? s.body.rich_message.html.length : undefined,
           }));
           return json({
             ok: true, ms: Date.now() - t0, text, cb, admin: isAdmin(env, uid),
