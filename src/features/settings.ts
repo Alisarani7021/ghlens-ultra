@@ -321,12 +321,14 @@ export class Settings {
         ? "همهٔ ۹۳ فرمان، دسته‌بندی‌شده. هر بخش را باز کن؛ عنوانش را لمس کن."
         : "All 93 commands, grouped. Tap a section title to unfold it.") +
       sections
+        // the first entry is the document's own title, and the rich message
+        // already has an <h1> — keeping it produced an empty "📚" section
+        .slice(1)
         .map((sec, i) => {
-          // "**title**\n…" → <details><summary>title</summary>body</details>
           const m = sec.match(/^(?:<b>)?([^<\n]+)(?:<\/b>)?\n?([\s\S]*)$/);
           const title = (m?.[1] ?? "").trim();
-          const body = (m?.[2] ?? "").replace(/\n/g, "<br>").trim();
-          return details(title, body ? `<p>${body}</p>` : "", i < 2);
+          const body = (m?.[2] ?? "").trim();
+          return details(title, body ? sectionBody(body) : "", i < 2);
         })
         .join("") +
       hr() +
@@ -357,7 +359,8 @@ export class Settings {
   }
 
 
-  /** About — the honest pitch, including the limits. */
+  
+/** About — the honest pitch, including the limits. */
   async about(h: H) {
     const fa = h.loc === "fa";
     const stats = await h.env.DB.prepare(
@@ -517,4 +520,28 @@ export async function aiEngineState(env: Env): Promise<string> {
   } catch {
     return fa ? "✅ آماده" : "ready";
   }
+}
+
+/**
+ * Turn a help section's body into rich blocks.
+ *
+ * The sections were written for plain messages, where a bullet was a literal
+ * "• " and a newline was the only structure available. In a rich message the
+ * bullets become a real `<ul>` (Telegram indents and hangs them properly) and
+ * the remaining lines stay as prose.
+ */
+function sectionBody(body: string): string {
+  const out: string[] = [];
+  let bullets: string[] = [];
+  const flush = () => {
+    if (bullets.length) { out.push(ul(bullets)); bullets = []; }
+  };
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^[•\-*]\s+/.test(line)) bullets.push(line.replace(/^[•\-*]\s+/, ""));
+    else { flush(); out.push(p(line)); }
+  }
+  flush();
+  return out.join("");
 }
