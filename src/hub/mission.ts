@@ -99,7 +99,11 @@ export async function planMission(
       `• Use "content" before "approval" so the post exists in the graph.\n` +
       `• If the mission is a request to translate/summarise, use task "translate"/"compose" with breadth 1 to save quota.\n` +
       `• on_event must be "" when the mission is something the owner runs by hand.`,
-    { tier: "smart", max_tokens: 1400, temperature: 0.15, feature: "hub:mission", userId: ownerId },
+    // `json: true` appends the "return ONLY valid JSON" instruction the model
+    // actually obeys — without it a smart-tier model often wraps the DAG in a
+    // sentence of explanation, and the planner falls back to a playbook even
+    // though it had the right answer.
+    { tier: "smart", max_tokens: 1600, temperature: 0.15, json: true, feature: "hub:mission", userId: ownerId },
   );
 
   const parsed = extractJson(raw);
@@ -146,7 +150,18 @@ function extractJson(raw: string): any | null {
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
-  try { return JSON.parse(candidate.slice(start, end + 1)); } catch { return null; }
+  const slice = candidate.slice(start, end + 1);
+  try { return JSON.parse(slice); } catch { /* try repairs below */ }
+  // Models emit near-JSON constantly: a trailing comma, a comment, a stray
+  // newline inside a string. Repairing is cheaper than a second generation and
+  // the plan is validated afterwards anyway — a bad repair cannot produce a
+  // dangerous DAG, only an invalid one.
+  const repaired = slice
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+  try { return JSON.parse(repaired); } catch { return null; }
 }
 
 /**
