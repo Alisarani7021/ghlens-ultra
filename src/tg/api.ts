@@ -121,7 +121,19 @@ export class Telegram {
     return this.call<{ message_id: number }>("sendDocument", {}, { formData: fd, retries: 1 });
   }
 
-  sendPhoto(chat_id: number, photo: Blob | ArrayBuffer | Uint8Array, caption?: string, opts: SendMessageOpts = {}) {
+  /**
+   * Send a photo by bytes, or by a `file_id` we already uploaded once.
+   *
+   * A `file_id` is the cheap path: Telegram keeps the image, we keep 40 bytes of
+   * string, and the welcome banner costs no upload on every /start. Passing a
+   * string therefore goes through the JSON method instead of a multipart form.
+   */
+  sendPhoto(chat_id: number, photo: string | Blob | ArrayBuffer | Uint8Array, caption?: string, opts: SendMessageOpts = {}) {
+    if (typeof photo === "string") {
+      return this.call<{ message_id: number }>("sendPhoto", {
+        chat_id, photo, ...(caption ? { caption } : {}), ...opts,
+      });
+    }
     const fd = new FormData();
     fd.append("chat_id", String(chat_id));
     if (caption) fd.append("caption", caption.slice(0, 1024));
@@ -131,15 +143,6 @@ export class Telegram {
     return this.call<{ message_id: number }>("sendPhoto", {}, { formData: fd, retries: 1 });
   }
 
-  sendAudio(chat_id: number, audio: Blob | ArrayBuffer | Uint8Array, caption?: string, opts: SendMessageOpts = {}, filename = "lens.mp3") {
-    const fd = new FormData();
-    fd.append("chat_id", String(chat_id));
-    if (caption) fd.append("caption", caption.slice(0, 1024));
-    if (opts.parse_mode) fd.append("parse_mode", opts.parse_mode);
-    if (opts.reply_markup) fd.append("reply_markup", JSON.stringify(opts.reply_markup));
-    fd.append("audio", new Blob([audio as any]), filename);
-    return this.call<{ message_id: number }>("sendAudio", {}, { formData: fd, retries: 1 });
-  }
 }
 
 /** Split text preferring paragraph → line → space boundaries. */

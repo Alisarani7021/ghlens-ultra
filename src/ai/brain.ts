@@ -629,64 +629,8 @@ export class AiBrain {
     return v[0] ?? new Array(1024).fill(0);
   }
 
-  // ── speech ──────────────────────────────────────────────────────────────
-  /** Diagnostics from the last speak() attempt (surfaced by /health?deep). */
-  lastTtsDebug: string[] = [];
-  /** Which voice/language the last clip actually used. */
-  spokenLang = "fa";
-
-  /**
-   * TTS — Persian first (mms-tts-fas), then the multilingual melotts voice.
-   * Workers AI models answer in different shapes depending on the model
-   * (base64 string, byte array, stream or ArrayBuffer), so normalise first and
-   * report a readable trace when nothing usable comes back.
-   */
-  async speak(text: string, locale = "fa"): Promise<ArrayBuffer | null> {
-    const clean = text.replace(/[*_`#>|]/g, "").replace(/https?:\/\/\S+/g, "").slice(0, 900);
-    const models = locale === "en"
-      ? ["@cf/deepgram/aura-1", "@cf/myshell-ai/melotts"]
-      : ["@cf/facebook/mms-tts-fas", "@cf/myshell-ai/melotts"];
-    this.lastTtsDebug = [];
-    this.spokenLang = locale;
-    // Stage 2 for non-English locales: Workers AI ships only English voices on
-    // this account, so speak a live translation instead of dropping the feature.
-    if (locale !== "en") {
-      try {
-        const en = await this.translate(clean, "en", "text");
-        if (en && en.length > 3) {
-          const res: any = await this.env.AI.run("@cf/deepgram/aura-1" as any, { text: en.replace(/[*_`#>|]/g, "").slice(0, 1200) } as any);
-          const buf = await audioBytes(res);
-          this.lastTtsDebug.push(`@cf/deepgram/aura-1 (English read of the ${locale} text) → ${buf ? buf.byteLength + "B" : "no audio"}`);
-          if (buf && buf.byteLength > 1000) {
-            this.spokenLang = "en (live translation)";
-            return buf;
-          }
-        }
-      } catch (e: any) {
-        this.lastTtsDebug.push("@cf/deepgram/aura-1 fallback → error: " + String(e?.message ?? e).slice(0, 80));
-      }
-    }
-    for (const m of models) {
-      try {
-        const res: any = await this.env.AI.run(m as any, { prompt: clean, text: clean, lang: locale } as any);
-        const buf = await audioBytes(res);
-        this.lastTtsDebug.push(`${m} → ${buf ? buf.byteLength + "B" : "no audio (" + describe(res) + ")"}`);
-        if (buf && buf.byteLength > 1000) {
-          if (locale !== "en") {
-            this.spokenLang = `en (translated from ${locale}, model ${m})`;
-            this.lastTtsDebug.push("spoken through the English voice as a live translation");
-          }
-          return buf;
-        }
-      } catch (e: any) {
-        this.lastTtsDebug.push(`${m} → error: ${String(e?.message ?? e).slice(0, 90)}`);
-        continue;
-      }
-    }
-    return null;
-  }
-
-  /** Voice → text (voice notes handled like commands in the bot). */
+  /** Voice → text. This is the only audio path left: a mic as a keyboard,
+   * never a voice the bot speaks with. */
   async transcribe(audio: ArrayBuffer, locale = "fa"): Promise<string> {
     try {
       const res: any = await this.env.AI.run("@cf/openai/whisper-large-v3-turbo" as any, {

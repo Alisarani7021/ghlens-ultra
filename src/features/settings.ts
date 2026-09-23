@@ -37,6 +37,28 @@ export class Settings {
   }
 
   /**
+   * The welcome banner.
+   *
+   * Telegram keeps the image and hands back a `file_id`; sending by that id
+   * means every /start shows the artwork without uploading a byte, and no CDN,
+   * bucket or static route has to exist for one picture. If the id ever goes
+   * stale (bot moved, file re-uploaded) sendPhoto fails and the welcome card
+   * still arrives — the picture is decoration, never a dependency.
+   */
+  private static readonly START_BANNER =
+    "AgACAgQAAxkDAAICR2q0Kzc9gh09PPk9AAHe34LMS6liZwACuw9rGzOloFFvA9miDkY3WgEAAwIAA3kAAz0E";
+
+  private static readonly START_CAPTION_FA =
+    "🔭 <b>GitHub Lens Ultra</b>\n" +
+    "<b>هر مخزنی، هر نسخه‌ای، هر آسیب‌پذیری — از پشت یک لنز.</b>\n" +
+    "<i>کاوش · ترجمه · امنیت · دانلود · هاب جهانی رویدادها — کاملاً روی کلودفلر</i>";
+
+  private static readonly START_CAPTION_EN =
+    "🔭 <b>GitHub Lens Ultra</b>\n" +
+    "<b>Every repo, every release, every vulnerability — through one lens.</b>\n" +
+    "<i>Search · translate · audit · download · an event-driven hub — all on Cloudflare</i>";
+
+  /**
    * The welcome screen.
    *
    * The owner's ask: after /start it must (a) say hello and explain what the
@@ -52,22 +74,28 @@ export class Settings {
     const linked = !!(u as any)?.github_login;
     const aiState = await aiEngineState(h.env);
 
+    // The owner's ask for this screen: bolder, wider, worth reading. Six equal
+    // bullets said what the bot has; this says what it is for.
     const capabilities = fa
       ? [
-          "🔍 <b>جست‌وجو</b> — فارسی یا انگلیسی بنویس، دقیق‌ترین مخزن را پیدا می‌کنم",
-          "🛰 <b>کاوش عمیق</b> — ۱۲ تب: رشد، جامعه، انتشارها، امنیت، PRها",
-          "🧠 <b>هوش مصنوعی</b> — ترجمهٔ README، خلاصه، چت با مخزن، ورک‌فلو، بازبینی PR",
-          "📥 <b>دانلود</b> — زیپ، با تقسیم خودکار برای مخزن‌های بزرگ",
-          "🧰 <b>جعبه‌ابزار</b> — تبدیل پکیج، IP/DNS/ASN، هش، JWT، کرون",
-          "⭐ <b>فید شخصی</b> — علاقه‌مندی‌ها، هشدار انتشار، جدول امتیاز",
+          "🔍 <b>جست‌وجوی چندزبانه</b> — فارسی، انگلیسی، هر زبانی؛ آن‌قدر می‌گردم تا همان را پیدا کنم که منظورت بود",
+          "🛰 <b>کاوش عمیق، ۱۲ تب</b> — رشد ستاره‌ها، جامعه، انتشارها، PRها، کامیت‌ها، CI، امنیت، چنج‌لاگ",
+          "🧠 <b>هوش مصنوعی چندمدلی</b> — ترجمهٔ README، خلاصه، چت با مخزن، بازبینی PR، ساخت ورک‌فلو، توضیح کد",
+          "📥 <b>دانلود مستقیم</b> — زیپ یا تار، با تقسیم خودکار برای مخزن‌های بزرگ",
+          "🛡 <b>امنیت</b> — اسکن وابستگی‌ها (OSV)، شکار کلید لو‌رفته، هشدار CVE",
+          "🧰 <b>جعبه‌ابزار</b> — IP/DNS/ASN، JWT، هش، کرون، CIDR، رجکس و ۱۵ ابزار دیگر",
+          "📡 <b>رادار اینترنت آزاد</b> · ⭐ <b>فید شخصی</b> · 🏆 لیدربورد و نشان",
+          "🌌 <b>هاب جهانی</b> — خودش رویداد می‌گیرد، ورک‌فلو می‌سازد، پست کانال را آماده می‌کند و بعد از تأیید تو منتشر می‌کند",
         ].join("\n")
       : [
-          "🔍 <b>Search</b> — type in any language, I find the exact repo",
-          "🛰 <b>Deep scout</b> — 12 tabs: growth, community, releases, security, PRs",
-          "🧠 <b>AI</b> — README translation, summaries, repo chat, workflows, PR review",
-          "📥 <b>Downloads</b> — zip, with automatic splitting for big repos",
-          "🧰 <b>Toolbox</b> — package conversion, IP/DNS/ASN, hashes, JWT, cron",
-          "⭐ <b>Personal feed</b> — interests, release alerts, leaderboard",
+          "🔍 <b>Multilingual search</b> — any language in, the repo you meant out",
+          "🛰 <b>Deep scout, 12 tabs</b> — growth, community, releases, PRs, commits, CI, security",
+          "🧠 <b>Multi-model AI</b> — README translation, summaries, repo chat, PR review, workflows",
+          "📥 <b>Direct downloads</b> — zip or tar, auto-split for big repos",
+          "🛡 <b>Security</b> — OSV dependency scan, leaked-key hunt, CVE alerts",
+          "🧰 <b>Toolbox</b> — IP/DNS/ASN, JWT, hashes, cron, CIDR, regex and 15 more",
+          "📡 <b>Net Radar</b> · ⭐ <b>Personal feed</b> · 🏆 leaderboard and badges",
+          "🌌 <b>Universal hub</b> — reacts to events, builds workflows, drafts the channel post, publishes on your word",
         ].join("\n");
 
     // the persistent bottom keyboard was retired: the inline menu is enough and
@@ -87,15 +115,32 @@ export class Settings {
 
     const login = String((u as any)?.github_login ?? "");
     const hello = fa
-      ? `👋 <b>سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
-        `من <b>GitHub Lens Ultra</b> هستم — دستیار کشف و تحلیل اوپن‌سورس، کاملاً روی کلودفلر.\n\n` +
-        `<b>چه کارهایی می‌کنم:</b>\n${capabilities}\n\n` +
+      ? `👋 <b>سلام${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b> — به <b>GitHub Lens Ultra</b> خوش آمدی.\n\n` +
+        `<blockquote>اینجا ایستگاهِ کاوشِ اوپن‌سورس است: گیت‌هاب را می‌کاوم، فارسی‌اش می‌کنم، ` +
+        `امنیتش را چک می‌کنم، دانلودش می‌کنم — و اگر چیزی ارزش گفتن داشت، خودش می‌فهمد و می‌آورد.</blockquote>\n\n` +
+        `<b>⚡ چه کارهایی از دستم برمی‌آید</b>\n${capabilities}\n\n` +
+        `🎯 <b>از کجا شروع کنیم؟</b>\n` +
+        `• یک موضوع بنویس → <i>جست‌وجوی معنایی</i>\n` +
+        `• یک <code>owner/repo</code> بفرست → <i>پروندهٔ کامل مخزن</i>\n` +
+        `• <code>/help</code> → همهٔ دستورها، دسته‌بندی‌شده\n\n` +
         `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}\n` +
-        `<i>هر بخش دکمهٔ راهنما و بازگشت دارد.</i>`
-      : `👋 <b>Hello${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b>\n\n` +
-        `<b>GitHub Lens Ultra</b> — open-source discovery and analysis, entirely on Cloudflare.\n\n` +
-        `<b>What I do:</b>\n${capabilities}\n\n` +
+        `<i>منوی زیر، نقشهٔ همهٔ ۲۷ صفحه است.</i>`
+      : `👋 <b>Hello${u?.first_name ? " " + tgEscape(String(u.first_name)) : ""}!</b> — welcome to <b>GitHub Lens Ultra</b>.\n\n` +
+        `<blockquote>An open-source observatory: I search GitHub, translate it, audit it and download it — ` +
+        `and when something deserves telling, the hub notices on its own.</blockquote>\n\n` +
+        `<b>⚡ What I can do</b>\n${capabilities}\n\n` +
+        `🎯 <b>Start here:</b> send a topic for semantic search, an <code>owner/repo</code> for the full dossier, ` +
+        `or <code>/help</code> for every command.\n\n` +
         `🐙 <code>${tgEscape(login)}</code> · 🧠 ${aiState}`;
+
+    // Art first, then the card. The banner is decoration and must never be the
+    // reason a user sees nothing, so a failure here is swallowed on purpose.
+    await h.tg.sendPhoto(
+      h.chatId,
+      Settings.START_BANNER,
+      fa ? Settings.START_CAPTION_FA : Settings.START_CAPTION_EN,
+      { parse_mode: "HTML" } as any,
+    ).catch((e: any) => console.error("start-banner", String(e?.message ?? e)));
 
     await h.tg.sendMessage(h.chatId, hello, {
       parse_mode: "HTML",
@@ -105,104 +150,178 @@ export class Settings {
   }
 
   /** /help — the honest, complete command reference. */
+  /**
+   * /help — every feature of the bot, in one place.
+   *
+   * It used to be a single 3900-character string: everything past that point
+   * was silently sliced off, which is exactly how "the help does not mention the
+   * hub" happens. It is now a list of sections, packed into as many messages as
+   * they need, split only at section boundaries so no HTML tag is ever cut in
+   * half — and the hub gets its own section, because it grew a lot of surface.
+   */
   async help(h: H) {
     const fa = h.loc === "fa";
-    const text = fa
-      ? `📚 <b>راهنمای کامل GitHub Lens Ultra</b>\n
-<b>🤝 کلید هوش مصنوعی</b>
-<code>/keys</code> — استخر کلیدهای اهدایی: کلید خودت را بده، اول تست می‌شود، بعد همهٔ قابلیت‌های AI (ترجمه، خلاصه، چت با مخزن، پادکست) با کلیدهای همه کار می‌کنند؛ کلید سوخته فوراً حذف می‌شود.
 
-<b>🐙 حساب گیت‌هاب</b>
-<code>/connect</code> یا دکمهٔ «🐙 حساب گیت‌هاب» در منو — یک دکمه توکن می‌سازد (دسترسی‌ها از قبل تیک خورده)، توکن را بفرست، حساب وصل می‌شود و همهٔ قابلیت‌ها باز می‌شود. وضعیت کامل حساب هم همین‌جا می‌آید. — تعداد مخزن‌ها (خصوصی/عمومی)، زبان‌ها، ستاره‌ها، سازمان‌ها، سقف درخواست.
+    const FA: string[] = [
+      `📚 <b>راهنمای کامل GitHub Lens Ultra</b>\n<i>همهٔ قابلیت‌ها، دسته‌بندی‌شده — هر بخش دکمه‌های خودش را دارد.</i>`,
 
-<b>🚀 شروع سریع</b>
-هر اسم مخزنی بفرست (<code>owner/repo</code>) → کارت کامل
-هر موضوعی بفرست (<code>react state management</code>) → جست‌وجوی معنایی
-هر سؤالی بفرست → دستیار AI پاسخ می‌دهد
-هر ویسی بفرست → تبدیل به متن و پاسخ 🎙
+      `<b>🚀 شروع سریع</b>\n` +
+        `• هر موضوعی بنویس (<code>react state management</code>) → جست‌وجوی معنایی\n` +
+        `• هر <code>owner/repo</code> بفرست → پروندهٔ کامل مخزن\n` +
+        `• هر سؤالی بفرست → دستیار AI با دادهٔ زنده\n` +
+        `• <code>/start</code> → خانه و منوی اصلی`,
 
-<b>🔍 کشف</b>
-<code>/search [موضوع]</code> — جست‌وجوی هیبرید (معنایی + متنی) با ترجمه خودکار درخواست
-<code>/trending</code> — داغ‌ترین‌ها: روزانه/هفتگی/ماهانه/همیشه + فیلتر زبان + رشد واقعی
-<code>/browse</code> — مرور دسته‌بندی‌شده (AI، امنیت، دواپس، وب، موبایل، OSINT، بازی…)
-<code>/gems</code> — گنج‌های پنهان: کیفیت بالا، ستاره کم
-<code>/random</code> — کشف تصادفی وزنی بر اساس علاقه‌مندی
-<code>/feed</code> — فید شخصی
+      `<b>🔍 کشف</b>\n` +
+        `<code>/search [موضوع]</code> — جست‌وجوی هیبرید (معنایی + متنی) با ترجمهٔ خودکار درخواست\n` +
+        `<code>/trending</code> — داغ‌ترین‌ها: روزانه/هفتگی/ماهانه/همیشه + فیلتر زبان، آمار واقعی\n` +
+        `<code>/browse</code> — مرور دسته‌بندی‌شده (AI، امنیت، دواپس، وب، موبایل، OSINT…)\n` +
+        `<code>/gems</code> — گنج‌های پنهان: کیفیت بالا، ستاره کم\n` +
+        `<code>/random</code> — کشف تصادفی وزن‌دار بر اساس علاقه‌مندی\n` +
+        `<code>/feed</code> — فید شخصی`,
 
-<b>🛰 تحلیل عمیق</b>
-<code>/scout owner/repo</code> — ۱۲ تب: نمای کلی، رشد، زبان‌ها، جامعه، ریلیزها، ایشوها، PRها، کامیت‌ها، CI، امنیت، چنج‌لاگ، مشارکت
-<code>/compare a/b c/d</code> — مقایسه تنگاتنگ با جدول و حکم AI
-<code>/changelog owner/repo</code> — چنج‌لاگ انسانی از کامیت‌ها
-<code>/chart owner/repo</code> — نمودار رشد ستاره‌ها
-<code>/files owner/repo</code> — مرورگر فایل داخل تلگرام
-<code>/card owner/repo</code> — کارت تصویری اشتراک‌گذاری
+      `<b>🛰 تحلیل عمیق</b>\n` +
+        `<code>/scout owner/repo</code> — ۱۲ تب: نما، رشد، زبان‌ها، جامعه، ریلیزها، ایشوها، PRها، کامیت‌ها، CI، امنیت، چنج‌لاگ، مشارکت\n` +
+        `<code>/compare a/b c/d</code> · <code>/changelog</code> · <code>/chart</code> · <code>/files</code> · <code>/card</code>`,
 
-<b>🤖 هوش مصنوعی</b>
-<code>/ask [سؤال]</code> — دستیار با داده زنده گیت‌هاب
-<code>/repochat owner/repo</code> — چت با مخزن (RAG + منبع‌دهی)
-<code>/ai owner/repo</code> — تحلیل ساختاریافته: چیست، برای کی، نقاط قوت/ضعف، جایگزین‌ها
-<code>/translate owner/repo</code> — ترجمه README با حفظ ساختار
-<code>/workflow [توضیح]</code> — ساخت GitHub Actions
-<code>/review owner/repo#12</code> — بازبینی PR
-<code>/code</code> — توضیح کد
+      `<b>🤖 هوش مصنوعی</b>\n` +
+        `<code>/ask</code> دستیار · <code>/repochat owner/repo</code> چت با مخزن (با منبع)\n` +
+        `<code>/ai</code> تحلیل ساختاریافته · <code>/translate</code> ترجمهٔ README \n` +
+        `<code>/workflow</code> ساخت GitHub Actions · <code>/review owner/repo#12</code> بازبینی PR · <code>/code</code> توضیح کد\n` +
+        `<i>چند مدل موازی، داور و سنتز — جزئیات در دروازهٔ AI پایین‌تر.</i>`,
 
-<b>📥 دانلود سورس</b>
-<code>/dl owner/repo [@ref] [zip|tar]</code> — دانلود مستقیم، کش R2، تقسیم خودکار
-<code>/secrets owner/repo</code> — جست‌وجوی کلید لو رفته
-<code>/security owner/repo</code> — اسکن وابستگی‌ها با OSV
+      `<b>📥 دانلود</b>\n` +
+        `<code>/dl owner/repo [@ref] [zip|tar]</code> — دانلود مستقیم با کش و تقسیم خودکار\n` +
+        `<code>/secrets owner/repo</code> — شکار کلید لو‌رفته · <code>/security owner/repo</code> — اسکن وابستگی‌ها (OSV)`,
 
-<b>🛡 امنیت</b>
-<code>/scan</code> — اسکن کامل مخزن + نمره + اصلاحیه
-<code>/cve</code> — هشدارهای اخیر
+      `<b>🛡 امنیت</b>\n<code>/scan</code> — اسکن کامل مخزن + نمره + اصلاحیه · <code>/cve</code> — هشدارهای تازه`,
 
-<b>🧰 ابزارها</b>
-<code>/tools</code> — تبدیل پکیج (deb/rpm/arch/apk)، IP، ASN، DNS، TLS
-<code>/ip 1.1.1.1</code> — استعلام شبکه و وضعیت تهدید
-<code>/asn 13335</code> — اطلاعات ASN
-<code>/dev</code> — کرون، رجکس، CIDR، JWT، Base64، هش، UUID، زمان، JSON، .gitignore، SemVer، رنگ
+      `<b>🧰 ابزارها</b>\n` +
+        `<code>/tools</code> تبدیل پکیج (deb/rpm/arch/apk) · <code>/ip 1.1.1.1</code> · <code>/asn 13335</code>\n` +
+        `<code>/dev</code> — کرون، رجکس، CIDR، JWT، Base64، هش، UUID، زمان، JSON، .gitignore، SemVer، رنگ`,
 
-<b>👤 حساب</b>
-<code>/profile</code> — پروفایل، سطح، نشان، رتبه
-<code>/dashboard</code> — آمار ۳۰ روز، streak، مصرف AI
-<code>/favorites</code> · <code>/subs</code> · <code>/interests</code> · <code>/refer</code>
-<code>/language</code> — تغییر زبان (fa/en/ar/ru/zh)
+      `<b>📡 رادار اینترنت آزاد</b>\n<code>/netradar</code> — وضعیت شبکه، ابزارهای آزادی اینترنت و منابع به‌روز.`,
 
-<b>🌱 مشارکت</b>
-<code>/contribute</code> — فرصت‌ها، راهنمای اولین PR، برنامه ۷ روزه
+      `<b>🌌 هاب جهانی</b> — از <code>⚙️ تنظیمات → «🌌 هاب جهانی»</code>\n` +
+        `<i>هر اتفاق بیرون → رویداد → ورک‌فلو → محتوا → تأیید تو → انتشار</i>\n` +
+        `• 🧪 <b>مأموریت</b> — یک جمله بگو؛ خودش ورک‌فلو می‌سازد و اجرا می‌کند\n` +
+        `• 📚 <b>برنامه‌های آماده</b> — انتشار نسخه در کانال · خلاصهٔ RSS · هشدار تغییر صفحه\n` +
+        `• 🔌 <b>کانکتورها</b> — گیت‌هاب / RSS / HTTP / تلگرام + تست واقعی + «دریافت الان»\n` +
+        `• 🎯 <b>رویدادها</b> — و «🧪 رویداد آزمایشی» برای تست کل مسیر\n` +
+        `• 🕹 <b>صف تأیید</b> — ✅ انتشار (دقیقاً یک‌بار) · ✏️ ویرایش متن · 🗑 رد\n` +
+        `• ⚙️ <b>ورک‌فلوها</b> · 🕸 <b>گراف محتوا</b> · 📊 <b>اجراها</b> — چه گره‌ای، چند میلی‌ثانیه، با چه نتیجه‌ای\n` +
+        `• 🧠 <b>دانش و جست‌وجوی معنایی</b> — یک جمله بنویس، بدون کلیدواژه\n` +
+        `• 📄 <b>کالبدشکافی فایل</b> — فایل بفرست: متن، ساختار، موجودیت‌ها، برداری برای جست‌وجو\n` +
+        `• 🖼 <b>کارخانهٔ رسانه</b> — کاور SVG + پرامپت تصویر انگلیسی + متن جانشین فارسی\n` +
+        `• 🔌 <b>وبهوک و گیت‌وی</b> — آدرس وبهوک هر سرویس + دروازهٔ سازگار با OpenAI (<code>/v1/chat/completions</code>) با ۵ مدل\n` +
+        `• 🚀 <b>ساخت نمونهٔ شخصی</b> — کپی ربات روی حساب کلاودفلر خودت، یک‌کلیکی\n` +
+        `• 📖 <b>راهنما: از کجا چه کاری</b> — همان راهنمای دکمه‌ای داخل هاب`,
 
-<b>⚡ نکته‌ها</b>
-• دکمه‌های زیر هر پیام همیشه یک لایه عمیق‌تر هستند
-• با ⭐ مخزن را ذخیره کن، با 🔔 از ریلیز/امنیت باخبر شو
-• هر جست‌وجو XP می‌دهد؛ هفتگی لیدربورد و نشان دارد
-• در چت خصوصی، حالت inline (@ربات) هم کار می‌کند`
-      : `📚 <b>GitHub Lens Ultra — command reference</b>
+      `<b>🤝 کلید هوش مصنوعی</b>\n` +
+        `<code>/keys</code> — استخر کلیدهای اهدایی: کلید خودت را بده، اول تست می‌شود، بعد همهٔ قابلیت‌های AI با کلیدهای همه کار می‌کنند.`,
 
-• <code>/search</code> hybrid semantic+lexical search
-• <code>/trending</code> daily/weekly/monthly/all-time boards with real growth
-• <code>/browse</code> curated categories · <code>/gems</code> hidden gems · <code>/random</code>
-• <code>/scout owner/repo</code> 12-tab deep dossier
-• <code>/compare a/b c/d</code> · <code>/changelog</code> · <code>/chart</code> · <code>/files</code> · <code>/card</code>
-• <code>/ask</code> · <code>/repochat</code> · <code>/ai</code> · <code>/translate</code> · <code>/workflow</code> · <code>/review</code> · <code>/code</code>
-• <code>/dl owner/repo</code> download with R2 cache + auto-split
-• <code>/security</code> · <code>/secrets</code> · <code>/scan</code> OSV dependency scanning
-• <code>/tools</code> · <code>/ip</code> · <code>/asn</code> · <code>/dev</code>
-• <code>/profile</code> · <code>/dashboard</code> · <code>/favorites</code> · <code>/subs</code> · <code>/language</code>
-• <code>/contribute</code> first-PR guidance`;
+      `<b>🐙 حساب گیت‌هاب</b>\n` +
+        `<code>/connect</code> یا دکمهٔ «🐙 حساب گیت‌هاب» — یک دکمهٔ توکن می‌سازد (دسترسی‌ها از قبل تیک خورده)، توکن را بفرست و حساب وصل می‌شود.`,
 
-    await h.reply(text.slice(0, 3900), kb(
-      [
-        { text: "🔍 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" },
-        { text: "🔥 " + (fa ? "داغ‌ترین" : "Trending"), cb: "t:menu" },
-        { text: "🛰 " + (fa ? "کاوش" : "Scout"), cb: "s:home" },
-      ],
-      [
-        { text: "🤖 AI", cb: "a:home" },
-        { text: "📥 " + (fa ? "دانلود" : "Download"), cb: "d:home" },
-        { text: "🧰 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" },
-      ],
-      [{ text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" }],
-    ), !!h.cbId);
+      `<b>👤 حساب من</b>\n` +
+        `<code>/profile</code> پروفایل و نشان‌ها · <code>/dashboard</code> آمار ۳۰ روزه و مصرف AI\n` +
+        `<code>/favorites</code> · <code>/subs</code> · <code>/interests</code> · <code>/refer</code> · <code>/language</code> (fa/en/ar/ru/zh)`,
+
+      `<b>🌱 مشارکت</b>\n<code>/contribute</code> — فرصت‌ها، راهنمای اولین PR، برنامهٔ ۷ روزه`,
+
+      `<b>⚡ نکته‌ها</b>\n` +
+        `• دکمه‌های زیر هر پیام یک لایه عمیق‌ترند؛ «◀️ بازگشت» همیشه هست\n` +
+        `• با ⭐ ذخیره کن و با 🔔 از ریلیز و امنیت باخبر شو\n` +
+        `• در چت خصوصی، حالت inline هم کار می‌کند: <code>@ربات نام مخزن</code>\n` +
+        `• متن‌های بلند را کامل می‌فرستم؛ چیزی بریده نمی‌شود.`,
+    ];
+
+    const EN: string[] = [
+      `📚 <b>GitHub Lens Ultra — complete reference</b>\n<i>Every feature, grouped. Each section has its own buttons.</i>`,
+
+      `<b>🚀 Quick start</b>\n` +
+        `• Send a topic → semantic search\n• Send an <code>owner/repo</code> → full dossier\n` +
+        `• Ask anything → the AI assistant with live data\n• <code>/start</code> → home`,
+
+      `<b>🔍 Discovery</b>\n` +
+        `<code>/search</code> hybrid semantic + lexical · <code>/trending</code> real growth boards\n` +
+        `<code>/browse</code> curated categories · <code>/gems</code> hidden gems · <code>/random</code> · <code>/feed</code>`,
+
+      `<b>🛰 Deep scout</b>\n` +
+        `<code>/scout owner/repo</code> 12 tabs · <code>/compare a/b c/d</code> · <code>/changelog</code> · <code>/chart</code> · <code>/files</code> · <code>/card</code>`,
+
+      `<b>🤖 AI</b>\n` +
+        `<code>/ask</code> · <code>/repochat</code> · <code>/ai</code> · <code>/translate</code> · <code>/workflow</code> · <code>/review</code> · <code>/code</code>\n` +
+        `<i>Parallel models, a critic and synthesis — see the AI gateway below.</i>`,
+
+      `<b>📥 Download &amp; audit</b>\n` +
+        `<code>/dl owner/repo [@ref] [zip|tar]</code> · <code>/secrets owner/repo</code> · <code>/security owner/repo</code>\n` +
+        `<code>/scan</code> full repo scan with a score · <code>/cve</code> recent advisories`,
+
+      `<b>🧰 Toolbox</b>\n<code>/tools</code> · <code>/ip</code> · <code>/asn</code> · <code>/dev</code> (cron, regex, CIDR, JWT, hash, UUID, JSON…)`,
+
+      `<b>📡 Net Radar</b>\n<code>/netradar</code> — network status and internet-freedom resources.`,
+
+      `<b>🌌 Universal hub</b> — <code>Settings → Universal Hub</code>\n` +
+        `<i>event → workflow → content → your approval → publish</i>\n` +
+        `• 🧪 <b>Mission</b> — one sentence in, a workflow out\n` +
+        `• 📚 <b>Playbooks</b> — release-to-channel · RSS digest · page-change alert\n` +
+        `• 🔌 <b>Connectors</b> — github / rss / http / telegram, real tests, «Fetch now»\n` +
+        `• 🎯 <b>Events</b> — and a test event that runs the whole path\n` +
+        `• 🕹 <b>Approval queue</b> — ✅ publish exactly once · ✏️ edit · 🗑 reject\n` +
+        `• ⚙️ <b>Workflows</b> · 🕸 <b>Content graph</b> · 📊 <b>Runs</b> (node by node)\n` +
+        `• 🧠 <b>Knowledge &amp; semantic search</b> — a sentence, no keyword needed\n` +
+        `• 📄 <b>File dissection</b> — text, structure, entities, embeddings\n` +
+        `• 🖼 <b>Media factory</b> — SVG cover + image prompt + alt text\n` +
+        `• 🔌 <b>Webhooks &amp; gateway</b> — per-source hooks and an OpenAI-compatible endpoint\n` +
+        `• 🚀 <b>Self-host</b> — your own copy, one click`,
+
+      `<b>🤝 AI keys</b> · <b>🐙 GitHub</b> · <b>👤 Account</b>\n` +
+        `<code>/keys</code> donate a key · <code>/connect</code> link GitHub · <code>/profile</code> · <code>/dashboard</code> · ` +
+        `<code>/favorites</code> · <code>/subs</code> · <code>/language</code>`,
+
+      `<b>🌱 Contribute</b>\n<code>/contribute</code> — opportunities, first-PR guide, a 7-day plan.`,
+    ];
+
+    const sections = fa ? FA : EN;
+    const LIMIT = 3500;
+
+    // Pack sections into messages, splitting only between sections.
+    const parts: string[] = [];
+    let cur = "";
+    for (const sec of sections) {
+      if (cur && cur.length + sec.length + 2 > LIMIT) { parts.push(cur); cur = sec; }
+      else cur = cur ? `${cur}\n\n${sec}` : sec;
+    }
+    if (cur) parts.push(cur);
+
+    for (let i = 0; i < parts.length; i++) {
+      const last = i === parts.length - 1;
+      const body = last ? parts[i] : `${parts[i]}\n\n<i>… ادامه در پیام بعد</i>`;
+      await h.reply(
+        body,
+        last
+          ? kb(
+              [
+                { text: "🔍 " + (fa ? "جست‌وجو" : "Search"), cb: "n:search" },
+                { text: "🔥 " + (fa ? "داغ‌ترین" : "Trending"), cb: "t:menu" },
+                { text: "🛰 " + (fa ? "کاوش" : "Scout"), cb: "s:home" },
+              ],
+              [
+                { text: "🤖 AI", cb: "a:home" },
+                { text: "📥 " + (fa ? "دانلود" : "Download"), cb: "d:home" },
+                { text: "🧰 " + (fa ? "ابزارها" : "Tools"), cb: "u:home" },
+              ],
+              [
+                { text: "🌌 " + (fa ? "هاب جهانی" : "Universal hub"), cb: "hos:home" },
+                { text: "🌐 " + (fa ? "زبان" : "Language"), cb: "lang:menu" },
+              ],
+            )
+          : undefined,
+        i === 0 && !!h.cbId,
+      );
+    }
   }
+
 
   /** About — the honest pitch, including the limits. */
   async about(h: H) {

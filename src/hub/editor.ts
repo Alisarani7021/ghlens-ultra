@@ -353,7 +353,13 @@ export function composeReleasePost(input: ReleasePostInput): ComposedPost {
     groups.length ? `⬇️ <b>دانلود</b> — ${summary}` : `📦 آرشیو سورس در گیت‌هاب`,
   ].filter(Boolean).join("\n\n");
 
-  return { text, markup: { inline_keyboard: assetButtons(input.assets ?? []) }, assetCount: groups.length };
+  // One button per release asset, then exactly one link to the project itself.
+  // The asset rows are the point of the post; the project button is where a
+  // reader goes when none of the builds is the one they wanted.
+  const rows = assetButtons(input.assets ?? []);
+  rows.push([{ text: "🔗 لینک پروژه", url: `https://github.com/${repo}` }]);
+
+  return { text, markup: { inline_keyboard: rows }, assetCount: groups.length };
 }
 
 /**

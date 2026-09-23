@@ -17,7 +17,8 @@ import { kb } from "../tg/keyboards";
  *   • AI dossier (structured, honest analysis with pros/cons/alternatives)
  *   • README → Persian translation, cached forever, format-preserving
  *   • code explainer, workflow generator, PR reviewer
- *   • voice in → text → answer (Whisper) and text → voice (TTS) — hands-free
+ *   • voice note in → text → answer (Whisper). Audio only ever comes IN:
+ *     every audio output was removed by owner instruction.
  *   • Persian-first: every answer respects the user's locale
  */
 export class Assistant {

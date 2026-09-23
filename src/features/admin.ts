@@ -117,7 +117,6 @@ export class Admin {
       ["smart (70B)", () => h.ai.chat("Reply with exactly: OK", { tier: "smart", max_tokens: 8 })],
       ["code (Qwen)", () => h.ai.chat("Write the word OK", { tier: "code", max_tokens: 8 })],
       ["embed (bge-m3)", async () => ((await h.ai.embedOne("test")).length ? "1024-dim ✅" : "❌")],
-      ["tts (fa)", async () => (((await h.ai.speak("سلام", "fa"))?.byteLength ?? 0) > 1000 ? "audio ✅" : "❌")],
       ["whisper", async () => "skip (needs audio input)"],
       ["translate", () => h.ai.translate("Hello world, this is a test.", "fa", "text")],
     ];

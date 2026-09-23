@@ -102,7 +102,7 @@ async function miniapp(url: URL, env: Env, store: Store) {
     return {
       ai_state: stats.ok > 0 ? "on" : halted ? "quota" : "idle",
       pooled_keys: stats.total, healthy_keys: stats.ok,
-      hint: stats.total === 0 ? "donate a key to light up translation, summaries, repo chat and the podcast" : undefined,
+      hint: stats.total === 0 ? "donate a key to light up translation, summaries and repo chat" : undefined,
     };
   }
   if (kind === "trending" || period !== "daily") {

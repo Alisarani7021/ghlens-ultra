@@ -6,7 +6,6 @@ import { GithubRest } from "../github/rest";
 import { TrendingEngine } from "../github/trending";
 import { SecurityEngine } from "../github/osv";
 import { VectorIndex } from "../ai/vector";
-import { Podcast } from "../ai/podcast";
 import { fmt } from "../features/cards";
 
 /**
@@ -59,13 +58,6 @@ export async function consumeQueue(batch: MessageBatch<Job>, env: Env, ctx: Ctx)
             if ((r.muted_until ?? 0) > Date.now()) continue;
             await tg.sendMessage(r.user_id, payload.text, { parse_mode: "HTML", reply_markup: payload.markup }).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
           }
-          break;
-        }
-
-        case "podcast": {
-          const podcast = new Podcast(env, ai, tg);
-          const rows = await store.board(job.scope === "daily" ? "daily" : "weekly", "all", 6);
-          await podcast.publish(rows, job.scope);
           break;
         }
 

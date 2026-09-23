@@ -176,7 +176,11 @@ const MS = hubMods.mission, EN = hubMods.engine;
   ok("post: has the release header", /نسخهٔ جدید منتشر شد/.test(post.text));
   ok("post: repo link present", /hamedp-71\/Hamed_Panel/.test(post.text));
   ok("post: three real assets, noise gone", post.assetCount === 3);
-  ok("post: exactly 3 buttons", post.markup.inline_keyboard.length === 3);
+  // 3 asset buttons + the project link = 4 rows, in that order
+  ok("post: exactly 3 asset buttons + 1 project link", post.markup.inline_keyboard.length === 4);
+  ok("post: the last row is the project link",
+    post.markup.inline_keyboard.at(-1)[0].text.includes("پروژه") &&
+    post.markup.inline_keyboard.at(-1)[0].url === "https://github.com/hamedp-71/Hamed_Panel");
   ok("post: every button is a url", post.markup.inline_keyboard.every((r) => !!r[0].url));
   ok("post: body is wrapped in a quote", /<blockquote>/.test(post.text));
   ok("post: no raw tags leaked", !/<\/?details|<\/?summary|<\/?strong/i.test(post.text));

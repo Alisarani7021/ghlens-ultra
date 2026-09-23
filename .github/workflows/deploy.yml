@@ -70,7 +70,7 @@ jobs:
           cat /tmp/health.json
           python3 -c "import json; d=json.load(open('/tmp/health.json')); assert d['ok'], d; print('health ok, storage backend:', d['bindings']['storage_backend'])"
 
-      - name: Deep health (D1, KV, Telegram, AI, queue, DO, TTS)
+      - name: Deep health (D1, KV, Telegram, GitHub, AI, embeddings, queue, DO)
         if: steps.creds.outputs.ready == 'true'
         env:
           TG_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}

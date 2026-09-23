@@ -10,7 +10,6 @@ import { tgEscape } from "./tg/types";
 import { kb } from "./tg/keyboards";
 import { Store } from "./core/db";
 import { BlobStore } from "./core/blobstore";
-import { Podcast as Podcast_ } from "./ai/podcast";
 import { AiBrain } from "./ai/brain";
 import { RepoCard } from "./features/cards";
 import type { H } from "./core/handler";
@@ -36,7 +35,6 @@ import { runCron } from "./core/cron";
 import { consumeQueue } from "./core/queue";
 import { handleApi } from "./core/api";
 import { audioBytes, describe } from "./ai/brain";
-import { podcastRoutes, podcastText } from "./features/podcast";
 import { MINI_APP_HTML } from "./web/miniapp";
 import { aiDownNotice, aiHalted } from "./ai/brain";
 import { readMode, touchMode, clearMode, modeKeeps, setMode } from "./core/mode";
@@ -353,32 +351,9 @@ export default {
         return Response.json({ probe: "ai", results: out }, { headers: { "cache-control": "no-store" } });
       }
 
-      if (url.pathname === "/health" && url.searchParams.get("tts") === "probe") {
-        const secret = url.searchParams.get("deep");
-        if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
-        const ids = [
-          "@cf/myshell-ai/melotts",
-          "@cf/facebook/mms-tts-eng",
-          "@cf/facebook/mms-tts-fas",
-          "@cf/deepgram/aura-1",
-          "@cf/deepgram/aura-2",
-          "@cf/openai/tts-1",
-          "@cf/elevenlabs/tts",
-          "@cf/piper/piper",
-          "@cf/meta/mms-tts-fas",
-        ];
-        const out: Record<string, string> = {};
-        for (const id of ids) {
-          try {
-            const r: any = await env.AI.run(id as any, { prompt: "hello", text: "hello", lang: "en" } as any);
-            const b = await audioBytes(r);
-            out[id] = b && b.byteLength > 1000 ? `✅ ${b.byteLength}B` : `shape ${describe(r)}`;
-          } catch (e: any) {
-            out[id] = "❌ " + String(e?.message ?? e).slice(0, 80);
-          }
-        }
-        return json({ models: out });
-      }
+      // NOTE: /health?tts=probe used to enumerate speech models here. Everything
+      // audio was removed from this bot by owner instruction, so the probe is
+      // gone with it — no point asking the account what it can sing.
       if (url.pathname === "/health" && url.searchParams.get("session") === "purge") {
         if (url.searchParams.get("deep") !== env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "forbidden" }, 403);
         const uid = Number(url.searchParams.get("uid") ?? 0);
@@ -410,7 +385,7 @@ export default {
     }
   },
 
-  // ── cron: snapshots, boards, digests, podcasts, security sweep ────────
+  // ── cron: snapshots, boards, digests, hub sweeps, security ────────────
   async scheduled(event: ScheduledController, env: Env, ctx: Ctx) {
     ctx.waitUntil(runCron(event, env, ctx));
   },
@@ -1166,14 +1141,16 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/arch": case "/architecture": return archExplainer.explain(h, arg);
     case "/appgen": case "/createapp": return appGen.prompt(h);
     case "/hub": case "/cloud": return multiHub.home(h);
-    case "/hf": return multiHub.hfRadar(h);
     case "/gitlab": { await setMode(h.session, "hub_gitlab"); return multiHub.gitlabPrompt(h); }
     case "/postmaker": { await setMode(h.session, "hub_post"); return multiHub.postMakerPrompt(h); }
     case "/py": case "/python": { await setMode(h.session, "hub_py"); return multiHub.pySandboxPrompt(h); }
     case "/contribute": return contribute.home(h);
     case "/issues": return contribute.issues(h);
     case "/firstpr": return contribute.firstpr(h);
-    case "/podcast": case "/pod": return h.reply(h.loc === "fa" ? "🎙 بخش صوتی و پادکست غیرفعال شده است." : "Podcast is disabled.");
+    // audio was removed from this bot on purpose; say so instead of going silent
+    case "/podcast": case "/pod": return h.reply(h.loc === "fa"
+      ? "🎙 پادکست و هر خروجی صوتی از این ربات حذف شد. جایش: <code>/trending</code> برای داغ‌ترین‌ها و <code>/scout owner/repo</code> برای پروندهٔ کامل."
+      : "🎙 Podcast and every audio output were removed from this bot. Try <code>/trending</code> or <code>/scout owner/repo</code> instead.");
 
     case "/admin":
       if (!isAdmin(h.env, h.u.id)) return security.home(h);
@@ -1422,7 +1399,6 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "review") return assistant.review(h);
         if (action === "askv") return assistant.ask(h, arg);
         if (action === "voice") return assistant.home(h);
-        if (action === "tts") return;
         break;
 
       // ── downloads ──
@@ -1582,12 +1558,9 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "stats") return accountFeature.stats(h);
         break;
 
-      // ── podcast ──
-      case "p":
-        if (action === "today") return podcastRoutes(h);
-        if (action === "weekly") return podcastRoutes(h, "weekly");
-        if (action === "text") return podcastText(h, (args[0] as any) ?? "daily");
-        break;
+      // ── audio: gone by owner instruction, kept only as a one-line signpost ──
+      case "pod":
+        return h.toast(fa ? "🎙 صدا حذف شد" : "🎙 audio removed", true);
 
       // ── feed ──
       case "feed":
@@ -1630,7 +1603,6 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── multi-cloud and ai hub ──
       case "hub":
         if (action === "home") return multiHub.home(h);
-        if (action === "hf") return multiHub.hfRadar(h);
         if (action === "gitlab") {
           await setMode(h.session, "hub_gitlab");
           return multiHub.gitlabPrompt(h);
@@ -1690,29 +1662,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "flag") return admin.setFlag(h, args[0] ?? "", args[1] ?? "on");
         if (action === "broadcast") return admin.broadcast(h);
         if (action === "aitest") return admin.aitest(h);
-        if (action === "podcast") {
-          if (!isAdmin(env, h.u.id)) return h.toast(fa ? "فقط ادمین" : "admins only", true);
-          await h.reply(fa ? "🎙 در حال ساخت پادکست…" : "🎙 building the podcast…", undefined, !!h.cbId);
-          const rows = await h.store.board("daily", "all", 10);
-          const pod = new Podcast_(env, ai, tg);
-          const out = await pod.publish(rows, "daily").catch((e: any) => {
-            console.error("podcast-build", String(e?.message ?? e));
-            return null;
-          });
-          if (!out) {
-            const notice = await aiDownNotice(env, h.loc);
-            return h.reply(`${notice}\n\n<i>${fa ? "پادکست فردا دوباره خودکار ساخته می‌شود." : "tomorrow's podcast builds automatically."}</i>`, undefined, true);
-          }
-          const key = (out as any).key as string | null;
-          if (!key) return h.reply(fa ? "🎙 متن پادکست آماده شد (صدا در دسترس نبود) — /podcast" : "🎙 script ready (no audio available)", undefined, true);
-          const blobs = new BlobStore(env);
-          const audio = await blobs.get(key);
-          if (audio) {
-            const bytes = audio instanceof Uint8Array ? audio : new Uint8Array(await new Response(audio as any).arrayBuffer());
-            await h.tg.sendAudio(h.chatId, bytes.buffer as ArrayBuffer, fa ? "🎙 پادکست روزانه" : "🎙 daily podcast", {});
-          }
-          return;
-        }
+        if (action === "podcast") return h.toast(fa ? "🎙 حذف شد" : "🎙 removed", true);
         if (action === "snapshot") {
           const eng = new TrendingEngine(h.env);
           const n = await eng.snapshot((await eng.rank("daily", "all", 30)).map((r: any) => r.full_name));
@@ -1797,13 +1747,6 @@ code{background:#f1f3f5;padding:2px 5px;border-radius:4px}.meta{color:#666;font-
 <body><h1>${full}</h1><div class="meta">GitHub Lens Ultra — ${new Date().toISOString().slice(0, 10)}</div><pre style="white-space:pre-wrap">${escapeHtml(text)}</pre></body></html>`;
   await h.tg.sendDocument(h.chatId, `${full.replace("/", "-")}-${h.loc}.html`, new TextEncoder().encode(html),
     `🖨 ${h.loc === "fa" ? "نسخه قابل چاپ (HTML → PDF با Ctrl+P)" : "printable HTML"}`);
-}
-
-async function ttsLast(h: H, key: string) {
-  const ans = (await h.store.history(`u${h.u.id}`, 1)).results?.[0]?.content ?? "";
-  const audio = await h.ai.speak(ans.slice(0, 700), h.loc);
-  if (!audio) return h.toast(h.loc === "fa" ? "TTS در دسترس نیست" : "TTS unavailable", true);
-  await h.tg.sendAudio(h.chatId, audio, "🎙 " + (h.loc === "fa" ? "خوانش پاسخ" : "answer audio"), {});
 }
 
 async function aiCompare(h: H, a: string, b: string) {
@@ -2079,7 +2022,8 @@ async function deepHealth(env: Env) {
     }
   } catch (e: any) { C.ai_text = { ok: false, error: String(e.message).slice(0, 140) }; }
 
-  // 6. Embeddings + Vectorize
+  // 6. Embeddings (1024-dim bge-m3) — stored in D1, so search works without
+  //    a Vectorize index; the key is named for what it means, not the product.
   try {
     const ai = new (await import("./ai/brain")).AiBrain(env);
     const v = await ai.embedOne("test");
@@ -2087,10 +2031,10 @@ async function deepHealth(env: Env) {
     if (env.INDEX) {
       try {
         const q = await env.INDEX.query(v, { topK: 1 } as any);
-        C.vectorize = { ok: true, matches: q.matches?.length ?? 0 };
-      } catch (e: any) { C.vectorize = { ok: false, error: String(e.message).slice(0, 120) }; }
+        C.semantic_search = { ok: true, matches: q.matches?.length ?? 0, backend: "vectorize" };
+      } catch (e: any) { C.semantic_search = { ok: false, error: String(e.message).slice(0, 120) }; }
     } else {
-      C.vectorize = { ok: true, note: "not bound — lexical-only search mode" };
+      C.semantic_search = { ok: true, backend: "d1-cosine", note: "vectors live in D1; no Vectorize index needed" };
     }
   } catch (e: any) { C.embeddings = { ok: false, error: String(e.message).slice(0, 120) }; }
 
@@ -2108,18 +2052,8 @@ async function deepHealth(env: Env) {
     C.durable_object = { ok: true };
   } catch (e: any) { C.durable_object = { ok: false, error: String(e.message).slice(0, 120) }; }
 
-  // 9. TTS (Persian)
-  try {
-    const ai = new (await import("./ai/brain")).AiBrain(env);
-    const audio = await ai.speak("سلام، این یک آزمایش صدا است.", "fa");
-    C.tts_persian = {
-      ok: !!audio && audio.byteLength > 1000,
-      bytes: audio?.byteLength ?? 0,
-      voice: ai.spokenLang,
-      note: "this account only exposes the English Deepgram Aura voice, so Persian audio is spoken from a live translation",
-      models: ai.lastTtsDebug,
-    };
-  } catch (e: any) { C.tts_persian = { ok: false, error: String(e.message).slice(0, 120) }; }
+  // There is no check 9: the whole audio chain was removed by owner
+  // instruction, so there is nothing speech-shaped left to probe.
 
   out.ms = Date.now() - t0;
   out.pass = Object.values(C).filter((c: any) => c && c.ok === false).length === 0;

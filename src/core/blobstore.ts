@@ -103,7 +103,7 @@ export class BlobStore {
     await this.env.CACHE.delete(`blobmeta:${key}`).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
   }
 
-  /** Free-form small values (used by the podcast script cache). */
+  /** Free-form small values (cached drafts, short scripts, sync markers). */
   async getText(key: string): Promise<string | null> {
     if (this.env.FILES) {
       const o = await this.env.FILES.get(key).catch(() => null);

@@ -3,7 +3,6 @@ import { Telegram } from "../tg/api";
 import { Store } from "./db";
 import { TrendingEngine } from "../github/trending";
 import { AiBrain, aiHalted } from "../ai/brain";
-import { Podcast } from "../ai/podcast";
 import { GithubRest } from "../github/rest";
 import { SecurityEngine } from "../github/osv";
 import { fmt } from "../features/cards";
@@ -17,7 +16,7 @@ import { tgEscape } from "../tg/types";
  * other projects on this account already use some, so Lens Ultra runs on two:
  *
  *   "every 15 min" → snapshots, trending refresh, digest drain, broadcasts
- *   "daily at 06:00 UTC" → podcast + digests + fresh indexing, and promotes to
+ *   "daily at 06:00 UTC" → digests + fresh indexing, and promotes to
  *                   the weekly report on Sundays and monthly retention on the 1st
  *
  * classifyCron() recognises all five historical shapes, so a future paid-plan
@@ -166,7 +165,7 @@ async function hourly(env: Env, store: Store, ctx: Ctx) {
   }
 }
 
-/** Daily 06:00 UTC: podcast + personalised digests. */
+/** Daily 06:00 UTC: personalised digests + fresh indexing. */
 async function daily(env: Env, store: Store, ctx: Ctx) {
   const ai = new AiBrain(env);
   const tg = new Telegram(env);
@@ -185,12 +184,6 @@ async function daily(env: Env, store: Store, ctx: Ctx) {
       `Mention 3 repos with their star counts and why developers care. No fluff, no emojis.\n\n${JSON.stringify(rows)}`,
     { tier: "smart", max_tokens: 500, cacheKey: `digest:${new Date().toISOString().slice(0, 10)}`, cacheTtl: 43200 },
   );
-
-  // podcast generation (audio cached in R2)
-  if (!halted) {
-    const podcast = new Podcast(env, ai, tg);
-    await podcast.publish(rows, "daily").catch((e) => console.error("podcast", e));
-  }
 
   const digestText =
     `☀️ <b>خلاصه صبحگاهی گیت‌هاب</b> — ${new Date().toISOString().slice(0, 10)}\n\n` +
@@ -255,11 +248,6 @@ async function weekly(env: Env, store: Store, ctx: Ctx) {
   for (const u of users ?? []) {
     await store.enqueueDigest(u.id, "weekly", { text: report, markup: kb([[{ text: "🏆 لیدربورد", cb: "me:board" }, { text: "🔥 هفتگی", cb: "t:b:0,weekly,all" }]]) }, Date.now());
   }
-
-  // weekly podcast
-  const ai = new AiBrain(env);
-  const podcast = new Podcast(env, ai, tg);
-  await podcast.publish(board.slice(0, 8).map((r: any) => ({ full_name: r.full_name, description: r.description, stars: r.stars, gained: r.gained, lang: r.language, topics: [] })), "weekly").catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
 
   // cleanup: old trending rows, old webhook log
   await env.DB.prepare(`DELETE FROM trending WHERE day < date('now','-21 days')`).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));

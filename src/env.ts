@@ -48,7 +48,6 @@ export type Job =
   | { type: "download"; download_id: string }
   | { type: "broadcast"; from: number; text: string; button?: { text: string; url: string } }
   | { type: "notify_subscribers"; full_name: string; event: string; payload: unknown }
-  | { type: "podcast"; scope: "daily" | "weekly"; day: string }
   | { type: "snapshot"; day: string }
   | { type: "scan_security"; full_name: string; manifest?: string }
   | { type: "action_job"; job_id: string }
