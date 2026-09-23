@@ -336,7 +336,18 @@ export const CONNECTORS: Record<string, Connector> = {
       const res: any = await fetch(`https://api.telegram.org/bot${ctx.env.BOT_TOKEN}/sendMessage`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(msg),
       }).then((r) => r.json());
-      if (!res?.ok) throw new Error(`telegram: ${res?.description ?? "send failed"}`);
+      if (!res?.ok) {
+        // Telegram's own words are accurate but not actionable. The two failures
+        // that actually happen here are "not an admin" and "wrong channel", and
+        // both have a next step the owner can take in ten seconds.
+        const d = String(res?.description ?? "send failed");
+        const why = /not enough rights|CHAT_ADMIN_REQUIRED|administrator/i.test(d)
+          ? "ربات در این کانال ادمین نیست — در کانال: تنظیمات → ادمین‌ها → افزودن ادمین → @Gitguts_bot با اجازهٔ ارسال پیام"
+          : /chat not found|chat_id is empty/i.test(d)
+            ? "کانال پیدا نشد — نام کاربری یا آیدی را در کانکتورها درست کن"
+            : d;
+        throw new Error(`telegram: ${why}`);
+      }
       return { message_id: res.result?.message_id, chat: channel, action };
     },
   },

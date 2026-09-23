@@ -347,6 +347,17 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
       // search over recently written text for sources that have no stable id.
       let duplicate = !!bag.duplicate;
       let duplicateScore = Number(bag.duplicate_score ?? 0);
+      /* A preview is not a publication. The sample event keeps a fixed identity,
+         so the second «🧪 اجرای آزمایشی» of the same workflow always looked like
+         "already handled" — true for a real delivery, and pure noise in a run
+         that cannot publish anything anyway. */
+      if (ctx.dry) {
+        return {
+          patch: { policy: { allow: true, require: null, summary: "آزمایشی — بررسی تکرار انجام نشد", verdicts: [] } },
+          branch: node.next ?? [],
+          summary: "آزمایشی — بدون بررسی تکرار",
+        };
+      }
       if (!duplicate && sourceRef) {
         const prior = await CG.findBySource(ctx.env, ctx.owner_id, sourceRef);
         if (prior) { duplicate = true; duplicateScore = 1; }
@@ -560,8 +571,12 @@ export async function resumeRun(
 }
 
 export async function loadConnectorConfig(env: Env, ownerId: number, kind: string): Promise<Record<string, any>> {
+  /* Newest is not the same as working: a mistyped channel added five minutes ago
+     would outrank the one that actually passed its test, and posts would go to a
+     channel the bot cannot even write to. A connector that passed wins. */
   const r = await env.DB.prepare(
-    `SELECT config FROM hub_connectors WHERE owner_id=? AND kind=? AND enabled=1 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT config FROM hub_connectors WHERE owner_id=? AND kind=? AND enabled=1
+      ORDER BY (status='ok') DESC, created_at DESC LIMIT 1`,
   ).bind(ownerId, kind).first<{ config: string }>().catch(() => null);
   try { return JSON.parse(r?.config ?? "{}"); } catch { return {}; }
 }

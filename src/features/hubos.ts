@@ -169,11 +169,18 @@ export class HubOS {
   async connectors(h: H) {
     const fa = h.loc === "fa";
     const rows = await this.connectorRows(h);
+    // mirror the engine's rule: verified first, then newest
+    const publishTargetId = [...rows]
+      .filter((r) => r.kind === "telegram" && r.enabled)
+      .sort((a, b) => (b.status === "ok" ? 1 : 0) - (a.status === "ok" ? 1 : 0))[0]?.id;
     const lines = rows.length
       ? rows.map((r) => {
           const c = connector(r.kind);
           const dot = !r.enabled ? "⚪️" : r.status === "ok" ? "🟢" : r.status === "error" ? "🔴" : "🟡";
-          return `${dot} <b>${tgEscape(c?.label ?? r.kind)}</b> — ${tgEscape(r.label || "—")}\n   <code>${r.id.slice(-6)}</code>${r.detail ? ` · ${tgEscape(String(r.detail).slice(0, 70))}` : ""}`;
+          // Which connector a workflow would actually publish through is not
+          // obvious when there are two of the same kind — so say it out loud.
+          const target = r.id === publishTargetId ? `\n   🎯 ${fa ? "پست‌ها از این کانال منتشر می‌شوند" : "posts publish through this one"}` : "";
+          return `${dot} <b>${tgEscape(c?.label ?? r.kind)}</b> — ${tgEscape(r.label || "—")}\n   <code>${r.id.slice(-6)}</code>${r.detail ? ` · ${tgEscape(String(r.detail).slice(0, 70))}` : ""}${target}`;
         }).join("\n\n")
       : (fa ? "<i>هنوز کانکتوری وصل نیست.</i>" : "<i>No connectors yet.</i>");
 
