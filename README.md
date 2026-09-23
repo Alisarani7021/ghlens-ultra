@@ -175,7 +175,7 @@ MIT — [LICENSE](LICENSE). داده از APIهای عمومی گیت‌هاب،
 
 # English
 
-**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 418 callback keys, 33 D1 tables, 248 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
+**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 417 callback keys, 33 D1 tables, 248 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
 
 **Core** — hybrid semantic + lexical search (1024-dim `bge-m3` embeddings stored **in D1**, cosine similarity in SQL, no Vectorize dependency) · 12-tab dossier from a single GraphQL query (growth, bus factor, merge rate, releases, CI, security) · repo chat with citations · structure-preserving README translation · direct downloads with streaming splits · OSV dependency scans, leaked-key hunting, CVE alerts · package conversion (deb ⇄ rpm ⇄ pacman ⇄ apk).
 
