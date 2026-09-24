@@ -298,14 +298,111 @@ export class ProfileFeature {
 
   async plans(h: H) {
     const fa = h.loc === "fa";
+    const state = await this.planState(h);
     await h.reply(
-      `⚡ <b>${fa ? "پلن‌ها" : "Plans"}</b>\n\n` +
+      `⚡ <b>${fa ? "پلن‌ها" : "Plans"}</b>\n` +
+        `${fa ? "وضعیت تو" : "your plan"}: <b>${state.plan === "pro" ? "💎 Pro" : "🆓 Free"}</b>` +
+        (state.requested && state.plan !== "pro" ? ` · <i>${fa ? "درخواست Pro ثبت شده" : "Pro requested"}</i>` : "") +
+        `\n\n` +
         `🆓 <b>Free</b> — ${fa ? "روزی ۱۲۰ جست‌وجو، کاوش کامل، ترجمه README، دانلود تا ۱۰۰ مگ" : "120 queries/day"}\n` +
         `💎 <b>Pro</b> — ${fa ? "نامحدود، کاوش عمیق نامحدود، ترجمهٔ README بی‌سقف، دانلود بدون سقف، هشدار لحظه‌ای، آلرت امنیتی اختصاصی" : "unlimited"}\n` +
         `🏢 <b>Team</b> — ${fa ? "۵۰ عضو، داشبورد سازمانی، Webhook اختصاصی، SLA" : "50 seats, org dashboard"}\n\n` +
         `<i>${fa ? "نسخه فعلی این ربات کاملاً رایگان و اوپن‌سورس است؛ پلن‌ها فقط برای مصارف سنگین (Actions و AI) تعریف شده‌اند." : ""}</i>`,
       kb(
-        [{ text: "💎 " + (fa ? "درخواست Pro" : "Request Pro"), cb: "me:pro" }],
+        state.plan === "pro"
+          ? [{ text: "✅ " + (fa ? "Pro فعال است" : "Pro is active"), cb: "noop:noop:0" }]
+          : state.requested
+            ? [{ text: "⏳ " + (fa ? "درخواست در انتظار تأیید" : "request pending"), cb: "me:pro" }]
+            : [{ text: "💎 " + (fa ? "درخواست Pro" : "Request Pro"), cb: "me:pro" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  /** Pro state for this user: the plan flag and any open request. */
+  async planState(h: H): Promise<{ plan: "free" | "pro"; requested: boolean }> {
+    const get = async (key: string) =>
+      (await h.env.DB.prepare(`SELECT value FROM flags WHERE key=?`).bind(key).first<{ value: string }>().catch(() => null))?.value ?? "";
+    const plan = (await get(`plan:${h.u.id}`)) === "pro" ? "pro" : "free";
+    const requested = !!(await get(`pro:req:${h.u.id}`));
+    return { plan, requested };
+  }
+
+  /**
+   * «💎 درخواست Pro».
+   *
+   * The button used to re-render the price list — a press with no effect, which
+   * is indistinguishable from a broken button. It now does the thing it says:
+   * records the request, tells the owner's admins with two buttons that settle
+   * it, and gives the requester a card showing exactly what changes and what the
+   * wait looks like. What Pro *means* is stated honestly: the deployment is free
+   * and open-source, and Pro lifts the quotas that cost real money (model quota,
+   * heavy Actions jobs, unlimited downloads).
+   */
+  async requestPro(h: H) {
+    const fa = h.loc === "fa";
+    const state = await this.planState(h);
+    const who = `@${h.u.username ?? "—"} · <code>${h.u.id}</code>`;
+
+    if (state.plan === "pro") {
+      return h.reply(
+        `💎 <b>${fa ? "Pro روی حساب تو فعال است" : "Pro is active"}</b>\n\n` +
+          (fa
+            ? `سقف روزانهٔ تو برداشته شده، صف کارهای سنگین برای تو باز است و آرشیو کامل بدون سقف حجم دانلود می‌شود.`
+            : `Your daily cap is lifted, heavy jobs are open to you, and downloads are uncapped.`),
+        kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]),
+        !!h.cbId,
+      );
+    }
+
+    if (state.requested) {
+      return h.reply(
+        `⏳ <b>${fa ? "درخواست Pro ثبت شده است" : "Pro request is in"}</b>\n\n` +
+          (fa
+            ? `درخواستت در صف بررسی است. تا آن موقع همهٔ قابلیت‌ها با سقف رایگان کار می‌کنند؛ فقط سهمیهٔ روزانه و کارهای سنگین محدودند.\n\n` +
+              `اگر عجله داری، یک بار در چت یادآوری کن — همان درخواست دوباره بررسی می‌شود.`
+            : `Your request is queued. Everything keeps working on the free tier meanwhile.`),
+        kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]),
+        !!h.cbId,
+      );
+    }
+
+    await h.env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+      .bind(`pro:req:${h.u.id}`, String(Date.now()), Date.now()).run()
+      .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+
+    // Tell every configured admin, with the two buttons that settle it.
+    const admins = (h.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const a of admins) {
+      await h.tg.sendMessage(Number(a),
+        `💎 <b>${fa ? "درخواست Pro تازه" : "New Pro request"}</b>\n\n` +
+          `👤 ${who}${h.u.first_name ? ` — ${tgEscape(h.u.first_name)}` : ""}\n` +
+          `📊 ${fa ? "سهمیه امروز" : "today"}: ${h.user?.daily_queries ?? 0}/${h.env.FREE_TIER_DAILY_QUERIES ?? 120}\n` +
+          `🗓 <code>${new Date().toISOString().slice(0, 16).replace("T", " ")}</code>\n\n` +
+          (fa ? "با فعال‌کردن، سقف روزانه‌اش برداشته می‌شود و کارهای سنگین برایش باز می‌شود." : ""),
+        {
+          parse_mode: "HTML",
+          reply_markup: kb([
+            { text: "✅ " + (fa ? "فعال کن" : "Grant"), cb: `adm:prog:${h.u.id}` },
+            { text: "🗑 " + (fa ? "رد کن" : "Decline"), cb: `adm:pror:${h.u.id}` },
+          ]) as any,
+        },
+      ).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    }
+
+    return h.reply(
+      `💎 <b>${fa ? "درخواست Pro ثبت شد" : "Pro request recorded"}</b>\n\n` +
+        (fa
+          ? `<blockquote>نوبت تو در صف است. همان لحظه‌ای که فعال شود، همین‌جا پیام می‌گیری — لازم نیست کاری بکنی.</blockquote>\n\n` +
+            `<b>با Pro چه چیزی عوض می‌شود</b>\n` +
+            `• سقف روزانهٔ ${h.env.FREE_TIER_DAILY_QUERIES ?? 120} درخواست برداشته می‌شود\n` +
+            `• صف کارهای سنگین (تحلیل عمیق، ساخت بسته، اسکن کامل) برایت باز است\n` +
+            `• دانلود سورس بدون سقف، با اولویت در صف Actions\n\n` +
+            `<i>این نسخه رایگان و اوپن‌سورس است؛ Pro فقط سهمیه‌هایی را برمی‌دارد که واقعاً هزینه دارند (نئورون Workers AI و اجرای Actions).</i>`
+          : `You are queued. You will be told here the moment it is granted.`),
+      kb(
+        [{ text: "📊 " + (fa ? "وضعیت من" : "My status"), cb: "me:home" }],
         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
       ),
       !!h.cbId,

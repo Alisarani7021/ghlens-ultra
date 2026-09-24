@@ -280,3 +280,81 @@ export function modelsResponse() {
     headers: { "content-type": "application/json" },
   });
 }
+
+/**
+ * GET /v1 — the page a person lands on.
+ *
+ * `/v1/chat/completions` is for machines and `/v1/models` is for clients; a
+ * human who taps the gateway link in Telegram used to get «Not found» from a
+ * path they had no way to guess. This page states what the endpoint is, shows
+ * copy-paste snippets built from the *real* host, and lists the ways a request
+ * can fail — so a wrong turn ends in an explanation instead of a dead end.
+ */
+export function gatewayLanding(base: string): Response {
+  const models = MODELS.map((m) => `<li><code>${m.id}</code> <span class="d">${(m as any).description ?? ""}</span></li>`).join("");
+  const html = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>GitHub Lens Ultra — دروازهٔ هوش مصنوعی</title>
+<style>
+ *{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.9 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif}
+ main{max-width:820px;margin:0 auto;padding:28px 18px 60px}h1{font-size:22px;margin:0 0 6px}h2{font-size:17px;margin:28px 0 10px;color:#e6edf3}
+ p,li{color:#c9d1d9}.d{color:#8b949e}code{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:1px 6px;font-size:13px;direction:ltr;display:inline-block}
+ pre{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;overflow:auto;direction:ltr;text-align:left;font-size:13px}
+ .ok{color:#3fb950}.warn{color:#d29922}table{width:100%;border-collapse:collapse;margin:10px 0}td,th{border:1px solid #30363d;padding:8px 10px;text-align:right;font-size:14px}
+ th{background:#161b22}a{color:#58a6ff}.row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+ .btn{display:inline-block;background:#238636;color:#fff;padding:9px 14px;border-radius:8px;text-decoration:none}.btn.alt{background:#21262d;border:1px solid #30363d;color:#e6edf3}
+</style></head><body><main>
+<h1>🧠 دروازهٔ هوش مصنوعی</h1>
+<p>این آدرس یک API سازگار با OpenAI است: هر برنامه‌ای که <code>api.openai.com</code> را صدا می‌زند، با عوض‌کردن آدرس، به این ربات وصل می‌شود — با مسیریابی خودکار بین مدل‌ها، استخر کلیدهای اهدایی و گزارش مصرف.</p>
+<div class="row"><a class="btn" href="${base}/v1/models">GET /v1/models</a><a class="btn alt" href="${base}/health">وضعیت سرویس</a><a class="btn alt" href="https://github.com/Alisarani7021/ghlens-ultra">سورس</a></div>
+
+<h2>۱) آدرس‌ها</h2>
+<table><tr><th>متد</th><th>مسیر</th><th>کار</th></tr>
+<tr><td>POST</td><td><code>${base}/v1/chat/completions</code></td><td>گفتگو — با <code>stream: true</code> هم کار می‌کند</td></tr>
+<tr><td>GET</td><td><code>${base}/v1/models</code></td><td>فهرست مدل‌ها و مترادف‌ها</td></tr>
+<tr><td>GET</td><td><code>${base}/v1</code></td><td>همین صفحه</td></tr></table>
+
+<h2>۲) کلید</h2>
+<p>هدر <code>Authorization: Bearer &lt;key&gt;</code> لازم است. کلید همان توکنی است که در ربات می‌سازی: <b>🧠 هوش مصنوعی → 🔑 کلید API</b> (یا فرمان <code>/token</code>). هر کلید به حساب خودت گره خورده و مصرفش در همان صفحه گزارش می‌شود.</p>
+
+<h2>۳) سه خط کد</h2>
+<pre>curl ${base}/v1/chat/completions \
+  -H "authorization: Bearer YOUR_KEY" -H "content-type: application/json" \
+  -d '{"model":"ghlens-smart","messages":[{"role":"user","content":"سلام"}]}'</pre>
+<pre>from openai import OpenAI
+client = OpenAI(base_url="${base}/v1", api_key="YOUR_KEY")
+print(client.chat.completions.create(model="ghlens-auto",
+      messages=[{"role":"user","content":"یک کتابخانهٔ سبک صف در Go پیشنهاد بده"}]).choices[0].message.content)</pre>
+<pre>import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "${base}/v1", apiKey: process.env.GHLENS_KEY });
+const r = await client.chat.completions.create({ model: "ghlens-code",
+  messages: [{ role: "user", content: "این تابع را بازبینی کن" }] });
+console.log(r.choices[0].message.content);</pre>
+<p class="d">در Cursor/Continue/Cline و هر کلاینت دیگر، همین دو مقدار را بگذار: Base URL و API Key — بقیه‌اش خودکار است.</p>
+
+<h2>۴) مدل‌ها</h2>
+<ul>${models}</ul>
+
+<h2>۵) اگر خطا گرفتی</h2>
+<table><tr><th>خطا</th><th>معنی</th><th>راه‌حل</th></tr>
+<tr><td><code>401 invalid api key</code></td><td>کلید غایب یا باطل است</td><td>کلید را در ربات دوباره بساز (<code>/token</code>)</td></tr>
+<tr><td><code>404 unknown endpoint</code></td><td>مسیر غلط — مثلاً <code>/v1/completions</code></td><td>یکی از سه مسیر جدول بالا</td></tr>
+<tr><td><code>429</code></td><td>سهمیهٔ روزانهٔ رایگان تمام شده</td><td>فردا صفر می‌شود، یا Pro بگیر</td></tr>
+<tr><td><code>503 model unavailable</code></td><td>همهٔ مدل‌های آن رده مشغول‌اند</td><td>مدل <code>ghlens-auto</code> را بزن؛ خودش جابه‌جا می‌کند</td></tr></table>
+
+<p class="d">GitHub Lens Ultra · روی لبهٔ Cloudflare · بدون سرور · <span class="ok">این صفحه هم با همین Worker سرو می‌شود</span></p>
+</main></body></html>`;
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+/** A machine-readable 404 for /v1/* — an agent should never see a bare "Not found". */
+export function gatewayNotFound(pathname: string): Response {
+  return new Response(JSON.stringify({
+    error: {
+      message: `unknown endpoint ${pathname}`,
+      type: "invalid_request_error",
+      code: 404,
+      hint: "available: POST /v1/chat/completions · GET /v1/models · GET /v1 (docs)",
+      docs: "/v1",
+    },
+  }), { status: 404, headers: { "content-type": "application/json" } });
+}

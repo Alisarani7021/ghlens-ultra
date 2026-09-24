@@ -146,8 +146,13 @@ export const CONNECTORS: Record<string, Connector> = {
         try {
           if (watch.includes("release")) {
             const releases: any[] = await gh(ctx.env, `/repos/${full}/releases?per_page=5`);
+            let meta: any = null;
             for (const r of releases) {
               if (ctx.cursor && Date.parse(r.published_at ?? 0) <= Date.parse(ctx.cursor)) continue;
+              /* The repository's live numbers, fetched once per poll and only
+                 when there is a new release to report: the post shows ⭐/🍴/🐞
+                 instead of the grey line it used to show. */
+              if (!meta) meta = await gh(ctx.env, `/repos/${full}`).catch(() => null);
               out.push(ev("github", r.prerelease ? "github.release.prerelease" : "github.release.published", {
                 identity: `${full}@${r.tag_name}`,
                 repo: full,
@@ -158,6 +163,17 @@ export const CONNECTORS: Record<string, Connector> = {
                 published_at: r.published_at,
                 prerelease: !!r.prerelease,
                 author: r.author?.login ?? "",
+                meta: meta
+                  ? {
+                      stars: meta.stargazers_count,
+                      forks: meta.forks_count,
+                      issues: meta.open_issues_count,
+                      language: meta.language,
+                      license: meta.license?.spdx_id ?? meta.license?.name ?? "",
+                      description: meta.description ?? "",
+                      topics: meta.topics ?? [],
+                    }
+                  : undefined,
                 assets: (r.assets ?? []).map((a: any) => ({
                   name: a.name, size: a.size, downloads: a.download_count,
                   url: a.browser_download_url, type: a.content_type,
@@ -326,6 +342,25 @@ export const CONNECTORS: Record<string, Connector> = {
     async act(ctx, action, args) {
       const channel = args.channel ?? ctx.config.channel;
       if (!channel) throw new Error("no channel configured");
+      /* A rich post — headings, a download table, an open changelog — when the
+         caller built one. Telegram's rich messages are the difference between a
+         release note and a wall of text; if the channel or the API refuses it we
+         fall back to the same content as a normal message, so a post is never
+         lost to a formatting preference. */
+      if (args.rich) {
+        const { richToLegacy } = await import("../tg/rich");
+        const richBody = {
+          chat_id: channel,
+          rich_message: { html: String(args.rich), is_rtl: true },
+          ...(args.markup ? { reply_markup: args.markup } : {}),
+        };
+        const rr: any = await fetch(`https://api.telegram.org/bot${ctx.env.BOT_TOKEN}/sendRichMessage`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(richBody),
+        }).then((r) => r.json()).catch(() => null);
+        if (rr?.ok) return { message_id: rr.result?.message_id, chat: channel, action, format: "rich" };
+        console.error("rich-publish-fallback", String(rr?.description ?? "send failed").slice(0, 160));
+        args = { ...args, rich: undefined, text: args.text ?? richToLegacy(String(args.rich)) };
+      }
       const msg = {
         chat_id: channel,
         text: args.text ?? "",

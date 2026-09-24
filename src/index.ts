@@ -110,6 +110,11 @@ export default {
         const text = url.searchParams.get("text") ?? "";
         const cb = url.searchParams.get("cb");            // simulate a button press
         const capture = url.searchParams.get("capture") !== "0";
+        /* An audit drives the handler with a synthetic account. Marking it as a
+           bot is both true and useful: the leaderboard (and anything else that
+           counts people) skips it, so a health check can never outrank a real
+           user on a public screen. */
+        await new Store(env).upsertUser({ id: uid, is_bot: true, first_name: "Self (audit)" } as any).catch(() => null);
         const from = { id: uid, is_bot: false, first_name: "Self", language_code: "fa" } as any;
         const chat = { id: uid, type: "private", first_name: "Self" } as any;
         const message = {
@@ -293,7 +298,18 @@ export default {
       }
 
       // ── AI gateway: OpenAI-compatible, authenticated ────────────────────
+      if (url.pathname === "/v1" || url.pathname === "/v1/") {
+        const { gatewayLanding } = await import("./hub/gateway");
+        return gatewayLanding(new URL(request.url).origin);
+      }
       if (url.pathname === "/v1/models" && request.method === "GET") return modelsResponse();
+      /* Any other /v1 path answers with the list of real ones. Before this, a
+         single mistyped character produced a bare «Not found» from the edge and
+         nothing to act on. */
+      if (url.pathname.startsWith("/v1/") && request.method === "GET") {
+        const { gatewayNotFound } = await import("./hub/gateway");
+        return gatewayNotFound(url.pathname);
+      }
       if (url.pathname.startsWith("/v1/") && request.method === "POST") {
         const auth = await authorise(env, request);
         if (!auth.ok) return json({ error: { message: "invalid api key", type: "auth_error", code: 401 } }, 401);
@@ -304,7 +320,10 @@ export default {
           const result = await chatCompletion(env, gwAi, body, auth.who);
           return body.stream && result.status === 200 ? streamResponse(result.body) : json(result.body, result.status);
         }
-        return json({ error: { message: `unknown endpoint ${url.pathname}`, type: "invalid_request_error", code: 404 } }, 404);
+        {
+          const { gatewayNotFound } = await import("./hub/gateway");
+          return gatewayNotFound(url.pathname);
+        }
       }
 
       if (url.pathname.startsWith("/api/")) {
@@ -1092,6 +1111,8 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         return hubOS.compileMission(h, mission);
       };
       case "hos:conn:add": return async (t: string) => hubOS.connectorAdd(h, String(mode.data?.kind ?? ""), t.trim());
+      // the mission wizard's second question: which repositories is this about
+      case "hos:wfrepo": return async (t: string) => hubOS.setRepos(h, String(mode.data?.wfId ?? ""), t.trim());
       case "hos:search": return async (t: string) => hubOS.search(h, t);
       case "hos:edit": return async (t: string) => hubOS.applyEdit(h, String(mode.data?.id ?? ""), t);
       case "hos:media": return async (t: string) => hubOS.buildMedia(h, t);
@@ -1670,7 +1691,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "ref") return profile.referral(h);
         if (action === "interests") return profile.interests(h);
         if (action === "t") return profile.toggleInterest(h, args[0] ?? "");
-        if (action === "plan" || action === "pro") return profile.plans(h);
+        if (action === "plan") return profile.plans(h);
+        if (action === "pro") return profile.requestPro(h);
         if (action === "link") return githubLink(h);
         if (action === "token") return githubTokenPrompt(h);
         if (action === "unlink") return githubUnlink(h);
@@ -1808,6 +1830,10 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "wfdel") return hubOS.workflowDeletePrompt(h, arg);
         if (action === "wfdel2") return hubOS.deleteWorkflow(h, arg);
         if (action === "wfrun") return hubOS.runWorkflowById(h, arg);
+        if (action === "wire") return hubOS.wiring(h, arg, true);
+        if (action === "wiring") return hubOS.wiring(h, arg, false);
+        if (action === "whook") return hubOS.hookHelp(h, arg);
+        if (action === "repo") return hubOS.repoPrompt(h, arg);
         if (action === "queue") return hubOS.queue(h);
         if (action === "view") return hubOS.viewContent(h, arg);
         if (action === "ok") return hubOS.approve(h, arg);
@@ -1835,6 +1861,38 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
       // ── admin ──
       case "adm":
         if (action === "home") return admin.home(h);
+        if (action === "prog" || action === "pror") {
+          // Only an admin may settle a plan request; anyone else gets nothing.
+          if (!isAdmin(env, h.u.id)) return h.toast(fa ? "دسترسی نداری" : "not allowed", true);
+          const uid = Number(args[0] ?? 0);
+          await env.DB.prepare(`DELETE FROM flags WHERE key=?`).bind(`pro:req:${uid}`).run().catch(() => null);
+          if (action === "prog") {
+            await env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+              .bind(`plan:${uid}`, "pro", Date.now()).run().catch(() => null);
+            await env.DB.prepare(`UPDATE users SET daily_queries=0 WHERE id=?`).bind(uid).run().catch(() => null);
+          }
+          await h.tg.sendMessage(uid, action === "prog"
+            ? `💎 <b>Pro فعال شد</b>\n\nسقف روزانه‌ات برداشته شد و کارهای سنگین برایت باز است. از همین حالا کار می‌کند — چیزی برای تنظیم نیست.`
+            : `🆓 <b>درخواست Pro فعلاً تأیید نشد</b>\n\nهمهٔ قابلیت‌ها با سقف رایگان در دسترس‌اند. هر وقت خواستی دوباره از «⚡ پلن‌ها» درخواست بده.`,
+            { parse_mode: "HTML" }).catch(() => null);
+          return h.toast(action === "prog" ? "✅ Pro فعال شد" : "🗑 رد شد", true);
+        }
+        if (action === "pros") {
+          if (!isAdmin(env, h.u.id)) return h.toast(fa ? "دسترسی نداری" : "not allowed", true);
+          const { results } = await env.DB.prepare(
+            `SELECT f.key, f.value, u.username, u.first_name FROM flags f LEFT JOIN users u ON u.id = CAST(REPLACE(f.key,'pro:req:','') AS INTEGER)
+             WHERE f.key LIKE 'pro:req:%' ORDER BY f.updated_at DESC LIMIT 20`,
+          ).all<any>().catch(() => ({ results: [] as any[] }));
+          const rows = results ?? [];
+          return h.reply(
+            `💎 <b>${fa ? "درخواست‌های Pro" : "Pro requests"}</b> — <b>${rows.length}</b>\n\n` +
+              (rows.length
+                ? rows.map((r: any) => `• ${tgEscape(r.username ? "@" + r.username : r.first_name ?? "?")} · <code>${String(r.key).replace("pro:req:", "")}</code> · ${new Date(Number(r.value)).toISOString().slice(0, 10)}`).join("\n")
+                : (fa ? "<i>درخواستی در صف نیست.</i>" : "<i>none</i>")),
+            kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "adm:home" }]]),
+            !!h.cbId,
+          );
+        }
         if (action === "flags") return admin.flags(h);
         if (action === "flag") return admin.setFlag(h, args[0] ?? "", args[1] ?? "on");
         if (action === "broadcast") return admin.broadcast(h);
@@ -2383,7 +2441,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 270 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 310 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

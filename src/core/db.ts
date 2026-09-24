@@ -238,10 +238,15 @@ export class Store {
   }
 
   async leaderboard(metric = "queries", limit = 10) {
+    /* A leaderboard is a list of *people*. Two kinds of rows used to appear in
+     * it: Telegram bots (which the bot itself registers when it meets one) and
+     * the synthetic user the health checks send updates as. Neither is a person
+     * competing for a rank, and both made the board look broken. */
     const { results } = await this.env.DB.prepare(
       `SELECT l.user_id, l.value, u.first_name, u.username, u.level FROM leaderboard l
-       LEFT JOIN users u ON u.id = l.user_id
-       WHERE l.week=? AND l.metric=? ORDER BY l.value DESC LIMIT ?`,
+       JOIN users u ON u.id = l.user_id
+       WHERE l.week=? AND l.metric=? AND COALESCE(u.is_bot,0)=0 AND u.banned=0
+       ORDER BY l.value DESC LIMIT ?`,
     ).bind(Store.week(), metric, limit).all<any>().catch(() => ({ results: [] as any[] }));
     return results ?? [];
   }

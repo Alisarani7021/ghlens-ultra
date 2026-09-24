@@ -1,6 +1,5 @@
 import type { H } from "../core/handler";
 import { setMode } from "../core/mode";
-import { bar } from "../github/rest";
 import { fmt } from "./cards";
 import { code, i, pre, tgEscape } from "../tg/types";
 import { kb } from "../tg/keyboards";
@@ -181,50 +180,106 @@ export class ToolsFeature {
   }
 
   /** IP intelligence: RDAP + geo + ASN + reverse DNS + threat posture. */
+  /**
+   * IP intelligence — every field traceable to the source that answered it.
+   *
+   * The previous version asked ip-api.com over plain HTTP and printed whatever
+   * came back as fact. In free mode that service never fills `proxy`, `hosting`
+   * or `mobile`, so the card showed «اتصال خانگی/عادی» for a datacenter IP and a
+   * threat bar computed from fields that were always false — numbers that looked
+   * authoritative and were invented. The card now cites its sources, prints «—»
+   * where a source had nothing, and links out for the parts that genuinely need a
+   * paid key (abuse reputation, Shodan, GreyNoise) instead of pretending to know.
+   */
   async ipIntel(h: H, ip: string) {
     const fa = h.loc === "fa";
-    const [rdap, geo, asn, rev]: any[] = await Promise.all([
-      getJson(`https://rdap.org/ip/${encodeURIComponent(ip)}`),
-      getJson(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`),
-      getJson(`https://stat.ripe.net/data/prefix-overview/data.json?resource=${encodeURIComponent(ip)}`),
-      getJson(`https://dns.google/resolve?name=${reverseName(ip)}&type=PTR`),
+    const clean = ip.trim();
+
+    const [who, rdap, ripe, rir, rev]: any[] = await Promise.all([
+      getJson(`https://ipwho.is/${encodeURIComponent(clean)}`),
+      getJson(`https://rdap.org/ip/${encodeURIComponent(clean)}`),
+      getJson(`https://stat.ripe.net/data/prefix-overview/data.json?resource=${encodeURIComponent(clean)}`),
+      getJson(`https://stat.ripe.net/data/rir/data.json?resource=${encodeURIComponent(clean)}`),
+      getJson(`https://dns.google/resolve?name=${encodeURIComponent(reverseName(clean))}&type=PTR`),
     ]);
 
-    const d = (geo?.status === "ok" ? geo : null) ?? {};
-    const prefix = asn?.data?.resource ?? "";
-    const asns: any[] = asn?.data?.asns ?? [];
-    const org = rdap?.name ?? d.org ?? asns[0]?.holder ?? "—";
-    const country = rdap?.country ?? d.countryCode ?? "—";
-    const ptr = (rev?.Answer ?? []).map((a: any) => String(a.data).replace(/\.$/, "")).join(", ");
-    const flags: string[] = [];
-    if (d.proxy) flags.push(fa ? "🕵️ پروکسی/VPN دیده شده" : "🕵️ proxy/VPN detected");
-    if (d.hosting) flags.push(fa ? "🏢 دیتاسنتر/میزبانی" : "🏢 datacenter / hosting");
-    if (d.mobile) flags.push(fa ? "📱 شبکه موبایل" : "📱 mobile carrier");
-    if (!flags.length) flags.push(fa ? "🏠 به‌نظر اتصال خانگی/عادی" : "🏠 residential-looking");
-
-    const risk = (d.proxy ? 40 : 0) + (d.hosting ? 15 : 0) + (isPrivate(ip) ? -100 : 0);
-    const riskLabel = risk >= 40 ? (fa ? "بالا" : "high") : risk >= 15 ? (fa ? "متوسط" : "medium") : (fa ? "پایین" : "low");
-
-    await h.reply(
-      `📡 <b>${tgEscape(ip)}</b> — ${fa ? "استعلام شبکه" : "network intel"}\n\n` +
-        `🌍 ${tgEscape([d.city, d.regionName, d.country].filter(Boolean).join(", ") || "—")}  ${flagEmoji(d.countryCode)}\n` +
-        `🏢 ${tgEscape(org)}\n` +
-        `🛰 ASN: ${asns.length ? asns.map((a: any) => `<a href="https://bgp.tools/as/${a.asn}">AS${a.asn}</a>`).join(", ") : code(d.as ?? "—")}\n` +
-        (prefix ? `📦 ${fa ? "پیشوند اعلام‌شده" : "announced prefix"}: <code>${tgEscape(prefix)}</code> · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>\n` : "") +
-        `📬 ${fa ? "DNS معکوس" : "reverse DNS"}: <code>${tgEscape(ptr || "—")}</code>\n` +
-        `🕐 ${d.timezone ?? "—"}${d.lat ? `  📍 <code>${d.lat},${d.lon}</code>` : ""}\n\n` +
-        `🧪 <b>${fa ? "وضعیت تهدید" : "Threat posture"}</b>: ${riskLabel} ${bar(risk, 10, "▓", "░")}\n` +
-        flags.join("\n") +
-        `\n\n🔗 ${fa ? "منابع" : "Sources"}: <a href="https://ipinfo.io/${encodeURIComponent(ip)}">ipinfo</a> · ` +
-        `<a href="https://www.shodan.io/host/${encodeURIComponent(ip)}">shodan</a> · ` +
-        `<a href="https://viz.greynoise.io/ip/${encodeURIComponent(ip)}">greynoise</a> · ` +
-        `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}">abuseipdb</a>`,
-      kb(
-        [{ text: "🔁 " + (fa ? "IP دیگر" : "Another IP"), cb: "u:ip" }, { text: "🧭 DNS", cb: "u:dns" }],
-        [{ text: "🛡 " + (fa ? "مرکز امنیت" : "Security hub"), cb: "sec:home" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "u:home" }],
-      ),
-      !!h.cbId,
+    const kbRow = kb(
+      [{ text: "🔁 " + (fa ? "IP دیگر" : "Another IP"), cb: "u:ip" }, { text: "🧭 DNS", cb: "u:dns" }],
+      [{ text: "🛡 " + (fa ? "مرکز امنیت" : "Security hub"), cb: "sec:home" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "u:home" }],
     );
+
+    if (who && who.success === false) {
+      return h.reply(
+        `📡 <code>${tgEscape(clean)}</code>\n\n` +
+          `🏠 <b>${fa ? "آدرس داخلی یا رزروشده" : "private or reserved"}</b>\n` +
+          `<blockquote>${tgEscape(who.message ?? "Reserved range")} — ${fa
+            ? "این آدرس در اینترنت عمومی مسیریابی نمی‌شود، پس جغرافیا و ASN ندارد. برای آدرس عمومی امتحان کن."
+            : "not routed on the public internet."}</blockquote>`,
+        kbRow, !!h.cbId,
+      );
+    }
+
+    const geo = who && who.success !== false ? who : null;
+    const conn = geo?.connection ?? {};
+    const prefix = ripe?.data?.resource ?? "";
+    const asns: any[] = ripe?.data?.asns ?? [];
+    const block = ripe?.data?.block ?? null;
+    const announced = ripe?.data?.announced;
+    const rirName = (rir?.data?.rirs ?? [])[0]?.rir ?? "";
+    const ptr = (rev?.Answer ?? []).map((a: any) => String(a.data).replace(/\.$/, "")).join(", ");
+
+    // allocation facts straight from RDAP (the registry's own record)
+    const type = rdap?.type ?? "";
+    const netName = rdap?.name ?? "";
+    const range = rdap?.startAddress && rdap?.endAddress ? `${rdap.startAddress} – ${rdap.endAddress}` : "";
+    const evt = (name2: string) => (rdap?.events ?? []).find((e: any) => e.eventAction === name2)?.eventDate?.slice(0, 10) ?? "";
+    const registered = evt("registration") || evt("last changed");
+    const abuse = (rdap?.entities ?? [])
+      .filter((e: any) => (e.roles ?? []).includes("abuse"))
+      .map((e: any) => (e.vcardArray?.[1] ?? []).find((x: any) => x[0] === "email")?.[3])
+      .filter(Boolean)[0] as string | undefined;
+
+    const place = [geo?.city, geo?.region, geo?.country].filter(Boolean).join(" · ") || "—";
+    const org = conn.org ?? conn.isp ?? asns[0]?.holder ?? netName ?? "—";
+    const tz = geo?.timezone ? `${geo.timezone.id} (${geo.timezone.abbr}, UTC${geo.timezone.utc})` : "—";
+
+    const lines = [
+      `📡 <b>${tgEscape(clean)}</b> — ${fa ? "استعلام شبکه" : "network intel"}${geo?.flag?.emoji ? "  " + geo.flag.emoji : ""}`,
+      ``,
+      `<blockquote>${fa
+        ? "هر خط از منبع خودش آمده و همان‌جا نام برده شده. جایی که منبع جواب نداده «—» است؛ عدد ساخته نمی‌شود."
+        : "Every line cited; «—» where the source had nothing."}</blockquote>`,
+      ``,
+      `🌍 ${tgEscape(place)}${geo?.continent ? `  <i>(${tgEscape(geo.continent)})</i>` : ""}`,
+      `🏢 ${tgEscape(org)}${conn.isp && conn.isp !== conn.org ? ` — ISP: ${tgEscape(conn.isp)}` : ""}${conn.domain ? ` · <i>${tgEscape(conn.domain)}</i>` : ""}`,
+      `🛰 ${asns.length
+        ? asns.map((a: any) => `AS${a.asn} <a href="https://bgp.tools/as/${a.asn}">${tgEscape(a.holder ?? "")}</a>`).join(" \n🛰 ")
+        : code(conn.asn ? "AS" + conn.asn : "—")}`,
+      prefix ? `📦 ${fa ? "پیشوند" : "prefix"}: <code>${tgEscape(prefix)}</code>${announced === true ? " · " + (fa ? "اعلام‌شده ✅" : "announced ✅") : announced === false ? " · " + (fa ? "اعلام نشده ⛔️" : "not announced ⛔️") : ""} · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>` : "",
+      block?.resource ? `🧱 ${fa ? "بلوک بالادست" : "parent block"}: <code>${tgEscape(block.resource)}</code> <i>${tgEscape(block.desc ?? "")}</i>` : "",
+      `${rirName ? `🏛 RIR: <b>${tgEscape(rirName)}</b>` : ""}${netName ? `   🧾 ${tgEscape(netName)}` : ""}${type ? ` · ${tgEscape(type)}` : ""}`,
+      range ? `📐 ${fa ? "بازه" : "range"}: <code>${tgEscape(range)}</code>${registered ? ` · ${fa ? "ثبت" : "recorded"} <code>${registered}</code>` : ""}` : "",
+      `📬 rDNS: <code>${tgEscape(ptr || "—")}</code>`,
+      `🕐 ${tgEscape(tz)}${geo?.latitude ? `  📍 <code>${geo.latitude},${geo.longitude}</code>` : ""}`,
+      abuse ? `📮 ${fa ? "تماس سوءاستفادهٔ ثبت‌شده" : "registered abuse contact"}: <code>${tgEscape(abuse)}</code>` : "",
+      ``,
+      `🔗 ${fa ? "منابع" : "sources"}: <a href="https://ipwho.is/${encodeURIComponent(clean)}">ipwho.is</a> · ` +
+        `<a href="https://rdap.org/ip/${encodeURIComponent(clean)}">RDAP</a> · ` +
+        `<a href="https://stat.ripe.net/${encodeURIComponent(clean)}">RIPEstat</a> · ` +
+        `<a href="https://dns.google/resolve?name=${encodeURIComponent(reverseName(clean))}&type=PTR">Google DNS</a>`,
+      ``,
+      `🛡 <b>${fa ? "بررسی سوءاستفاده و امنیت" : "abuse & security"}</b>\n` +
+        `<i>${fa
+          ? "این بخش عمداً عدد نمی‌سازد: اعتبار سوءاستفاده فقط با کلید همین سرویس‌ها در دسترس است. با یک ضربه بازشان کن:"
+          : "No invented score: reputation data needs these services' own keys."}</i>\n` +
+        `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(clean)}">AbuseIPDB</a> · ` +
+        `<a href="https://viz.greynoise.io/ip/${encodeURIComponent(clean)}">GreyNoise</a> · ` +
+        `<a href="https://www.shodan.io/host/${encodeURIComponent(clean)}">Shodan</a> · ` +
+        `<a href="https://www.virustotal.com/gui/ip-address/${encodeURIComponent(clean)}">VirusTotal</a> · ` +
+        `<a href="https://ipinfo.io/${encodeURIComponent(clean)}">IPinfo</a>`,
+    ].filter((l) => l !== "").join("\n");
+
+    await h.reply(lines, kbRow, !!h.cbId);
   }
 
   /** Domain intelligence: DNS records, TLS cert, registrar, hosting hints. */
@@ -325,11 +380,4 @@ async function getJson(url: string): Promise<any> {
 function reverseName(ip: string) {
   if (ip.includes(":")) return ip; // v6 reverse needs nibble expansion — skip
   return ip.split(".").reverse().join(".") + ".in-addr.arpa";
-}
-function isPrivate(ip: string) {
-  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.)/.test(ip);
-}
-function flagEmoji(cc?: string) {
-  if (!cc || cc.length !== 2) return "";
-  return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
 }
