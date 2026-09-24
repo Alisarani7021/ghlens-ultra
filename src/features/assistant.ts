@@ -112,19 +112,28 @@ export class Assistant {
        `<url>` arrived as literal punctuation — the single most visible way an AI
        answer looks broken. The hub already had the converter (it was written for
        changelogs); this is the same function, so both paths escape identically. */
-    const { markdownToTelegramHtml } = await import("../hub/editor");
-    const body = (answer || (await aiDownNotice(h.env, h.loc))).slice(0, 3800);
-    await h.reply(
-      answer ? markdownToTelegramHtml(body) : body,
-      kb(
-        [
-          { text: "🔁 " + (fa ? "بپرس ادامه‌اش" : "Follow up"), cb: "a:cont" },
-        ],
-        [
-          { text: "🔎 " + (fa ? "جست‌وجوی این جمله" : "Search this"), cb: `n:q:${encodeURIComponent(question).replace(/%/g, "_").slice(0, 36)}` },
-          { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" },
-        ],
-      ),
+    const keys = kb(
+      [
+        { text: "🔁 " + (fa ? "بپرس ادامه‌اش" : "Follow up"), cb: "a:cont" },
+      ],
+      [
+        { text: "🔎 " + (fa ? "جست‌وجوی این جمله" : "Search this"), cb: `n:q:${encodeURIComponent(question).replace(/%/g, "_").slice(0, 36)}` },
+        { text: "🧹 " + (fa ? "پاک کردن حافظه" : "Clear memory"), cb: "a:clear" },
+      ],
+    );
+
+    /* The answer is a markdown *document* — headings, lists, code, links — and it
+       is now sent as one. Flattening it into bold-and-newlines is what made a good
+       answer read like a log dump; `sendRich` degrades to the legacy text by
+       itself, so the same string serves both paths. */
+    if (!answer) return h.reply(await aiDownNotice(h.env, h.loc), keys, !!h.cbId);
+    const { markdownToRichHtml, richDoc, inlineMd } = await import("../hub/richdoc");
+    await h.replyRich(
+      richDoc({
+        meta: `🧠 <b>${fa ? "پاسخ دستیار" : "Assistant"}</b>${question ? ` — <i>${inlineMd(question.slice(0, 90))}</i>` : ""}`,
+        body: markdownToRichHtml(answer, { headingBase: 2, maxChars: 26000 }),
+      }),
+      keys,
       !!h.cbId,
     );
   }
@@ -176,37 +185,36 @@ export class Assistant {
     const { answer, sources, mode } = await rag.ask(full, question, corpus, h.loc);
 
     await h.store.addXp(h.u.id, 2, "repochat");
-    // When the model is unavailable the passages themselves answer the
-    // question — say so plainly and point at the original text, instead of
-    // showing an empty answer over the word "پیدا نشد".
-    const header = mode === "extractive"
-      ? `📑 <b>${tgEscape(full)}</b>\n<blockquote>❓ <b>${fa ? "سؤال" : "Question"}:</b> ${tgEscape(truncate(question, 140))}</blockquote>\n` +
-        `<i>${fa ? "هوش مصنوعی در دسترس نبود؛ این‌ها مرتبط‌ترین بخش‌های مستندات خود مخزن‌اند (عین متن)." : "AI unavailable — these are the most relevant passages from the repo's own docs."}</i>\n\n`
-      : `🧠 <b>${tgEscape(full)}</b>\n<blockquote>❓ <b>${fa ? "سؤال" : "Question"}:</b> ${tgEscape(truncate(question, 140))}</blockquote>\n\n`;
-
-    // Filter out corrupted/binary/mojibake sources
+    /* Filter out corrupted/binary/mojibake sources */
     const validSources = sources
       .map(s => {
-        // clean any control characters or non-printable mojibake
         const cleanExcerpt = s.excerpt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim();
         return { ...s, excerpt: cleanExcerpt };
       })
       .filter(s => s.excerpt.length > 10 && !/^[\s\W_]+$/.test(s.excerpt))
-      .slice(0, 3);
+      .slice(0, 4);
 
-    const sourcesBlock = validSources.length > 0
-      ? `\n\n<blockquote>📚 <b>${fa ? "منابع ارجاع‌شده در مستندات مخزن" : "Referenced Passages"}:</b>\n` +
-        validSources.map(s => `• <b>[${s.n}]</b> <code>${tgEscape(truncate(s.excerpt.replace(/\s+/g, " "), 90))}</code>`).join("\n") +
-        `</blockquote>`
+    /* Rich: the passages become a small bordered table instead of three escaped
+       code lines, and when the model was unavailable the extractive note is said
+       in the document itself rather than in a separate header paragraph. */
+    const { markdownToRichHtml, richDoc, inlineMd } = await import("../hub/richdoc");
+    const srcRows = validSources.length
+      ? `<table bordered compact><tr><th>#</th><th>${fa ? "بخش مستندات" : "passage"}</th></tr>` +
+        validSources.map((s) => `<tr><td>[${s.n}]</td><td>${inlineMd(truncate(s.excerpt.replace(/\s+/g, " "), 110))}</td></tr>`).join("") +
+        `</table>`
       : "";
-
-    // same converter as the free-form answer: models write markdown, Telegram
-    // renders HTML, and the citations block above is already HTML
-    const { markdownToTelegramHtml } = await import("../hub/editor");
-    await h.reply(
-      header +
-        truncate(markdownToTelegramHtml(answer), 3100) +
-        sourcesBlock,
+    const doc = richDoc({
+      title: `🧠 ${full}`,
+      meta: `❓ <i>${inlineMd(truncate(question, 170))}</i>`,
+      body:
+        (mode === "extractive"
+          ? `<aside>${fa ? "هوش مصنوعی در دسترس نبود؛ این‌ها مرتبط‌ترین بخش‌های مستندات خود مخزن‌اند (عین متن)." : "AI unavailable — these are the repo's own most relevant passages."}</aside>`
+          : "") +
+        markdownToRichHtml(answer, { headingBase: 2, maxChars: 22000 }) +
+        (srcRows ? `\n<p><b>📚 ${fa ? "منابع" : "sources"}</b></p>\n${srcRows}` : ""),
+    });
+    await h.replyRich(
+      doc,
       kb(
         [
           { text: "🔁 " + (fa ? "سؤال بعدی" : "Next question"), cb: `a:repochat:${full}` },
@@ -305,8 +313,13 @@ export class Assistant {
     if (a) {
       await h.env.DB.prepare(`UPDATE repos SET ai_summary_fa=? WHERE full_name=?`).bind(a.one_liner ?? "", full).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
     }
-    await h.reply(
-      text,
+    const { markdownToRichHtml: toRich, richDoc: docOf, inlineMd: inline } = await import("../hub/richdoc");
+    await h.replyRich(
+      docOf({
+        title: `🎯 ${full}`,
+        meta: `⭐ <b>${fmt(meta.stars ?? 0)}</b> · 🧩 <code>${inline(meta.language ?? "—")}</code> · <i>${fa ? "از دادهٔ زندهٔ گیت‌هاب" : "live GitHub data"}</i>`,
+        body: toRich(text, { headingBase: 2, maxChars: 22000 }),
+      }),
       kb(
         [
           { text: "🛰 " + (fa ? "کاوش عمیق" : "Deep scout"), cb: `s:go:${full}` },
@@ -376,9 +389,10 @@ export class Assistant {
       `🤖 ${fa ? "ترجمه با Workers AI" : "translated by Workers AI"} · ` +
       `💾 ${fa ? "ذخیره‌شده (بار بعد فوری)" : "cached"}`;
 
-    const chunks = chunkMd(translated.slice(0, 12000), 3800);
-    await h.reply(chunks[0] + (chunks.length === 1 ? footer : `\n\n<i>…1/${chunks.length}</i>`), kb(
-      chunks.length > 1 ? [{ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:1` }] : [],
+    const MD = await import("../hub/richdoc");
+    const pages = MD.paginateMd(translated.slice(0, 24000), MD.README_PAGE_CHARS);
+    await h.replyRich(await readmePage(full, pages[0], 0, pages.length, raw.html_url, fa), kb(
+      pages.length > 1 ? [{ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:1` }] : [],
       [
         { text: "🇬🇧 English", cb: `ai:tre:${full}:en` },
         { text: "🖨 PDF", cb: `ai:trpdf:${full}` },
@@ -538,6 +552,27 @@ export class Assistant {
 }
 
 // helpers
+/**
+ * One page of a translated README, as a rich document.
+ *
+ * Module scope on purpose: the first page, the «ادامه» button and the PDF export
+ * all render through it, so page N of the pager and page N of the document are
+ * the same text and the printout matches the chat.
+ */
+export async function readmePage(
+  full: string, markdown: string, index: number, total: number, sourceUrl?: string, fa = true,
+): Promise<string> {
+  const { markdownToRichHtml, richDoc } = await import("../hub/richdoc");
+  return richDoc({
+    title: `📄 ${full}`,
+    meta:
+      `${total > 1 ? `<i>${index + 1}/${total}</i> · ` : ""}` +
+      `🌍 ${sourceUrl ? `<a href="${sourceUrl}">README ${fa ? "اصلی" : "original"}</a>` : "README"} · ` +
+      `🤖 ${fa ? "ترجمه با Workers AI" : "translated by Workers AI"}`,
+    body: markdownToRichHtml(markdown, { headingBase: 2, maxChars: 11500 }),
+  });
+}
+
 export function decodeB64(s: string): string {
   try {
     const bin = atob(s.replace(/\s/g, ""));

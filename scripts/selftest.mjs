@@ -340,12 +340,13 @@ const MS = hubMods.mission, EN = hubMods.engine;
 // ═══════════════════════════════════════════════════════════════════════════
 
 const more = {};
-for (const name of ["files", "knowledge", "media", "hooks", "gateway", "deploy"]) {
+for (const name of ["files", "knowledge", "media", "hooks", "gateway", "deploy", "richdoc"]) {
   const outFile = join(scratch, `hub2_${name}.mjs`);
   execSync(`npx esbuild src/hub/${name}.ts --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
   more[name] = await import(outFile);
 }
 const FL = more.files, KN = more.knowledge, MDF = more.media, HK = more.hooks, GW = more.gateway;
+const RD_ = more.richdoc;
 
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
@@ -715,6 +716,53 @@ const enc = (s) => new TextEncoder().encode(s);
 
   const caption = MD.mediaKitCaption({ title: "ریلیز تازه" }, kit.prompt, true);
   ok("caption: says the prompt came from the fallback", caption.includes("از خودِ متن"));
+}
+
+// ── rich documents: markdown in, a rendering Telegram can draw ────────────
+{
+  const RD = RD_;
+  const md = [
+    "# پروژه X",
+    "",
+    "یک کتابخانهٔ **سبک** برای `queues` با [مستندات](https://x.dev).",
+    "",
+    "- سریع",
+    "- ساده",
+    "",
+    "## نصب",
+    "```bash",
+    "npm i x",
+    "```",
+    "",
+    "| ویژگی | وضعیت |",
+    "|---|---|",
+    "| صف | ✅ |",
+    "",
+    "> نکته: Node 20 لازم است",
+  ].join("\n");
+  const html = RD.markdownToRichHtml(md);
+  ok("richdoc: headings survive", html.includes("<h1>پروژه X</h1>") && html.includes("<h2>نصب</h2>"));
+  ok("richdoc: inline bold, code and links", html.includes("<b>سبک</b>") && html.includes("<code>queues</code>") && html.includes('<a href="https://x.dev">'));
+  ok("richdoc: lists are real lists", /<ul><li>سریع<\/li><li>ساده<\/li><\/ul>/.test(html));
+  ok("richdoc: fences become pre", html.includes("<pre>npm i x</pre>"));
+  ok("richdoc: tables render as tables", html.includes("<table bordered striped>") && html.includes("<th>ویژگی</th>"));
+  ok("richdoc: quotes become asides", html.includes("<aside>نکته:"));
+
+  // markup in the source can never become markup in the message
+  const nasty = RD.markdownToRichHtml("سلام <script>alert(1)</script> و <b>پرچم</b>");
+  ok("richdoc: html in the source is escaped", !nasty.includes("<script>") && nasty.includes("&lt;script&gt;"));
+  ok("richdoc: it still closes the block it opened", (nasty.match(/<p>/g) ?? []).length === (nasty.match(/<\/p>/g) ?? []).length);
+
+  // truncation is on a block boundary: never half a tag, never a dangling list
+  const long = RD.markdownToRichHtml(Array.from({ length: 60 }, (_v, i) => `## بخش ${i}\nمتن ${i}`).join("\n\n"), { maxChars: 400 });
+  ok("richdoc: honours the character cap", long.length <= 400);
+  ok("richdoc: never cuts mid-tag", !/<[^>]*$/.test(long));
+  ok("richdoc: keeps the closed-list invariant", !/<ul>(?![^]*<\/ul>)/.test(html));
+
+  // one page size for both the first page and the pager
+  const pages = RD.paginateMd(Array.from({ length: 40 }, (_v, i) => `## s${i}\n\nمتن ${i}`).join("\n\n"), 400);
+  ok("richdoc: pagination drops nothing", pages.join("\n").includes("متن 39") && pages.every((p) => p.length <= 400));
+  eq("richdoc: the reader's page size is one constant", typeof RD.README_PAGE_CHARS, "number");
 }
 
 // ── the leaderboard is humans only ────────────────────────────────────────

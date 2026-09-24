@@ -59,7 +59,7 @@ export class ArchitectureExplainer {
       `Readme excerpt:\n${readmeSnippet}\n\n` +
       `Language of response: ${fa ? "Fluent Persian (فارسی روان و تمیز مهندسی)" : "English"}.\n` +
       `IMPORTANT FORMATTING RULES:\n` +
-      `- DO NOT use Markdown tables (no '|' pipes or table bars). Use clean bullet points instead.\n` +
+      `- You MAY use ONE small Markdown table (max 5 rows) for the tech stack — it renders as a real table.\n` +
       `- Use Telegram blockquote (starting with '> ') for the high-level summary/verdict.\n` +
       `- Organize cleanly into 4 distinct sections with bold titles:\n` +
       `  🎯 **هسته و نقطه ورود** (Entrypoint & Core Execution)\n` +
@@ -75,13 +75,18 @@ export class ArchitectureExplainer {
       feature: "architecture",
     });
 
-    const formattedAnalysis = markdownToTelegramHtml(analysis || (fa ? "تحلیل هوش مصنوعی در دسترس نبود." : "Analysis unavailable."));
-    const body =
-      `🗺 <b>${fa ? "معماری و مهندسی پروژه" : "Project Architecture & Engineering"}</b>\n` +
-      `📦 <b>${tgEscape(full)}</b> · ⭐ <b>${(repo.stargazers_count ?? 0).toLocaleString()}</b> · 🧩 <code>${repo.language ?? "—"}</code>\n\n` +
-      formattedAnalysis;
+    /* Rich: the analysis is written as four titled sections, so it is rendered as
+       four sections — with the stack table the model is now allowed to produce. */
+    const { markdownToRichHtml, richDoc, inlineMd } = await import("../hub/richdoc");
+    const body = richDoc({
+      title: `🗺 ${fa ? "معماری و مهندسی پروژه" : "Project Architecture"}`,
+      meta:
+        `📦 <b>${inlineMd(full)}</b> · ⭐ <b>${(repo.stargazers_count ?? 0).toLocaleString()}</b> · ` +
+        `🍴 ${(repo.forks_count ?? 0).toLocaleString()} · 🧩 <code>${inlineMd(repo.language ?? "—")}</code>`,
+      body: markdownToRichHtml(analysis || (fa ? "تحلیل هوش مصنوعی در دسترس نبود." : "Analysis unavailable."), { headingBase: 2 }),
+    });
 
-    return h.reply(
+    return h.replyRich(
       body,
       kb(
         [

@@ -1938,14 +1938,17 @@ async function translateMore(h: H, full: string, page: number) {
   const text = (await h.session.get(`tr:${full}`)) as string | null;
   const source = text ?? (await h.env.STATE.get(`trl:${full}:${h.loc}`));
   if (!source) return h.toast(h.loc === "fa" ? "دوباره ترجمه کن" : "re-translate first", true);
-  const chunks = splitSmart(source, 3800);
-  const idx = Math.max(0, Math.min(page, chunks.length - 1));
+  /* The same pagination the first page used: page N of the pager and page N of the
+     document are the same text, so pressing «ادامه» never re-flows the README. */
+  const { paginateMd } = await import("./hub/richdoc");
+  const pages = paginateMd(source.slice(0, 24000), (await import("./hub/richdoc")).README_PAGE_CHARS);
+  const idx = Math.max(0, Math.min(page, pages.length - 1));
   const nav: any[] = [];
   if (idx > 0) nav.push({ text: "⬅️ " + (h.loc === "fa" ? "قبلی" : "Prev"), cb: `ai:trmore:${full}:${idx - 1}` });
-  if (idx + 1 < chunks.length) nav.push({ text: (h.loc === "fa" ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:${idx + 1}` });
+  if (idx + 1 < pages.length) nav.push({ text: (h.loc === "fa" ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:${idx + 1}` });
 
-  return h.reply(
-    chunks[idx] + `\n\n<i>…${idx + 1}/${chunks.length}</i>`,
+  return h.replyRich(
+    await (await import("./features/assistant")).readmePage(full, pages[idx], idx, pages.length),
     kb(
       nav,
       [
