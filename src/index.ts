@@ -2227,7 +2227,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
 
 <div class="foot">
   <span>✅ سرویس‌ورکر فعال — <a href="${health}">${health}</a></span>
-  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۴۸ تست</span>
+  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۵۲ تست</span>
   <span>💻 <a href="https://github.com/${repo}">github.com/${repo}</a></span>
   <span>© ${year}</span>
 </div>
@@ -2236,7 +2236,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 248 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 252 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

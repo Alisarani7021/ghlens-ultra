@@ -641,5 +641,32 @@ const enc = (s) => new TextEncoder().encode(s);
   }
 }
 
+// ── AI deadline ────────────────────────────────────────────────────────
+// The bug this guards: an update is handled inside ctx.waitUntil, the platform
+// only guarantees that work for ~30s after the response, and the model chain had
+// no clock. A slow model therefore produced no answer at all and left the
+// "thinking…" message on screen forever. Chat must come back inside its budget.
+{
+  const out = join(scratch, "brain.mjs");
+  execSync(`npx esbuild src/ai/brain.ts --bundle --format=esm --platform=neutral --outfile=${out} --log-level=error`, { stdio: "inherit" });
+  const { AiBrain, DEFAULT_DEADLINE_MS } = await import(out);
+
+  eq("ai: default deadline is under the platform's ~30s budget", DEFAULT_DEADLINE_MS <= 25000, true);
+
+  const never = () => new Promise(() => {});
+  const fakeEnv = {
+    DB: { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({ ok: true }) }), first: async () => null }) },
+    CACHE: { get: async () => null, put: async () => {}, delete: async () => {} },
+    AI: { run: never },              // a model that never answers
+  };
+  const brain = new AiBrain(fakeEnv);
+  const t0 = Date.now();
+  const answer = await brain.chat("hello", { deadlineMs: 700 });
+  const took = Date.now() - t0;
+  ok("ai: a hung model gives up instead of hanging (<=1.5s for a 0.7s budget)", took <= 1500);
+  ok("ai: the hung model produced no text", answer === "");
+  eq("ai: the reason is a timeout, not a shrug", brain.failure, "timeout");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
