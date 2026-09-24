@@ -108,8 +108,14 @@ export class Assistant {
 
 
 
+    /* Models answer in markdown and Telegram renders HTML, so `**bold**` and
+       `<url>` arrived as literal punctuation — the single most visible way an AI
+       answer looks broken. The hub already had the converter (it was written for
+       changelogs); this is the same function, so both paths escape identically. */
+    const { markdownToTelegramHtml } = await import("../hub/editor");
+    const body = (answer || (await aiDownNotice(h.env, h.loc))).slice(0, 3800);
     await h.reply(
-      (answer || (await aiDownNotice(h.env, h.loc))).slice(0, 3900),
+      answer ? markdownToTelegramHtml(body) : body,
       kb(
         [
           { text: "🔁 " + (fa ? "بپرس ادامه‌اش" : "Follow up"), cb: "a:cont" },
@@ -194,9 +200,12 @@ export class Assistant {
         `</blockquote>`
       : "";
 
+    // same converter as the free-form answer: models write markdown, Telegram
+    // renders HTML, and the citations block above is already HTML
+    const { markdownToTelegramHtml } = await import("../hub/editor");
     await h.reply(
       header +
-        truncate(answer, 3100) +
+        truncate(markdownToTelegramHtml(answer), 3100) +
         sourcesBlock,
       kb(
         [
