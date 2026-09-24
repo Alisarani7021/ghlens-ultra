@@ -423,6 +423,9 @@ interface ProgressGuard {
   lastLoader?: string;
   /** when this update started, so ai calls can share one deadline */
   startedAt?: number;
+  /** how long this request may take. A webhook gets 22 s; a queued job gets
+      minutes, because it is not racing the platform's reply window. */
+  budgetMs?: number;
 }
 
 /**
@@ -479,6 +482,63 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
         console.error("lens-swallowed", String(e?.message ?? e));
       }
     }
+  }
+}
+
+/**
+ * Which features may be answered later.
+ *
+ * These are the ones whose model work routinely exceeds one platform reply
+ * window: a repo analysis makes two calls plus GitHub reads (measured: 39.7 s
+ * end to end on a cold repo), code review and workflow synthesis are comparable.
+ * Anything that fits in seconds stays synchronous, because a synchronous answer
+ * is a better one.
+ */
+export const DEFERRED_FEATURES = new Set(["repo", "code", "review", "workflow", "mission"]);
+
+/**
+ * Hand a slow feature to the queue and tell the user what will happen.
+ *
+ * Returns false when there is no queue bound (a self-hosted copy without
+ * Cloudflare Queues), so the caller can fall back to doing the work inline —
+ * slower is better than unavailable.
+ */
+export async function deferFeature(
+  h: H,
+  feature: "repo" | "code" | "review" | "workflow" | "ask" | "mission",
+  arg: string,
+  note: string,
+): Promise<boolean> {
+  const env = h.env;
+  if (!env.JOBS) return false;
+  const card = await h.tg.sendMessage(
+    h.chatId,
+    note,
+    { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "◀️ منوی اصلی", callback_data: "m:home" }]] } } as any,
+  ).catch(() => null);
+  const messageId = Number((card as any)?.result?.message_id ?? 0) || undefined;
+  await env.JOBS.send({
+    type: "ai.defer", feature, arg, chat_id: h.chatId, message_id: messageId,
+    user_id: h.u.id, trace: `df_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+  }).catch((e: any) => console.error("defer-enqueue-failed", String(e?.message ?? e)));
+  return true;
+}
+
+/**
+ * Run a deferred feature inside a queued job.
+ *
+ * The feature names are deliberately the *same* ones the buttons use, so a slow
+ * request and a fast one take exactly one code path and cannot drift apart.
+ */
+export async function runDeferredFeature(feature: string, h: H, arg: string): Promise<void> {
+  switch (feature) {
+    case "repo": return assistant.dossier(h, normRepo(arg));
+    case "code": return assistant.code(h, arg);
+    case "review": return assistant.review(h, arg);
+    case "workflow": return assistant.workflow(h, arg);
+    case "ask": return assistant.ask(h, arg);
+    case "mission": return hubOS.compileMission(h, arg);
+    default: return h.reply(`⚠️ صف نمی‌داند «${feature}» یعنی چه.`);
   }
 }
 
@@ -566,10 +626,10 @@ async function githubUnlink(h: H) {
     kb([[{ text: "🐙 " + (fa ? "اتصال حساب" : "Connect account"), cb: "me:link" }]]), !!h.cbId);
 }
 
-async function buildH(
+export async function buildH(
   m: { from?: User; chat: { id: number }; message_id?: number },
   env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard,
-  opts: { cbId?: string; args?: string[]; text?: string; msg?: Message; guard?: ProgressGuard } = {},
+  opts: { cbId?: string; args?: string[]; text?: string; msg?: Message; guard?: ProgressGuard; editTarget?: number } = {},
 ): Promise<H> {
   const guard = opts.guard;
   const u = m.from ?? { id: 0, is_bot: false, first_name: "?" } as User;
@@ -585,33 +645,37 @@ async function buildH(
   // (5000/h) belongs to the user instead of the deployment
   const userToken = user?.github_token_enc ? await decryptToken(env, user.github_token_enc) : null;
   const gh = new GithubRest(env, userToken ?? undefined);
-  /* The platform allows roughly half a minute per update and every model call in
-     this handler draws from that one allowance. A call that forgets its deadline
-     runs on the default 20 s; two of them can never both land, and the user sees a
-     spinner that never resolves. Clamping here — at the single place every feature
-     gets its `ai` from — means a call site added later inherits the bound instead
-     of having to remember it. */
-  const left = () => Math.max(2_000, (guard?.startedAt ?? Date.now()) + UPDATE_BUDGET_MS - Date.now());
-  const aiClamped = new Proxy(ai, {
-    get(target: any, prop: string | symbol, recv: any) {
-      const v = Reflect.get(target, prop, recv);
-      if (typeof v !== "function") return v;              // `ai.failure` reads pass through
-      const bound = v.bind(target);
-      if (prop !== "chat" && prop !== "json") return bound;
-      return (prompt: string, o: any = {}) =>
-        bound(prompt, { ...(o ?? {}), deadlineMs: Math.min(Number(o?.deadlineMs ?? 1e9) || 1e9, left()) });
-    },
-  }) as AiBrain;
+  /* One clock for the whole request.
+     The platform allows roughly half a minute per update and every model call in
+     this handler draws from that one allowance; a call that forgets its deadline
+     runs on the default 20 s, two of them can never both land, and the user stares
+     at a spinner that never resolves. The clock therefore lives in the brain
+     (`hardDeadline`) rather than in a wrapper around two method names, so every
+     path — chat, json, analyzeRepo, parallel, translate — inherits it. A queued
+     job sets a much larger allowance, because the queue's window is minutes, not
+     seconds. */
+  const allowance = guard?.budgetMs ?? UPDATE_BUDGET_MS;
+  const left = () => Math.max(2_000, (guard?.startedAt ?? Date.now()) + allowance - Date.now());
+  ai.hardDeadline = Date.now() + allowance;
 
   const h: H = {
-    env, store, tg, ai: aiClamped, card, u, user, loc, chatId, msgId,
+    env, store, tg, ai, card, u, user, loc, chatId, msgId,
     cbId: opts.cbId, args: opts.args ?? [], text: opts.text ?? "", msg: opts.msg,
+    editTarget: opts.editTarget,
     userToken: userToken ?? undefined,
     session,
     gh: () => gh,
     budget: left,
     async reply(body, keyboard, edit = false) {
       if (guard) guard.settled = true;
+      // a queued answer claims the card it was announced in, once
+      if (!edit && h.editTarget) {
+        const target = h.editTarget;
+        h.editTarget = undefined;
+        const res = await tg.editMessageText(chatId, target, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
+        if ((res as any).ok !== false) return;
+        // the card was deleted or is too old to edit → fall through to a send
+      }
       if (edit && h.cbId && msgId) {
         const res = await tg.editMessageText(chatId, msgId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
         if ((res as any).ok === false && /not modified/i.test((res as any).description ?? "")) return;
@@ -628,6 +692,13 @@ async function buildH(
       const { editRich, sendRich } = await import("./tg/rich");
       const extras = { reply_markup: keyboard, disable_web_page_preview: true } as any;
       const rtl = loc === "fa" || loc === "ar";
+      if (!edit && h.editTarget) {
+        const target = h.editTarget;
+        h.editTarget = undefined;
+        const how = await editRich(tg, chatId, target, html, { extra: extras, rtl })
+          .catch(async () => { await sendRich(tg, chatId, html, { extra: extras, rtl }); return "legacy" as const; });
+        if (how) return;
+      }
       if (edit && h.cbId && msgId) {
         const how = await editRich(tg, chatId, msgId, html, { extra: extras, rtl })
           .catch(async () => { await sendRich(tg, chatId, html, { extra: extras, rtl }); return "legacy" as const; });
@@ -1003,12 +1074,23 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       }
       case "ask": return (t) => assistant.ask(h, t);
       case "tr": return (t) => assistant.translateReadme(h, t.trim());
-      case "wf": return (t) => assistant.workflow(h, t);
+      case "wf": return async (t: string) => {
+        if (await deferFeature(h, "workflow", t, "🧩 ورک‌فلو در صف ساخته می‌شود…")) return;
+        return assistant.workflow(h, t);
+      };
       case "appgen": return async (t: string) => { await clearMode(h.session); return appGen.build(h, t); };
       case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
       case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
-      case "hos:mission": return async (t: string) => hubOS.compileMission(h, t.trim().slice(0, 1200));
+      /* Mission planning, code synthesis, review and workflow building each
+         exceed one reply window, and they are reached by *typing* — the same trap
+         as the button, one screen further in. Queued from here too, so the answer
+         arrives instead of the sentence never being finished. */
+      case "hos:mission": return async (t: string) => {
+        const mission = t.trim().slice(0, 1200);
+        if (await deferFeature(h, "mission", mission, `🧪 <b>مأموریت در صف ترجمه است</b>\n\n<blockquote>${tgEscape(mission.slice(0, 160))}</blockquote>\nنقشهٔ اجرا تا چند ثانیه دیگر همین‌جا می‌آید.`)) return;
+        return hubOS.compileMission(h, mission);
+      };
       case "hos:conn:add": return async (t: string) => hubOS.connectorAdd(h, String(mode.data?.kind ?? ""), t.trim());
       case "hos:search": return async (t: string) => hubOS.search(h, t);
       case "hos:edit": return async (t: string) => hubOS.applyEdit(h, String(mode.data?.id ?? ""), t);
@@ -1016,8 +1098,14 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "hos:deploy": return async (t: string) => hubOS.deployRun(h, t);
       case "hos:guide": return async () => hubOS.guide(h);
       case "arch": return async (t: string) => { await clearMode(h.session); return archExplainer.explain(h, t); };
-      case "code": return (t) => assistant.code(h, t);
-      case "review": return (t) => assistant.review(h, t);
+      case "code": return async (t: string) => {
+        if (await deferFeature(h, "code", t, "🧠 کد در صف ساخته می‌شود…")) return;
+        return assistant.code(h, t);
+      };
+      case "review": return async (t: string) => {
+        if (await deferFeature(h, "review", t, "🔎 بازبینی در صف اجرا شد…")) return;
+        return assistant.review(h, t);
+      };
       case "sec:scan": return (t) => security.scan(h, t.trim());
       case "sec:secrets": return (t) => security.secrets(h, t.trim());
       case "adm:broadcast": return (t) => admin.broadcast(h, t);
@@ -1401,7 +1489,19 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
 
       // ── AI ──
       case "ai":
-        if (action === "repo") return assistant.dossier(h, arg);
+        if (action === "repo") {
+          // A repo analysis takes ~40 s on a cold repo — longer than the platform
+          // gives a webhook. The card answers instantly and the queue edits it
+          // when the analysis lands, which is why this button never looks dead.
+          const queued = await deferFeature(
+            h, "repo", arg,
+            `🧠 <b>${tgEscape(arg)}</b>\n\n` +
+              (fa ? "تحلیل کامل در صف اجرا شد — تا چند ثانیه دیگر جای همین پیام می‌آید. می‌توانی بروی؛ نتیجه را می‌فرستم."
+                  : "Queued — the analysis will replace this message."),
+          );
+          if (queued) return;
+          return assistant.dossier(h, arg);
+        }
         if (action === "tr") {
           // «ترجمه README» from the assistant home asks for the repo; the same
           // key on a repo screen translates it directly. Either way the user

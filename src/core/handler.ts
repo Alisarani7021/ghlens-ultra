@@ -35,6 +35,15 @@ export interface H {
    * handler makes passes this number so the *whole* handler fits in the window.
    */
   budget(): number;
+  /**
+   * A message this handler should replace with its *first* answer.
+   *
+   * Queued work is announced with a card ("در صف…"), and the answer has to land
+   * where the user is already looking instead of arriving as a second message
+   * they have to match up themselves. The target is consumed once: the first
+   * reply edits it, the rest are normal sends.
+   */
+  editTarget?: number;
   msg?: Message;
   /** Edits the current message if we're in a callback, otherwise sends. */
   reply(body: string, keyboard?: InlineKeyboardMarkup, edit?: boolean): Promise<void>;
