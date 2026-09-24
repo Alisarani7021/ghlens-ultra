@@ -55,6 +55,33 @@ export class GithubRest {
     return data as T;
   }
 
+  /**
+   * Why did a repository read fail — a human sentence, not a status code.
+   *
+   * Used by the screens that would otherwise say «پیدا نشد» for four different
+   * problems (renamed, private, network, quota). It probes the two things that
+   * actually answer the question: whether GitHub serves the repo at all, and how
+   * much quota is left on `this.token` (anonymous: 60/h shared by the deployment).
+   */
+  async rateWhy(full: string): Promise<string | null> {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${full}`, { headers: this.headers() });
+      if (res.ok) return null;
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      const reset = res.headers.get("x-ratelimit-reset");
+      const mins = reset ? Math.max(0, Math.round((Number(reset) * 1000 - Date.now()) / 60000)) : null;
+      const body = (await res.json().catch(() => null)) as any;
+      if (res.status === 403 || remaining === "0") {
+        return `GitHub quota ${this.token ? "" : "(anonymous, shared) "}exhausted${
+          mins !== null ? ` — resets in ~${mins} min` : ""} · HTTP ${res.status}`;
+      }
+      if (res.status === 404) return body?.message ? `GitHub 404 — ${body.message}` : "GitHub 404";
+      return `GitHub HTTP ${res.status}${body?.message ? ` — ${body.message}` : ""}`;
+    } catch (e: any) {
+      return `network: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+  }
+
   async post<T = any>(path: string, body: unknown) {
     const url = path.startsWith("http") ? path : `https://api.github.com${path}`;
     const res = await fetch(url, { method: "POST", headers: { ...this.headers(), "content-type": "application/json" }, body: JSON.stringify(body) });

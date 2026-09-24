@@ -180,45 +180,126 @@ export class ToolsFeature {
     return isIp ? this.ipIntel(h, t) : this.domainIntel(h, t);
   }
 
-  /** IP intelligence: RDAP + geo + ASN + reverse DNS + threat posture. */
+  /**
+   * IP intelligence — every field labelled with the service that reported it.
+   *
+   * The screen used to read one HTTP-only provider, and Cloudflare Workers cannot
+   * reliably fetch plain `http://` upstreams: the request was refused, `geo.status`
+   * was never `"ok"`, and the renderer fell through to its own placeholders — a
+   * low-risk bar and «به‌نظر اتصال خانگی/عادی» for an IP the provider had never
+   * answered about. That is the fake data: not a wrong lookup, an invented one.
+   *
+   * So: several providers over HTTPS, the first that answers wins, its name is
+   * printed in the footer, and anything nobody reported is shown as «گزارش نشده»
+   * instead of a verdict.
+   */
   async ipIntel(h: H, ip: string) {
     const fa = h.loc === "fa";
-    const [rdap, geo, asn, rev]: any[] = await Promise.all([
+    const [rdap, asn, rev]: any[] = await Promise.all([
       getJson(`https://rdap.org/ip/${encodeURIComponent(ip)}`),
-      getJson(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`),
       getJson(`https://stat.ripe.net/data/prefix-overview/data.json?resource=${encodeURIComponent(ip)}`),
       getJson(`https://dns.google/resolve?name=${reverseName(ip)}&type=PTR`),
     ]);
 
-    const d = (geo?.status === "ok" ? geo : null) ?? {};
-    const prefix = asn?.data?.resource ?? "";
-    const asns: any[] = asn?.data?.asns ?? [];
-    const org = rdap?.name ?? d.org ?? asns[0]?.holder ?? "—";
-    const country = rdap?.country ?? d.countryCode ?? "—";
-    const ptr = (rev?.Answer ?? []).map((a: any) => String(a.data).replace(/\.$/, "")).join(", ");
-    const flags: string[] = [];
-    if (d.proxy) flags.push(fa ? "🕵️ پروکسی/VPN دیده شده" : "🕵️ proxy/VPN detected");
-    if (d.hosting) flags.push(fa ? "🏢 دیتاسنتر/میزبانی" : "🏢 datacenter / hosting");
-    if (d.mobile) flags.push(fa ? "📱 شبکه موبایل" : "📱 mobile carrier");
-    if (!flags.length) flags.push(fa ? "🏠 به‌نظر اتصال خانگی/عادی" : "🏠 residential-looking");
+    type Geo = {
+      city?: string; region?: string; country?: string; cc?: string; lat?: number; lon?: number;
+      tz?: string; isp?: string; org?: string; asn?: string;
+      proxy?: boolean; hosting?: boolean; mobile?: boolean;
+    };
+    const providers: { name: string; url: string; pick: (j: any) => Geo | null }[] = [
+      {
+        name: "ipwho.is",
+        url: `https://ipwho.is/${encodeURIComponent(ip)}`,
+        pick: (j) => (j && j.success !== false ? {
+          city: j.city, region: j.region, country: j.country, cc: j.country_code,
+          lat: j.latitude, lon: j.longitude, tz: j.timezone?.id,
+          isp: j.connection?.isp, org: j.connection?.org, asn: j.connection?.asn ? `AS${j.connection.asn}` : undefined,
+        } : null),
+      },
+      {
+        name: "ipapi.co",
+        url: `https://ipapi.co/${encodeURIComponent(ip)}/json/`,
+        pick: (j) => (j && !j.error ? {
+          city: j.city, region: j.region, country: j.country_name, cc: j.country_code,
+          lat: j.latitude, lon: j.longitude, tz: j.timezone,
+          isp: j.org, org: j.org, asn: j.asn,
+        } : null),
+      },
+      {
+        name: "freeipapi.com",
+        url: `https://freeipapi.com/api/json/${encodeURIComponent(ip)}`,
+        pick: (j) => (j && j.ipVersion ? {
+          city: j.cityName, region: j.regionName, country: j.countryName, cc: j.countryCode,
+          lat: j.latitude, lon: j.longitude, tz: j.timeZones?.[0],
+          isp: j.asnOrganization, org: j.asnOrganization, asn: j.asn ? `AS${j.asn}` : undefined,
+        } : null),
+      },
+      {
+        // last, and the only one that publishes proxy/hosting flags: plain HTTP,
+        // so it is allowed to fail without taking the screen with it
+        name: "ip-api.com",
+        url: `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`,
+        pick: (j) => (j?.status === "ok" ? {
+          city: j.city, region: j.regionName, country: j.country, cc: j.countryCode,
+          lat: j.lat, lon: j.lon, tz: j.timezone, isp: j.isp, org: j.org, asn: j.as,
+          proxy: !!j.proxy, hosting: !!j.hosting, mobile: !!j.mobile,
+        } : null),
+      },
+    ];
 
-    const risk = (d.proxy ? 40 : 0) + (d.hosting ? 15 : 0) + (isPrivate(ip) ? -100 : 0);
-    const riskLabel = risk >= 40 ? (fa ? "بالا" : "high") : risk >= 15 ? (fa ? "متوسط" : "medium") : (fa ? "پایین" : "low");
+    let geo: Geo | null = null;
+    let geoSource = "";
+    const tried: string[] = [];
+    for (const pr of providers) {
+      const j = await getJson(pr.url).catch(() => null);
+      tried.push(`${pr.name}${j ? "" : " ✗"}`);
+      const picked = j ? pr.pick(j) : null;
+      if (picked) { geo = picked; geoSource = pr.name; break; }
+    }
+
+    const asns: any[] = asn?.data?.asns ?? [];
+    const prefix = asn?.data?.resource ?? "";
+    const org = rdap?.name ?? geo?.org ?? asns[0]?.holder ?? "";
+    const country = geo?.country ?? rdap?.country ?? "";
+    const cc = geo?.cc ?? (rdap?.country === "IR" ? "IR" : "");
+    const ptr = (rev?.Answer ?? []).map((a: any) => String(a.data).replace(/\.$/, "")).join(", ");
+    const handle = rdap?.handle ?? "";
+
+    // Reported facts only. A provider that does not publish these fields has not
+    // told us "no" — so they are printed as unreported, not as a clean bill.
+    const signals: string[] = [];
+    if (geo?.proxy !== undefined) signals.push(geo.proxy ? (fa ? "🕵️ پروکسی/VPN: <b>بله</b> (گزارش منبع)" : "🕵️ proxy: yes") : (fa ? "🕵️ پروکسی/VPN: خیر" : "🕵️ proxy: no"));
+    if (geo?.hosting !== undefined) signals.push(geo.hosting ? (fa ? "🏢 میزبانی/دیتاسنتر: <b>بله</b>" : "🏢 hosting: yes") : (fa ? "🏢 میزبانی/دیتاسنتر: خیر" : "🏢 hosting: no"));
+    if (geo?.mobile !== undefined) signals.push(geo.mobile ? (fa ? "📱 شبکه موبایل: بله" : "📱 mobile: yes") : (fa ? "📱 شبکه موبایل: خیر" : "📱 mobile: no"));
+    const unreported = ["proxy", "hosting", "mobile"].filter((k) => (geo as any)?.[k] === undefined);
+
+    const line = (label: string, value?: string | number) =>
+      value === undefined || value === "" || value === null
+        ? `• ${label}: <i>${fa ? "گزارش نشده" : "not reported"}</i>\n`
+        : `• ${label}: ${value}\n`;
 
     await h.reply(
       `📡 <b>${tgEscape(ip)}</b> — ${fa ? "استعلام شبکه" : "network intel"}\n\n` +
-        `🌍 ${tgEscape([d.city, d.regionName, d.country].filter(Boolean).join(", ") || "—")}  ${flagEmoji(d.countryCode)}\n` +
-        `🏢 ${tgEscape(org)}\n` +
-        `🛰 ASN: ${asns.length ? asns.map((a: any) => `<a href="https://bgp.tools/as/${a.asn}">AS${a.asn}</a>`).join(", ") : code(d.as ?? "—")}\n` +
-        (prefix ? `📦 ${fa ? "پیشوند اعلام‌شده" : "announced prefix"}: <code>${tgEscape(prefix)}</code> · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>\n` : "") +
-        `📬 ${fa ? "DNS معکوس" : "reverse DNS"}: <code>${tgEscape(ptr || "—")}</code>\n` +
-        `🕐 ${d.timezone ?? "—"}${d.lat ? `  📍 <code>${d.lat},${d.lon}</code>` : ""}\n\n` +
-        `🧪 <b>${fa ? "وضعیت تهدید" : "Threat posture"}</b>: ${riskLabel} ${bar(risk, 10, "▓", "░")}\n` +
-        flags.join("\n") +
-        `\n\n🔗 ${fa ? "منابع" : "Sources"}: <a href="https://ipinfo.io/${encodeURIComponent(ip)}">ipinfo</a> · ` +
-        `<a href="https://www.shodan.io/host/${encodeURIComponent(ip)}">shodan</a> · ` +
+        `🌍 ${fa ? "موقعیت" : "location"}: ${geo ? tgEscape([geo.city, geo.region, country].filter(Boolean).join(", ")) : `<i>${fa ? "هیچ‌کدام از منابع ژئو پاسخ ندادند" : "no geo provider answered"}</i>`} ${cc ? flagEmoji(cc) : ""}\n` +
+        line(fa ? "سازمان" : "org", org ? tgEscape(org) : undefined) +
+        line("ASN", asns.length ? asns.map((a: any) => `<a href="https://bgp.tools/as/${a.asn}">AS${a.asn}</a>`).join(", ") : geo?.asn ? `<a href="https://bgp.tools/as/${geo.asn.replace(/^AS/, "")}">${tgEscape(geo.asn)}</a>` : undefined) +
+        line(fa ? "مشغل" : "ISP", geo?.isp ? tgEscape(geo.isp) : undefined) +
+        line(fa ? "پیشوند اعلام‌شده" : "announced prefix", prefix ? `<code>${tgEscape(prefix)}</code> · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>` : undefined) +
+        line(fa ? "DNS معکوس" : "reverse DNS", ptr ? `<code>${tgEscape(ptr)}</code>` : undefined) +
+        line(fa ? "منطقهٔ زمانی" : "timezone", geo?.tz ? tgEscape(geo.tz) : undefined) +
+        line(fa ? "مختصات" : "coordinates", geo?.lat ? `<code>${geo.lat},${geo.lon}</code>` : undefined) +
+        (handle || rdap?.startAddress ? `• RDAP: <code>${tgEscape(handle || `${rdap.startAddress}-${rdap.endAddress}`)}</code>\n` : "") +
+        `\n🧪 <b>${fa ? "نشانه‌های امنیتی" : "security signals"}</b>\n` +
+        (signals.length ? signals.map((x) => `• ${x}`).join("\n") : (fa ? "• هیچ‌کدام از منابع، فیلد پروکسی/میزبانی را برنگرداندند." : "• providers reported no flags")) +
+        (unreported.length
+          ? `\n<i>${fa ? `«${unreported.join(" · ")}» را منبع ژئو منتشر نمی‌کند؛ نبودش یعنی «نامعلوم»، نه «سالم».` : "unreported ≠ clean"}</i>`
+          : "") +
+        `\n\n🔗 ${fa ? "بررسی دستی" : "verify"}: <a href="https://www.shodan.io/host/${encodeURIComponent(ip)}">shodan</a> · ` +
         `<a href="https://viz.greynoise.io/ip/${encodeURIComponent(ip)}">greynoise</a> · ` +
-        `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}">abuseipdb</a>`,
+        `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}">abuseipdb</a> · ` +
+        `<a href="https://ipinfo.io/${encodeURIComponent(ip)}">ipinfo</a>\n` +
+        `<i>${fa ? "منابع" : "sources"}: ${geoSource ? tgEscape(geoSource) : "—"} · RIPEstat · RDAP · Google DNS\n` +
+        `${fa ? "امتحان‌شده" : "tried"}: ${tgEscape(tried.join(" · "))}</i>`,
       kb(
         [{ text: "🔁 " + (fa ? "IP دیگر" : "Another IP"), cb: "u:ip" }, { text: "🧭 DNS", cb: "u:dns" }],
         [{ text: "🛡 " + (fa ? "مرکز امنیت" : "Security hub"), cb: "sec:home" }, { text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "u:home" }],

@@ -113,11 +113,19 @@ export class Store {
     return this.env.DB.prepare(`SELECT * FROM repos WHERE full_name=?`).bind(full).first<RepoRow>().catch(() => null);
   }
 
-  /** Fresh-or-fetch: DB row younger than `ttlSec` wins, otherwise hit GitHub. */
-  async repoFresh(full: string, ttlSec = 1800) {
+  /**
+   * Fresh-or-fetch: DB row younger than `ttlSec` wins, otherwise hit GitHub.
+   *
+   * `token` is the *caller's* GitHub token when they linked an account. Without
+   * it this call ran anonymously — one shared bucket of 60 requests/hour for the
+   * whole deployment, which is why opening a repository could answer "not found"
+   * on a card whose button was pressed a second earlier. A linked user's 5000/h
+   * belongs to that user instead.
+   */
+  async repoFresh(full: string, ttlSec = 1800, token?: string) {
     const row = await this.repo(full);
     if (row && row.updated_at && Date.now() - row.updated_at < ttlSec * 1000) return row;
-    const gh = new GithubRest(this.env);
+    const gh = new GithubRest(this.env, token);
     const m = await gh.repo(full, 300).catch(() => null);
     if (!m) return row;
     await this.saveRepo({
@@ -237,13 +245,42 @@ export class Store {
     ).bind(Store.week(), userId, metric, value).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
   }
 
+  /**
+   * The weekly board: **humans only**.
+   *
+   * The bot's own account and the test identities used by the audit endpoints
+   * were competing on a public leaderboard (`Self` sat in second place with 18
+   * points, and the bot itself appeared first) — which reads as fake data even
+   * though every row is real. The filter is on identity, never on score:
+   *
+   *   • ids below 10^6 are the synthetic rows the seed/self-test writes
+   *   • `Self` is the identity `/selfcheck` runs as
+   *   • a username ending in `bot` is a bot account (the bot's own included)
+   *   • banned users do not rank
+   */
   async leaderboard(metric = "queries", limit = 10) {
     const { results } = await this.env.DB.prepare(
       `SELECT l.user_id, l.value, u.first_name, u.username, u.level FROM leaderboard l
        LEFT JOIN users u ON u.id = l.user_id
-       WHERE l.week=? AND l.metric=? ORDER BY l.value DESC LIMIT ?`,
+       WHERE l.week=? AND l.metric=?
+         AND l.user_id >= 1000000
+         AND COALESCE(u.first_name,'') <> 'Self'
+         AND LOWER(COALESCE(u.username,'')) NOT LIKE '%bot'
+         AND COALESCE(u.banned,0) = 0
+       ORDER BY l.value DESC LIMIT ?`,
     ).bind(Store.week(), metric, limit).all<any>().catch(() => ({ results: [] as any[] }));
     return results ?? [];
+  }
+
+  /** Every row that can appear on a board — for the dashboard's totals. */
+  async leaderboardSize(metric = "queries") {
+    const row = await this.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM leaderboard l LEFT JOIN users u ON u.id = l.user_id
+       WHERE l.week=? AND l.metric=? AND l.user_id >= 1000000
+         AND COALESCE(u.first_name,'') <> 'Self' AND LOWER(COALESCE(u.username,'')) NOT LIKE '%bot'
+         AND COALESCE(u.banned,0) = 0`,
+    ).bind(Store.week(), metric).first<{ n: number }>().catch(() => null);
+    return Number(row?.n ?? 0);
   }
 
   // ── co-star graph (recommendation engine) ───────────────────────────────

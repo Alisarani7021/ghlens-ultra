@@ -71,6 +71,42 @@ export class Admin {
     );
   }
 
+  /**
+   * Grant or refuse a Pro request.
+   *
+   * The admin card is the other half of `me:pro`: the user's request is only a
+   * recorded promise until someone with admin rights acts on it, and the user
+   * should hear the outcome in the same chat they asked from.
+   */
+  async setPlan(h: H, uidRaw: string, plan: "pro" | "free") {
+    const fa = h.loc === "fa";
+    const uid = Number(uidRaw);
+    if (!uid) return h.toast("❌", true);
+    await h.env.DB.prepare(`UPDATE users SET plan=? WHERE id=?`).bind(plan, uid)
+      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    const at = Date.now();
+    const approved = plan !== "free";
+    await h.env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+      .bind(`planreq:${uid}`, JSON.stringify({ status: approved ? "granted" : "denied", at, plan }), at)
+      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    await h.tg.sendMessage(
+      uid,
+      approved
+        ? `🎉 <b>${fa ? "پلن Pro فعال شد" : "Pro granted"}</b>\n\n` +
+          `<blockquote>${fa ? "از همین لحظه سقف AI روزانه‌ات بالا رفت، کاوش عمیق بی‌سقف است و دانلود محدودیت ندارد. در «⚡ پلن‌ها» قابل مشاهده است." : "Your plan is now Pro."}</blockquote>`
+        : `🆓 <b>${fa ? "پلن Free" : "Free plan"}</b>\n\n` +
+          `<blockquote>${fa ? "درخواست Pro فعلاً تأیید نشد. ربات برای همه رایگان است و همین سطح هم کار می‌کند؛ هر وقت لازم شد دوباره درخواست بده." : "Request not granted for now."}</blockquote>`,
+      { parse_mode: "HTML" },
+    ).catch(() => null);
+    return h.reply(
+      `${approved ? "✅" : "🆓"} <b>${fa ? "پلن ثبت شد" : "plan saved"}</b>\n\n` +
+        `<code>${uid}</code> → <b>${plan}</b>\n` +
+        `<i>${fa ? "به خود کاربر هم پیام رفت." : "the user was notified"}</i>`,
+      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "adm:home" }]]),
+      !!h.cbId,
+    );
+  }
+
   async flags(h: H) {
     const fa = h.loc === "fa";
     if (!isAdmin(h.env, h.u.id)) return;

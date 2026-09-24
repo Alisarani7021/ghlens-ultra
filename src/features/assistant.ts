@@ -242,8 +242,25 @@ export class Assistant {
   /** AI dossier: structured, cached, honest. */
   async dossier(h: H, full: string) {
     const fa = h.loc === "fa";
-    const meta = await h.store.repoFresh(full, 3600);
-    if (!meta) return h.reply(fa ? "❌ مخزن پیدا نشد." : "❌ not found", kb([{ text: "◀️", cb: "a:home" }]), true);
+    // with the caller's token when they linked one: the anonymous bucket is a
+    // shared 60 requests/hour and a busy bot drains it within minutes, which is
+    // how this button answered «پیدا نشد» for a repository GitHub was serving.
+    const meta = await h.store.repoFresh(full, 3600, h.userToken);
+    if (!meta) {
+      const why = await h.gh().rateWhy(full).catch(() => null);
+      return h.reply(
+        `❌ <b>${tgEscape(full)}</b>\n\n` +
+          `<blockquote>${fa ? "داده‌های این مخزن از گیت‌هاب خوانده نشد." : "GitHub did not return this repository."}</blockquote>` +
+          (why ? `\n<code>${tgEscape(why.slice(0, 200))}</code>` : "") +
+          `\n\n<i>${fa ? "بدون توکن گیت‌هاب، سهمیهٔ مشترک ۶۰ درخواست در ساعت است. با «🔗 اتصال گیت‌هاب» در پروفایل، سهمیهٔ خودت (۵۰۰۰ در ساعت) استفاده می‌شود و پرایوت‌ها هم باز می‌شوند." : "Link GitHub for a private 5000/h quota."}</i>`,
+        kb(
+          [{ text: "🔗 " + (fa ? "سهمیهٔ خودم را وصل کن" : "Use my own quota"), cb: "me:link" }],
+          [{ text: "🔁 " + (fa ? "دوباره" : "Retry"), cb: `ai:repo:${full}` }],
+          [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "a:home" }],
+        ),
+        !!h.cbId,
+      );
+    }
 
     const cachedSummary = meta.ai_summary_fa;
     const gql = new GithubRest(h.env);

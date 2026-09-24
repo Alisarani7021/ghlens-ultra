@@ -1570,7 +1570,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "ref") return profile.referral(h);
         if (action === "interests") return profile.interests(h);
         if (action === "t") return profile.toggleInterest(h, args[0] ?? "");
-        if (action === "plan" || action === "pro") return profile.plans(h);
+        if (action === "plan") return profile.plans(h);
+        // the Pro flow: ask → confirm → submit, with a way back out
+        if (action === "pro") return profile.proRequest(h);
+        if (action === "pro2") return profile.submitPro(h);
+        if (action === "procancel") return profile.cancelPro(h);
         if (action === "link") return githubLink(h);
         if (action === "token") return githubTokenPrompt(h);
         if (action === "unlink") return githubUnlink(h);
@@ -1738,6 +1742,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "flags") return admin.flags(h);
         if (action === "flag") return admin.setFlag(h, args[0] ?? "", args[1] ?? "on");
         if (action === "broadcast") return admin.broadcast(h);
+        if (action === "plan") return admin.setPlan(h, args[0] ?? "", args[1] === "pro" ? "pro" : "free");
         if (action === "aitest") return admin.aitest(h);
         if (action === "podcast") return h.toast(fa ? "🎙 حذف شد" : "🎙 removed", true);
         if (action === "snapshot") {
@@ -2283,7 +2288,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 270 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 274 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

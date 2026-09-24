@@ -709,6 +709,19 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("caption: says the prompt came from the fallback", caption.includes("از خودِ متن"));
 }
 
+// ── the leaderboard is humans only ────────────────────────────────────────
+{
+  /* The bot and the audit identities were ranking first and second on a public
+     board. The filter lives in SQL, so the guard reads the query: if someone
+     drops a condition, the test fails instead of the board filling with bots. */
+  const db = readFileSync("src/core/db.ts", "utf8");
+  const q = db.slice(db.indexOf("async leaderboard("), db.indexOf("async leaderboardSize("));
+  ok("board: the bot's own account is excluded", q.includes("NOT LIKE '%bot'"));
+  ok("board: self-test identities are excluded", q.includes("<> 'Self'"));
+  ok("board: synthetic id rows are excluded", /user_id >= 1000000/.test(q));
+  ok("board: banned users do not rank", /banned,0\) = 0/.test(q));
+}
+
 // ── no model call may outlive the update's budget ─────────────────────────
 {
   /* A fixed 90 s socket timeout on a pooled key is not a timeout at all: the

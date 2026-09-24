@@ -62,13 +62,30 @@ export class Downloader {
 
   async choose(h: H, full: string) {
     const fa = h.loc === "fa";
-    const gh = new GithubRest(h.env);
+    // the caller's own token when linked: the anonymous bucket (60/h, shared by
+    // the whole deployment) is what made this button answer «پیدا نشد» for a
+    // repository GitHub was perfectly happy to serve
+    const gh = h.gh();
+    await h.loading(fa ? "📥 آماده‌سازی دانلود…" : "📥 preparing…");
     const [repo, branches, tags] = await Promise.all([
       gh.repo(full, 900).catch(() => null),
       gh.branches(full, 12).catch(() => [] as any[]),
       gh.tags(full, 12).catch(() => [] as any[]),
     ]);
-    if (!repo) return h.reply(fa ? "مخزن پیدا نشد." : "Repo not found.", kb([{ text: "◀️", cb: "d:home" }]), !!h.cbId);
+    if (!repo) {
+      const why = await gh.rateWhy(full).catch(() => null);
+      return h.reply(
+        `❌ <b>${tgEscape(full)}</b>\n\n` +
+          `<blockquote>${fa ? "فرمت‌ها و برنچ‌ها خوانده نشد." : "could not read the repo."}</blockquote>` +
+          (why ? `\n<code>${tgEscape(why.slice(0, 200))}</code>` : "") +
+          `\n\n<i>${fa ? "با اتصال گیت‌هاب سهمیهٔ خودت (۵۰۰۰ در ساعت) استفاده می‌شود." : "Link GitHub for 5000/h."}</i>`,
+        kb(
+          [{ text: "🔗 " + (fa ? "حساب گیت‌هاب را وصل کن" : "Connect GitHub account"), cb: "me:link" }],
+          [{ text: "🔁 " + (fa ? "دوباره" : "Retry"), cb: `d:repo:${full}` }],
+        ),
+        !!h.cbId,
+      );
+    }
     const sizeMb = (repo.size ?? 0) / 1024;
     const est = sizeMb > 100 ? `~${(sizeMb / 1.7).toFixed(0)} MB` : `~${sizeMb.toFixed(1)} MB`;
 
