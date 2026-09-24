@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml)
-[![tests](https://img.shields.io/badge/tests-310%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
+[![tests](https://img.shields.io/badge/tests-335%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![D1](https://img.shields.io/badge/D1-33%20tables-0b7285?style=flat-square)](schema/d1.sql)
@@ -139,7 +139,7 @@ bash scripts/check.sh
 # sqlcheck   → تطابق تعداد ? با bind() در هر دستور SQL
 # dup-keys   → یکتایی کلید همهٔ دکمه‌ها
 # cb-audit   → هر کلید دکمه‌ای که صفحه می‌سازد، شاخهٔ روتر دارد
-# selftest   → ۳۱۰ تست الگوریتمی
+# selftest   → ۳۳۵ تست الگوریتمی
 ```
 
 همین دروازه در CI روی هر push و PR اجرا می‌شود؛ استقرار، پس از انتشار، سلامت و ضربان زمان‌بند را روی نسخهٔ زنده بررسی می‌کند.

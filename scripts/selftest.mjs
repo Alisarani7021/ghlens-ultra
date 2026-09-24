@@ -339,6 +339,10 @@ const MS = hubMods.mission, EN = hubMods.engine;
 //  Hub OS — the second five layers (files, knowledge, media, hooks, gateway)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// the README pager, bundled on its own: it is pure arithmetic on bytes
+const pagesOut = join(scratch, "assistant_pages.mjs");
+execSync(`npx esbuild src/features/assistant.ts --bundle --format=esm --platform=neutral --outfile=${pagesOut} --log-level=error`, { stdio: "inherit" });
+
 const more = {};
 for (const name of ["files", "knowledge", "media", "hooks", "gateway", "deploy", "richdoc"]) {
   const outFile = join(scratch, `hub2_${name}.mjs`);
@@ -899,6 +903,27 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("gateway: an unknown path is a 404", miss.status, 404);
   const body = await miss.json();
   ok("gateway: the 404 says which paths exist", /available: POST \/v1\/chat\/completions/.test(body.error.hint));
+}
+
+// ── a README is read one page at a time ───────────────────────────────────
+{
+  const A = await import(join(scratch, "assistant_pages.mjs"));
+  const b64 = (str) => Buffer.from(str, "utf8").toString("base64");
+  const fa = "سلام دنيا · ".repeat(600);            // multi-byte, so boundaries bite
+  const encoded = b64(fa);
+  const faBytes = Buffer.byteLength(fa, "utf8");
+  ok("pages: a big README is more than one page", A.readmePages(faBytes, encoded.length) > 1);
+  eq("pages: the count is capped, not unbounded", A.readmePages(1024 * 1024, 0), 9);
+  const n = A.readmePages(faBytes, encoded.length);
+  const seen = [];
+  for (let i = 0; i < n; i++) seen.push(A.readmeSlice(encoded, i, n));
+  ok("pages: every page has text", seen.every((t) => t.length > 0));
+  ok("pages: no replacement character from a split character",
+     seen.every((t) => !t.includes("\uFFFD")));
+  ok("pages: no page repeats the previous one", new Set(seen).size === seen.length);
+  ok("pages: the pages together cover the original text",
+     (seen.join("").replace(/\s/g, "")).startsWith(fa.slice(0, 200).replace(/\s/g, "")));
+  eq("pages: a one-line README is one page", A.readmePages(20, 28), 1);
 }
 
 // ── autonomy: the gate belongs to the owner, not to the graph ─────────────

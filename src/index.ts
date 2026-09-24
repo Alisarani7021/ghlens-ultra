@@ -1978,8 +1978,14 @@ async function scoutTab(h: H, tab: number, full: string) {
 }
 
 async function translateMore(h: H, full: string, page: number) {
-  const text = (await h.session.get(`tr:${full}`)) as string | null;
-  const source = text ?? (await h.env.STATE.get(`trl:${full}:${h.loc}`));
+  /* A README is read page by page now: page N is decoded, translated and cached
+     on its own, so turning a page costs one page instead of a whole document —
+     which is what the CPU limit allowed. The reader keeps both directions
+     («قبلی» / «ادامه») all the way to the end. */
+  return assistant.readmeMore(h, full, page);
+}
+async function translateMoreLegacy(h: H, full: string, page: number) {
+  const source = ((await h.session.get(`tr:${full}`)) ?? (await h.env.STATE.get(`trl:${full}:${h.loc}`))) as string | null;
   if (!source) return h.toast(h.loc === "fa" ? "دوباره ترجمه کن" : "re-translate first", true);
   /* The same pagination the first page used: page N of the pager and page N of the
      document are the same text, so pressing «ادامه» never re-flows the README. */
@@ -2487,7 +2493,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 310 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 335 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

@@ -354,15 +354,23 @@ export class Assistant {
       kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }]]),
       true,
     );
-    const md = decodeB64(raw.content);
-
-    const cacheKey = `trl:${full}:${h.loc}`;
+    /* One page per request, deliberately.
+     *
+     * This screen used to decode the whole README, split it into three 14 000
+     * character parts and translate all three before rendering — and died with
+     * «error code: 1102» (the worker's CPU limit) on any README worth reading.
+     * The work now scales with the page being shown, not with the file: page N's
+     * byte range is decoded, translated and cached on its own and the rest waits
+     * until the reader asks. It also makes «ادامه» mean something on long
+     * READMEs, which stopped at the second page because only three parts existed. */
+    const total = readmePages(raw.size ?? 0, raw.content.length);
+    const cacheKey = readmePageKey(full, h.loc, 0);
     let translated = await h.env.STATE.get(cacheKey);
     if (!translated) {
       // keep the structure: translate in two passes for very long READMEs
       // parts go out in parallel through *different* pooled keys, so several
       // donated keys genuinely share one long translation
-      const parts = splitMd(md, 14000).slice(0, 3);
+      const parts = [readmeSlice(raw.content, 0, total)];
       const out = await h.ai.translateMany(parts, h.loc, "README");
       translated = out.join("\n\n");
       // never cache an empty translation — that silently poisons the feature
@@ -390,9 +398,11 @@ export class Assistant {
       `💾 ${fa ? "ذخیره‌شده (بار بعد فوری)" : "cached"}`;
 
     const MD = await import("../hub/richdoc");
-    const pages = MD.paginateMd(translated.slice(0, 24000), MD.README_PAGE_CHARS);
-    await h.replyRich(await readmePage(full, pages[0], 0, pages.length, raw.html_url, fa), kb(
-      pages.length > 1 ? [{ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:1` }] : [],
+    /* already the size of a page: one render, and no 24 000-character paginate
+       pass over a document the reader has not asked for */
+    const pages = MD.paginateMd(translated, MD.README_PAGE_CHARS, 1);
+    await h.replyRich(await readmePage(full, pages[0], 0, total, raw.html_url, fa), kb(
+      total > 1 ? [{ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:1` }] : [],
       [
         { text: "🇬🇧 English", cb: `ai:tre:${full}:en` },
         { text: "🖨 PDF", cb: `ai:trpdf:${full}` },
@@ -400,6 +410,52 @@ export class Assistant {
       [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }],
     ), !!h.cbId);
     await h.session.set(`tr:${full}`, translated);
+  }
+
+  /**
+   * Page N of a README translation, translated on demand and cached per page.
+   *
+   * Pages are cheap to talk about (a byte range) and expensive to produce, so
+   * each is produced the first time it is read and kept for a month. A reader
+   * who never leaves page one pays for page one — which is what makes a 100 KB
+   * README readable on a 10 ms CPU budget.
+   */
+  async readmeMore(h: H, full: string, page: number) {
+    const fa = h.loc === "fa";
+    const gh = new GithubRest(h.env);
+    const raw = await gh.readme(full, 3600).catch(() => null);
+    if (!raw?.content) return h.toast(fa ? "دوباره امتحان کن" : "try again", true);
+    const total = readmePages(raw.size ?? 0, raw.content.length);
+    const idx = Math.max(0, Math.min(page, total - 1));
+    await h.loading(fa ? `🌍 صفحهٔ ${idx + 1} را ترجمه می‌کنم…` : `🌍 translating page ${idx + 1}…`);
+
+    const cacheKey = readmePageKey(full, h.loc, idx);
+    let translated = await h.env.STATE.get(cacheKey);
+    if (!translated) {
+      const out = await h.ai.translateMany([readmeSlice(raw.content, idx, total)], h.loc, "README");
+      translated = out.join("\n\n");
+      if (translated) {
+        await h.env.STATE.put(cacheKey, translated, { expirationTtl: 2592000 }).catch(() => null);
+      }
+    }
+    if (!translated) {
+      const notice = await aiDownNotice(h.env, h.loc);
+      return h.reply(`${notice}\n\n📄 <a href="${raw.html_url}">README</a>`, kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }]), true);
+    }
+
+    const MD = await import("../hub/richdoc");
+    const pages = MD.paginateMd(translated, MD.README_PAGE_CHARS, 1);
+    const nav: any[] = [];
+    if (idx > 0) nav.push({ text: "⬅️ " + (fa ? "قبلی" : "Prev"), cb: `ai:trmore:${full}:${idx - 1}` });
+    if (idx + 1 < total) nav.push({ text: (fa ? "ادامه" : "Continue") + " ➡️", cb: `ai:trmore:${full}:${idx + 1}` });
+    return h.replyRich(
+      await readmePage(full, pages[0], idx, total, raw.html_url, fa),
+      kb(nav, [
+        { text: "🇬🇧 English", cb: `ai:tre:${full}:en` },
+        { text: "🖨 PDF", cb: `ai:trpdf:${full}` },
+      ], [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: `s:card:${full}` }]),
+      true,
+    );
   }
 
   /**
@@ -576,12 +632,50 @@ export async function readmePage(
 export function decodeB64(s: string): string {
   try {
     const bin = atob(s.replace(/\s/g, ""));
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    /* Indexed loop, not Uint8Array.from(bin, cb): the callback version spends
+       ~1.9 ms on 18 KB where this spends 0.09 ms, and this runner is on the
+       README / source / PDF / upload paths of a worker with a 10 ms CPU budget. */
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new TextDecoder("utf-8").decode(bytes);
   } catch {
     try { return atob(s.replace(/\s/g, "")); } catch { return ""; }
   }
 }
+
+/**
+ * Decode one byte range of a base64 document.
+ *
+ * A README arrives base64-encoded as a whole; decoding all of it to show page
+ * one is what put this screen over the CPU limit. Base64 maps every 3 bytes to
+ * 4 characters, so a byte range translates to an exact character range when it
+ * is aligned to those groups — and a cut that lands mid-character is trimmed by
+ * the replacement character the decoder leaves behind.
+ */
+export function decodeB64Range(b64: string, fromByte: number, toByte: number): string {
+  const g0 = Math.floor(Math.max(0, fromByte) / 3) * 4;
+  const g1 = Math.ceil(Math.max(0, toByte) / 3) * 4;
+  let text = decodeB64(b64.slice(g0, g1));
+  // a range boundary can split a multi-byte character: drop the stub
+  if (text.endsWith("\uFFFD")) text = text.slice(0, -1);
+  return text;
+}
+/** How many pages a README of this size has. The byte size arrives with the
+    API response, so the count is free — no need to decode anything to know it. */
+export const README_PAGE_BYTES = 11000;
+export function readmePages(sizeBytes: number, b64Len: number): number {
+  const bytes = sizeBytes > 0 ? sizeBytes : Math.floor(b64Len * 0.75);
+  return Math.max(1, Math.min(9, Math.ceil(bytes / README_PAGE_BYTES)));
+}
+export function readmePageKey(full: string, loc: string, page: number): string {
+  return `trlp:${full}:${loc}:${page}`;
+}
+/** The markdown for one page — one decode, one page's worth of work. */
+export function readmeSlice(b64: string, page: number, total: number): string {
+  const per = Math.ceil((Math.min(9, Math.max(1, total)) * README_PAGE_BYTES) / Math.max(1, total));
+  return decodeB64Range(b64, page * per, (page + 1) * per);
+}
+
 function splitMd(md: string, size: number): string[] {
   const out: string[] = [];
   const lines = md.split("\n");

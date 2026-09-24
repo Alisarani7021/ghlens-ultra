@@ -19,8 +19,16 @@ export class Store {
     await this.env.DB.prepare(
       `INSERT INTO users (id, username, first_name, locale, referral_code, created_at, last_seen_at)
        VALUES (?,?,?,?,?,?,?)
-       ON CONFLICT(id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name,
-         last_seen_at=excluded.last_seen_at, locale=COALESCE(NULLIF(excluded.locale, ''), users.locale)`,
+       /* Names only ever move forward. An incoming *empty* name is a caller with
+          none to give — an audit impersonating the owner, a forwarded message
+          whose sender has no name — and writing it blanked a real person's row:
+          the audit that drove the owner's own id renamed him «Self» and pushed
+          him off his own leaderboard. A real rename is not empty, so it lands. */
+       ON CONFLICT(id) DO UPDATE SET
+         username=COALESCE(NULLIF(excluded.username, ''), users.username),
+         first_name=COALESCE(NULLIF(excluded.first_name, ''), users.first_name),
+         last_seen_at=excluded.last_seen_at,
+         locale=COALESCE(NULLIF(excluded.locale, ''), users.locale)`,
     ).bind(u.id, u.username ?? null, u.first_name ?? null, (locale ?? u.language_code?.slice(0, 2) ?? this.env.DEFAULT_LOCALE), randCode(u.id), now, now)
       .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
   }

@@ -93,7 +93,7 @@ export class GithubRest {
     return this.get(`/repos/${full}`, ttl);
   }
   readme(full: string, ttl = 3600) {
-    return this.get<{ content: string; encoding: string; name: string; path: string; html_url: string }>(`/repos/${full}/readme`, ttl);
+    return this.get<{ content: string; encoding: string; name: string; path: string; html_url: string; size?: number }>(`/repos/${full}/readme`, ttl);
   }
   languages(full: string, ttl = 86400) {
     return this.get<Record<string, number>>(`/repos/${full}/languages`, ttl);
