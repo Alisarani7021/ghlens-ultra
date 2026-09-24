@@ -358,8 +358,8 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"]]) {
-  const outFile = join(scratch, name === "wiring" ? "hub3_wiring.mjs" : "feat_cards.mjs");
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"]]) {
+  const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
 const DP = more.deploy;
@@ -774,6 +774,25 @@ const enc = (s) => new TextEncoder().encode(s);
   const pages = RD.paginateMd(Array.from({ length: 40 }, (_v, i) => `## s${i}\n\nمتن ${i}`).join("\n\n"), 400);
   ok("richdoc: pagination drops nothing", pages.join("\n").includes("متن 39") && pages.every((p) => p.length <= 400));
   eq("richdoc: the reader's page size is one constant", typeof RD.README_PAGE_CHARS, "number");
+
+  // maxPages=1 means «one full page», not «one block». The reader's first page
+  // (and every «ادامه» page) renders through this path; when it returned only
+  // the first block, the translated README looked empty — «nothing translates».
+  {
+    const small = Array.from({ length: 30 }, (_v, i) => `پاراگراف شمارهٔ ${i} با کمی متن`).join("\n\n");
+    const one = RD.paginateMd(small, RD.README_PAGE_CHARS, 1);
+    eq("richdoc: a small document is one whole page", one.length, 1);
+    ok("richdoc: that page carries every paragraph", one[0].includes("پاراگراف شمارهٔ 29"));
+
+    const big = Array.from({ length: 400 }, (_v, i) => `بخش ${i} — ${"متن بلند ".repeat(30)}`).join("\n\n");
+    const clipped = RD.paginateMd(big, RD.README_PAGE_CHARS, 1);
+    eq("richdoc: a long document is still one page", clipped.length, 1);
+    ok("richdoc: that page is full, not one block", clipped[0].length > RD.README_PAGE_CHARS - 2000);
+    ok("richdoc: and it never exceeds the page size", clipped[0].length <= RD.README_PAGE_CHARS + 400);
+    const two = RD.paginateMd(big, RD.README_PAGE_CHARS, 2);
+    eq("richdoc: maxPages=2 yields two pages", two.length, 2);
+    ok("richdoc: the second page is full too, not a stub", two[1].length > 1000);
+  }
 }
 
 // ── the leaderboard is humans only ────────────────────────────────────────
@@ -902,6 +921,26 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("license: the graphql shape is unwrapped", C.licenseText({ spdxId: "Apache-2.0" }), "Apache-2.0");
   eq("license: a stringified object never leaks", C.licenseText("[object Object]"), null);
   eq("license: nothing stays nothing", C.licenseText(null), null);
+
+  /* The card now carries a rich twin next to its plain text — the document the
+     reader actually sees. It must be a real document (heading, table, health
+     aside) and must degrade to sane legacy text when rich sends are refused. */
+  const card = new C.RepoCard({}, {});
+  const rendered = await card.render({
+    full_name: "oven-sh/bun", description: "Incredibly fast runtime", stars: 52000, forks: 1600,
+    watchers: 400, issues: 1200, language: "Zig", license: "MIT", topics: ["runtime", "javascript"],
+    pushed_at: new Date().toISOString(), created_at: "2021-01-01T00:00:00Z", contributors: 300,
+    health: 88, redFlags: [], languages: [{ name: "Zig", color: "#ec915c", bytes: 900 }, { name: "C", color: "#555", bytes: 100 }],
+  }, { loc: "fa" });
+  ok("card: the rich twin exists", typeof rendered.rich === "string" && rendered.rich.length > 200);
+  ok("card: it opens with the repo heading", rendered.rich.startsWith("<h1>📦 oven-sh/bun</h1>"));
+  ok("card: the stats are a real table", rendered.rich.includes("<table") && rendered.rich.includes("52k"));
+  ok("card: the language shares are tabulated", rendered.rich.includes("Zig") && rendered.rich.includes("90%"));
+  ok("card: no tag was re-escaped", !rendered.rich.includes("&lt;b&gt;"));
+  const { richToLegacy } = await import(join(scratch, "tg_rich.mjs"));
+  const legacyCard = richToLegacy(rendered.rich);
+  ok("card: the twin degrades to sane legacy text",
+     legacyCard.includes("oven-sh/bun") && legacyCard.includes("52k") && !/<(table|h1|aside)\b/.test(legacyCard));
 }
 
 // ── the gateway answers a human, and explains a wrong turn ────────────────

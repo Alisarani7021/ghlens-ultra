@@ -97,6 +97,73 @@ export const ul = (items: string[]) => `<ul>${items.map((i) => `<li>${i}</li>`).
 export const ol = (items: string[]) => `<ol>${items.map((i) => `<li>${i}</li>`).join("")}</ol>`;
 
 /**
+ * A screen the bot already renders as Telegram HTML → a rich document.
+ *
+ * The twelve scout tabs (and a few older screens) are written as escaped HTML
+ * with bold headings and emoji-led lines. Passing that through the *markdown*
+ * converter escapes every tag — literal `<b>` reaches the reader — so this
+ * converter takes the other side of the contract: the input is already escaped
+ * by construction, and the only job is to give the blocks document shape.
+ *
+ *   • a lone bold line (`📊 <b>repo</b> — title`) becomes the heading
+ *   • `• `-led and emoji-led item lines become list items
+ *   • a line that is nothing but <code> (a sparkline) becomes <pre>
+ *   • <blockquote> becomes an <aside>
+ *   • everything else stays a paragraph, joined with <br>
+ *
+ * Inline tags the rich parser shares with legacy HTML (b, i, u, s, code, a,
+ * tg-spoiler) pass through untouched — the content was escaped where it was
+ * written, and re-escaping here would print the tags as text.
+ */
+export function telegramHtmlToRich(html: string): string {
+  const lines = String(html ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  let para: string[] = [];
+  let items: string[] = [];
+  let titleDone = false;
+
+  const flushPara = () => {
+    if (para.length) { out.push(`<p>${para.join("<br>")}</p>`); para = []; }
+  };
+  const flushItems = () => {
+    if (items.length) { out.push(`<ul>${items.map((x) => `<li>${x}</li>`).join("")}</ul>`); items = []; }
+  };
+  const flush = () => { flushPara(); flushItems(); };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+
+    // the tab header: `📊 <b>repo</b> — عنوان` (or a plain lone bold line)
+    const head = /^[^<>]{0,8}?<b>(.+?)<\/b>(?:\s*[—–-]\s*(.*))?$/.exec(line);
+    if (head && !titleDone && !para.length && !items.length) {
+      out.push(`<h1>${head[1]}${head[2] ? ` — ${head[2]}` : ""}</h1>`);
+      titleDone = true;
+      continue;
+    }
+
+    // a sparkline: a line that is entirely <code>…</code>
+    if (/^<code>[\s\S]*<\/code>$/.test(line)) { flush(); out.push(`<pre>${line.replace(/^<code>|<\/code>$/g, "")}</pre>`); continue; }
+
+    // a quote block
+    if (/^<blockquote>[\s\S]*<\/blockquote>$/.test(line)) { flush(); out.push(`<aside>${line.replace(/^<blockquote>|<\/blockquote>$/g, "")}</aside>`); continue; }
+
+    // a list item: bullet-led or a bare bold label leading a section
+    if (/^[•\-*]\s+/.test(line) || /^(?:🌱|⚠️|✅|❌|🚀|📦)\s+<b>/.test(line)) {
+      flushPara();
+      items.push(line.replace(/^[•\-*]\s+/, ""));
+      continue;
+    }
+
+    // a bold label with content after it on the same line starts a paragraph
+    flushItems();
+    para.push(line);
+  }
+  flush();
+  return out.join("\n");
+}
+
+/**
  * A bordered, striped table with a caption — the shape that makes a feature list
  * scannable instead of a paragraph. Cells may only carry inline formatting
  * (Telegram's rule), so nothing here inserts block tags inside a cell.

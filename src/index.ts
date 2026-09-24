@@ -1969,14 +1969,19 @@ async function repoCard(h: H, full: string) {
   if (!m) return h.toast(h.loc === "fa" ? "❌ پیدا نشد" : "❌ not found", true);
   const meta = { ...m, full_name: m.full_name, stars: m.stargazers_count, forks: m.forks_count, watchers: m.watchers_count, issues: m.open_issues_count, languages: [], topics: m.topics ?? [], health: 0, redFlags: [], raw: m };
   const rendered = await h.card.render(meta, { loc: h.loc });
-  return h.reply(rendered.text, rendered.keyboard, true);
+  return h.replyRich(rendered.rich ?? rendered.text, rendered.keyboard, true);
 }
 
 async function scoutTab(h: H, tab: number, full: string) {
   const data = await fetchScoutRaw(h, full);
   if (!data) return h.toast("❌", true);
   const text = await scout.tab(h, data, tab);
-  return h.reply(text, scout.tabsKeyboard(h, full, tab), true);
+  /* The tab bodies are written as escaped Telegram HTML; the converter gives
+     them document shape (heading, lists, pre sparklines) without re-escaping
+     the tags the screen itself wrote. All twelve tabs become documents with
+     this one line. */
+  const { telegramHtmlToRich } = await import("./tg/rich");
+  return h.replyRich(telegramHtmlToRich(text), scout.tabsKeyboard(h, full, tab), true);
 }
 
 async function translateMore(h: H, full: string, page: number) {

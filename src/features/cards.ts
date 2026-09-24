@@ -67,10 +67,78 @@ export class RepoCard {
 
     const full = head + stats + (mode === "compact" ? "" : healthBlock + (langLines ? `\n${langLines}\n` : "") + meta2) + tail;
 
+    /* The rich twin of the card, built from the same facts with the document
+       builders — a real table for the numbers, an aside for the health meter.
+       The plain `text` above stays exactly as it was: it is what the share card,
+       the inline answers and the automatic fallback of sendRich still use. */
+    const rich = await this.renderRich(m, { fa, mode, health, meter, langs, total, flags, spark, gained });
+
     return {
       text: full,
+      rich,
       keyboard: this.keyboard(m, loc),
     };
+  }
+
+  /** The card as a rich document: headings, a stats table, a language table. */
+  private async renderRich(
+    m: RepoMeta,
+    o: { fa: boolean; mode: CardMode; health: number; meter: string; langs: any[]; total: number; flags: string[]; spark: string; gained?: number },
+  ): Promise<string> {
+    const { richDoc } = await import("../hub/richdoc");
+    const { p: rp, aside, table, footer } = await import("../tg/rich");
+    const fa = o.fa;
+    const short = m.full_name.split("/")[1] ?? m.full_name;
+
+    const statRows: string[][] = [
+      [fa ? "متریک" : "metric", fa ? "مقدار" : "value"],
+      ["⭐ " + (fa ? "ستاره" : "stars"), `<b>${fmt(m.stars)}</b>`],
+      ["🍴 " + (fa ? "فورک" : "forks"), `<b>${fmt(m.forks)}</b>`],
+      ["🐞 " + (fa ? "ایssueهای باز" : "open issues"), fmt(m.issues)],
+      ["👀 " + (fa ? "دیده‌بان" : "watchers"), fmt(m.watchers ?? 0)],
+    ];
+    if (m.releases) statRows.push(["🏷 " + (fa ? "نسخه‌ها" : "releases"), fmt(m.releases)]);
+
+    const langRows: string[][] = [];
+    if (o.langs.length) {
+      langRows.push([fa ? "زبان" : "language", fa ? "سهم" : "share"]);
+      for (const l of o.langs) {
+        const pct = Math.round(((l.bytes ?? 0) / o.total) * 100);
+        langRows.push([`${dot(l.color)} ${tgEscape(l.name)}`, `<b>${pct}%</b> ${bar(pct, 8)}`]);
+      }
+    }
+
+    const body = [
+      m.description ? rp(`${i(truncate(m.description, 220))}`) : "",
+      m.homepage ? rp(`🔗 ${link(fa ? "وب‌سایت" : "Homepage", m.homepage)}`) : "",
+      table(statRows, { caption: `📦 ${tgEscape(short)} · ${fa ? "آمار زندهٔ گیت‌هاب" : "live GitHub stats"}` }),
+      o.mode === "compact" ? "" :
+        aside(
+          `${fa ? "سلامت پروژه" : "Project health"}: <b>${o.health}/100</b>  ${o.meter}` +
+          (m.stars_per_day ? `<br>${fa ? "سرعت رشد" : "velocity"}: <b>${m.stars_per_day}</b> ⭐/${fa ? "روز" : "day"}` : "") +
+          (o.spark ? `<br>📈 <code>${o.spark}</code>${o.gained ? `  <b>+${fmt(o.gained)}</b> ⭐` : ""}` : ""),
+          fa ? "سلامت پروژه" : "project health",
+        ),
+      o.mode === "compact" || !langRows.length ? "" : table(langRows, { caption: fa ? "🧩 ترکیب زبان‌ها" : "🧩 languages" }),
+      o.mode === "compact" ? "" :
+        rp(
+          [m.language ? `🧩 <code>${tgEscape(m.language)}</code>` : "",
+           m.license ? `⚖️ ${tgEscape(m.license)}` : `⚠️ ${fa ? "بدون مجوز" : "no license"}`,
+           m.archived ? `📦 ${fa ? "آرشیو شده" : "archived"}` : "",
+           (m.topics as string[] | undefined)?.length ? `🏷 ${(m.topics ?? []).slice(0, 8).map((t) => code("#" + t)).join(" ")}` : "",
+           `🕒 ${fa ? "آخرین پوش" : "last push"}: ${rel(m.pushed_at, fa)}`,
+           `👥 ${fmt(m.contributors ?? 0)} ${fa ? "مشارکت‌کننده" : "contributors"}`,
+          ].filter(Boolean).join(" · "),
+        ),
+      o.flags.length ? aside(`⚠️ ${o.flags.join(" • ")}`, fa ? "نکات هشدار" : "flags") : "",
+    ].filter(Boolean).join("\n");
+
+    return richDoc({
+      title: `📦 ${tgEscape(m.full_name)}`,
+      meta: `${fa ? "سلامت" : "health"} <b>${o.health}/100</b> · ⭐ <b>${fmt(m.stars)}</b> · 🍴 <b>${fmt(m.forks)}</b>${m.language ? ` · 🧩 <code>${tgEscape(m.language)}</code>` : ""}`,
+      body,
+      footer: `<a href="https://github.com/${m.full_name}">github.com/${tgEscape(m.full_name)}</a> · <a href="https://github.com/${m.full_name}/stargazers">${fa ? "ستاره‌دهندگان" : "stargazers"}</a>`,
+    });
   }
 
   /** 8 primary + 6 deep actions per repo — every one is a real feature. */

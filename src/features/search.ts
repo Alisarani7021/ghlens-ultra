@@ -176,7 +176,7 @@ export class SearchFeature {
       { ...m, full_name: m.full_name, stars: m.stargazers_count, forks: m.forks_count, watchers: m.watchers_count, issues: m.open_issues_count, languages: [], topics: m.topics ?? [], health: 0, redFlags: [], raw: m },
       { loc: h.loc },
     );
-    await h.reply(rendered.text, rendered.keyboard, !!h.cbId);
+    await h.replyRich(rendered.rich ?? rendered.text, rendered.keyboard, !!h.cbId);
   }
 
   /**

@@ -32,23 +32,40 @@ export class TrendingFeature {
     }
 
     const slice = rows.slice(page * 10, page * 10 + 10);
-    const head = `<b>${this.titles(h.loc)[period]}</b>  ${language !== "all" ? `• ${tgEscape(language)}` : ""}\n\n`;
 
-    const body = slice
-      .map((r: any, idx: number) => {
+    /* The board as a document: one bordered table for the ranking (rank, repo,
+       stars, new stars) and a list underneath that keeps each repo's
+       description, language and health — the numbers in the table, the context
+       in the list, nothing glued into one emoji-led line. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table, ul } = await import("../tg/rich");
+    const medal = (rank: number) => rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : String(rank);
+    const tableRows: string[][] = [
+      ["#", fa ? "مخزن" : "repository", "⭐", fa ? "جدید" : "new"],
+      ...slice.map((r: any, idx: number) => {
         const rank = page * 10 + idx + 1;
-        const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}.`;
-        const delta = r.gained ? ` <b>+${fmt(r.gained)}</b> ⭐` : "";
-        const vel = r.velocity ? ` · 🚀 ${r.velocity}/day` : "";
-        return (
-          `${medal} <b>${tgEscape(r.full_name)}</b>\n` +
-          (r.description ? `   ${i(truncate(r.description, 95))}\n` : "") +
-          `   ⭐ ${fmt(r.stars)}${delta}${vel}${r.language ? ` · 🧩 ${tgEscape(r.language)}` : ""}\n` +
-          (r.topics?.length ? `   ${r.topics.slice(0, 3).map((t: string) => code("#" + t)).join(" ")}\n` : "") +
-          (r.quality ? `   ${fa ? "سلامت" : "health"}: ${r.quality}/100 · 🕒 ${rel(r.pushed_at, fa)}\n` : "")
-        );
-      })
-      .join("\n");
+        return [
+          medal(rank),
+          tgEscape(r.full_name),
+          fmt(r.stars),
+          r.gained ? `<b>+${fmt(r.gained)}</b>` : (r.velocity ? `🚀 ${r.velocity}/d` : "—"),
+        ];
+      }),
+    ];
+    const descItems = slice
+      .filter((r: any) => r.description)
+      .map((r: any) => {
+        const bits = [
+          `<b>${tgEscape(r.full_name)}</b>`,
+          `<i>${tgEscape(truncate(r.description, 90))}</i>`,
+          r.language ? `🧩 ${tgEscape(r.language)}` : "",
+          r.quality ? `${fa ? "سلامت" : "health"} ${r.quality}/100` : "",
+          r.pushed_at ? `🕒 ${rel(r.pushed_at, fa)}` : "",
+        ].filter(Boolean);
+        return bits.join(" · ");
+      });
+    const body = table(tableRows, { caption: fa ? "⭐ ستارهٔ کل · ستارهٔ جدید (یا سرعت رشد روزانه)" : "⭐ total · new stars (or daily velocity)" }) +
+      (descItems.length ? "\n" + ul(descItems) : "");
 
     const rowsKb = slice.slice(0, 8).map((r: any, i2: number) => [{ text: `${page * 10 + i2 + 1}. ${r.full_name}`, cb: `s:go:${r.full_name}` }]);
     const keyboard = kb(
@@ -68,7 +85,7 @@ export class TrendingFeature {
       ],
     );
 
-    await h.reply(head + body, keyboard, !!h.cbId);
+    await h.replyRich(richDoc({ title: `🔥 ${this.titles(h.loc)[period]}${language !== "all" ? ` · ${tgEscape(language)}` : ""}`, meta: fa ? `صفحهٔ ${page + 1} از ${Math.max(1, Math.ceil(rows.length / 10))} · دکمهٔ هر مخزن زیر جدول` : `page ${page + 1} · tap a repo below`, body }), keyboard, !!h.cbId);
     await h.store.event(h.u.id, "trending", `${period}:${language}`);
   }
 

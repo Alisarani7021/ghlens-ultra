@@ -23,16 +23,32 @@ export class ProfileFeature {
     const rank = await this.rank(h);
     const github = u?.github_login;
 
-    await h.reply(
-      `👤 <b>${tgEscape(u?.first_name ?? h.u.first_name ?? "—")}</b>${u?.username ? ` <code>@${tgEscape(u.username)}</code>` : ""}\n` +
-        (github ? `🐙 GitHub: <a href="https://github.com/${tgEscape(github)}">@${tgEscape(github)}</a>\n` : "") +
-        `\n🎖 ${fa ? "سطح" : "Level"} <b>${level}</b> ${"⭐".repeat(Math.min(5, Math.ceil(level / 7)))}   ` +
-        `🏆 ${fa ? "رتبه هفتگی" : "weekly rank"}: <b>${rank ? "#" + rank : "—"}</b>\n` +
-        `📈 XP: <b>${fmt(xp)}</b> / ${fmt(Math.round(nextAt))}  ${bar(pct, 12)} ${pct}%\n` +
-        `💠 ${fa ? "پلن" : "plan"}: <b>${u?.plan ?? "free"}</b>   🔎 ${fa ? "جست‌وجو" : "queries"}: ${u?.daily_queries ?? 0}\n` +
-        `⭐ ${fa ? "علاقه‌مندی" : "favourites"}: <b>${favs}</b>   🔔 ${fa ? "اشتراک" : "subs"}: <b>${subs}</b>\n\n` +
-        (badges.length ? `🎖 ${fa ? "نشان‌ها" : "badges"}: ${badges.join(" ")}\n\n` : "") +
-        (interests.length ? `🧠 ${fa ? "علاقه‌مندی‌ها" : "interests"}: ${interests.map((t) => code(t)).join(" ")}\n` : `<i>${fa ? "علاقه‌مندی‌هایت را تنظیم کن تا فید شخصی‌سازی‌شده بگیری." : "Set interests for a personalised feed."}</i>`),
+    /* The profile as a document: a stats table, the XP meter as an aside,
+       badges and interests as their own lines. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table, aside, p } = await import("../tg/rich");
+    await h.replyRich(
+      richDoc({
+        title: `👤 ${tgEscape(u?.first_name ?? h.u.first_name ?? "—")}${u?.username ? ` <code>@${tgEscape(u.username)}</code>` : ""}`,
+        meta: github ? `🐙 GitHub: <a href="https://github.com/${tgEscape(github)}">@${tgEscape(github)}</a>` : "",
+        body: [
+          table([
+            [fa ? "شاخص" : "stat", fa ? "مقدار" : "value"],
+            [`🎖 ${fa ? "سطح" : "level"}`, `<b>${level}</b> ${"⭐".repeat(Math.min(5, Math.ceil(level / 7)))}`],
+            [`📈 XP`, `${fmt(xp)} / ${fmt(Math.round(nextAt))}`],
+            [`🏆 ${fa ? "رتبهٔ هفتگی" : "weekly rank"}`, `<b>${rank ? "#" + rank : "—"}</b>`],
+            [`💠 ${fa ? "پلن" : "plan"}`, `<b>${u?.plan ?? "free"}</b>`],
+            [`🔎 ${fa ? "جست‌وجوی امروز" : "queries today"}`, String(u?.daily_queries ?? 0)],
+            [`⭐ ${fa ? "علاقه‌مندی‌ها" : "favourites"}`, `<b>${favs}</b>`],
+            [`🔔 ${fa ? "اشتراک‌ها" : "subscriptions"}`, `<b>${subs}</b>`],
+          ]),
+          aside(`📈 ${bar(pct, 12)} <b>${pct}%</b> ${fa ? "تا سطح بعدی" : "to next level"}`, `XP ${fmt(xp)}`),
+          badges.length ? p(`🎖 ${fa ? "نشان‌ها" : "badges"}: ${badges.join(" ")}`) : "",
+          p(interests.length
+            ? `🧠 ${fa ? "علاقه‌مندی‌ها" : "interests"}: ${interests.map((t) => code(t)).join(" ")}`
+            : `<i>${fa ? "علاقه‌مندی‌هایت را تنظیم کن تا فید شخصی‌سازی‌شده بگیری." : "Set interests for a personalised feed."}</i>`),
+        ].filter(Boolean).join("\n"),
+      }),
       kb(
         [
           { text: "⭐ " + (fa ? "علاقه‌مندی‌ها" : "Favourites"), cb: "f:list" },
@@ -91,17 +107,33 @@ export class ProfileFeature {
     const streak = computeStreak((daily.results ?? []).map((r) => r.d));
     const totals = (events.results ?? []).reduce((s, r) => s + r.c, 0);
 
-    await h.reply(
-      `📊 <b>${fa ? "داشبورد ۳۰ روز اخیر" : "30-day dashboard"}</b>\n\n` +
-        `⚡ ${fa ? "کل فعالیت‌ها" : "total actions"}: <b>${fmt(totals)}</b>   🔥 ${fa ? "روزهای پیوسته" : "streak"}: <b>${streak}</b> 🔥\n` +
-        (spark ? `📈 <code>${spark}</code>\n\n` : "") +
-        `<b>${fa ? "فعالیت‌ها" : "Activity"}</b>\n` +
-        ((events.results ?? []).map((r) => `• ${activityLabel(r.kind, fa)}: <b>${fmt(r.c)}</b>`).join("\n") || "—") +
-        `\n\n<b>🤖 ${fa ? "مصرف هوش مصنوعی" : "AI usage"}</b>\n` +
-        ((aiUse.results ?? []).map((r) => `• ${r.feature}: ${r.calls} ${fa ? "درخواست" : "calls"} · ${fmt(r.tokens)} tokens`).join("\n") || "—") +
-        `\n\n<b>🧩 ${fa ? "زبان‌های مورد علاقه‌ات" : "Your languages"}</b>\n` +
-        ((favLangs.results ?? []).map((r) => `• ${tgEscape(r.language ?? "—")} — ${r.c}`).join("\n") || "—") +
-        `\n\n🔔 ${fa ? "اشتراک‌های فعال" : "active subscriptions"}: <b>${subs?.c ?? 0}</b>`,
+    /* The dashboard is three small tables — activity, AI usage, languages —
+       instead of three lists with bullets. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table, aside } = await import("../tg/rich");
+    const mk = (head: string[], body: string[][]): string =>
+      body.length ? table([head, ...body]) : "";
+    await h.replyRich(
+      richDoc({
+        title: `📊 ${fa ? "داشبورد ۳۰ روز اخیر" : "30-day dashboard"}`,
+        meta: `⚡ ${fa ? "کل فعالیت‌ها" : "total actions"}: <b>${fmt(totals)}</b> · 🔥 ${fa ? "روزهای پیوسته" : "streak"}: <b>${streak}</b> 🔥`,
+        body: [
+          spark ? aside(`📈 <code>${spark}</code>`, fa ? "روند ۳۰ روزه" : "30-day trend") : "",
+          mk(
+            [fa ? "فعالیت" : "activity", fa ? "دفعات" : "count"],
+            (events.results ?? []).map((r) => [activityLabel(r.kind, fa), `<b>${fmt(r.c)}</b>`]),
+          ),
+          mk(
+            [`🤖 ${fa ? "قابلیت" : "feature"}`, fa ? "درخواست" : "calls", fa ? "توکن" : "tokens"],
+            (aiUse.results ?? []).map((r) => [String(r.feature), String(r.calls), fmt(r.tokens)]),
+          ),
+          mk(
+            [`🧩 ${fa ? "زبان" : "language"}`, fa ? "علاقه‌مندی" : "favourites"],
+            (favLangs.results ?? []).map((r) => [tgEscape(r.language ?? "—"), String(r.c)]),
+          ),
+          aside(`🔔 ${fa ? "اشتراک‌های فعال" : "active subscriptions"}: <b>${subs?.c ?? 0}</b>`),
+        ].filter(Boolean).join("\n"),
+      }),
       kb(
         [
           { text: "⭐ " + (fa ? "علاقه‌مندی‌ها" : "Favourites"), cb: "f:list" },
@@ -257,21 +289,36 @@ export class ProfileFeature {
     const rows = await h.store.leaderboard("queries", 15);
     const me = await this.rank(h);
     const medals = ["🥇", "🥈", "🥉"];
-    await h.reply(
-      `🏆 <b>${fa ? "لیدربورد این هفته" : "Weekly leaderboard"}</b> — ${Store.week()}\n\n` +
-        (rows.map((r, i2) => {
-          /* A row with no name is a real person the bot has not been introduced
-             to yet (their name arrives with a message, not a button press).
-             Say that, instead of a bare «?». */
-          const clean = String(r.first_name ?? "").trim();
-          const name = clean && !["?", "-", "Self"].includes(clean)
-            ? clean
-            : r.username ? `@${r.username}` : `#…${String(r.user_id).slice(-4)}`;
-          const meMark = r.user_id === h.u.id ? " ⬅️" : "";
-          return `${medals[i2] ?? `${i2 + 1}.`} ${tgEscape(name)} — <b>${fmt(r.value)}</b> ${fa ? "امتیاز" : "pts"} <i>(lvl ${r.level ?? 1})</i>${meMark}`;
-        }).join("\n") || "—") +
-        `\n\n${fa ? "رتبه تو" : "your rank"}: <b>${me ? "#" + me : "—"}</b>\n` +
-        `<i>${fa ? "هر جست‌وجو، کاوش، ترجمه و دانلود امتیاز دارد. هفته‌ای ۵ برتر می‌توانند نشان طلایی بگیرند." : ""}</i>`,
+    /* A board is a table: rank, person, points, level. The rich document
+       renders it bordered and striped; the automatic fallback of the rich
+       send rewrites it as one «cell · cell · cell» line per person. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table } = await import("../tg/rich");
+    const boardRows: string[][] = [
+      ["#", fa ? "کاربر" : "user", fa ? "امتیاز" : "pts", fa ? "سطح" : "lvl"],
+      ...(rows.length ? rows.map((r: any, i2: number) => {
+        /* A row with no name is a real person the bot has not been introduced
+           to yet (their name arrives with a message, not a button press).
+           Say that, instead of a bare «?». */
+        const clean = String(r.first_name ?? "").trim();
+        const name = clean && !["?", "-", "Self"].includes(clean)
+          ? clean
+          : r.username ? `@${r.username}` : `#…${String(r.user_id).slice(-4)}`;
+        return [
+          medals[i2] ?? String(i2 + 1),
+          `${tgEscape(name)}${r.user_id === h.u.id ? " ⬅️" : ""}`,
+          `<b>${fmt(r.value)}</b>`,
+          String(r.level ?? 1),
+        ];
+      }) : [["—", fa ? "هنوز کسی امتیاز نگرفته" : "nobody has scored yet", "—", "—"]]),
+    ];
+    await h.replyRich(
+      richDoc({
+        title: `🏆 ${fa ? "لیدربورد این هفته" : "Weekly leaderboard"}`,
+        meta: `<code>${Store.week()}</code> · ${fa ? "رتبه تو" : "your rank"}: <b>${me ? "#" + me : "—"}</b> · ${fa ? "فقط کاربران واقعی" : "humans only"}`,
+        body: table(boardRows, { caption: fa ? "امتیاز از جست‌وجو، کاوش، ترجمه و دانلود" : "points from searches, scouts, translations, downloads" }),
+        footer: fa ? "هفته‌ای ۵ برتر می‌توانند نشان طلایی بگیرند." : "Weekly top 5 can earn the gold badge.",
+      }),
       kb(
         [
           { text: "⭐ " + (fa ? "امتیاز من" : "My XP"), cb: "me:home" },
@@ -305,15 +352,24 @@ export class ProfileFeature {
   async plans(h: H) {
     const fa = h.loc === "fa";
     const state = await this.planState(h);
-    await h.reply(
-      `⚡ <b>${fa ? "پلن‌ها" : "Plans"}</b>\n` +
-        `${fa ? "وضعیت تو" : "your plan"}: <b>${state.plan === "pro" ? "💎 Pro" : "🆓 Free"}</b>` +
-        (state.requested && state.plan !== "pro" ? ` · <i>${fa ? "درخواست Pro ثبت شده" : "Pro requested"}</i>` : "") +
-        `\n\n` +
-        `🆓 <b>Free</b> — ${fa ? "روزی ۱۲۰ جست‌وجو، کاوش کامل، ترجمه README، دانلود تا ۱۰۰ مگ" : "120 queries/day"}\n` +
-        `💎 <b>Pro</b> — ${fa ? "نامحدود، کاوش عمیق نامحدود، ترجمهٔ README بی‌سقف، دانلود بدون سقف، هشدار لحظه‌ای، آلرت امنیتی اختصاصی" : "unlimited"}\n` +
-        `🏢 <b>Team</b> — ${fa ? "۵۰ عضو، داشبورد سازمانی، Webhook اختصاصی، SLA" : "50 seats, org dashboard"}\n\n` +
-        `<i>${fa ? "نسخه فعلی این ربات کاملاً رایگان و اوپن‌سورس است؛ پلن‌ها فقط برای مصارف سنگین (Actions و AI) تعریف شده‌اند." : ""}</i>`,
+    /* The price list as a matrix: one row per plan, one column per thing the
+       plan changes. Pro is described honestly — it lifts the quotas that cost
+       real money on a free deployment. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table, aside } = await import("../tg/rich");
+    await h.replyRich(
+      richDoc({
+        title: `⚡ ${fa ? "پلن‌ها" : "Plans"}`,
+        meta: `${fa ? "وضعیت تو" : "your plan"}: <b>${state.plan === "pro" ? "💎 Pro" : "🆓 Free"}</b>` +
+          (state.requested && state.plan !== "pro" ? ` · <i>${fa ? "درخواست Pro ثبت شده" : "Pro requested"}</i>` : ""),
+        body: table([
+          [fa ? "پلن" : "plan", fa ? "جست‌وجو" : "searches", fa ? "ترجمهٔ README" : "README", fa ? "دانلود" : "download"],
+          ["🆓 Free", fa ? "۱۲۰ در روز" : "120/day", fa ? "با سقف روزانه" : "daily cap", fa ? "تا ۱۰۰ مگ" : "≤100 MB"],
+          ["💎 Pro", fa ? "نامحدود" : "unlimited", fa ? "بی‌سقف" : "unlimited", fa ? "بدون سقف + اولویت صف" : "uncapped + queue priority"],
+          ["🏢 Team", fa ? "۵۰ عضو" : "50 seats", fa ? "نامحدود سازمانی" : "org-wide", fa ? "Webhook اختصاصی · SLA" : "dedicated webhook · SLA"],
+        ]) +
+          (fa ? "\n" + aside("این نسخهٔ ربات کاملاً رایگان و اوپن‌سورس است؛ پلن‌ها فقط سهمیه‌هایی را برمی‌دارند که واقعاً هزینه دارند — نئورون Workers AI و اجرای Actions.", "شفاف") : ""),
+      }),
       kb(
         state.plan === "pro"
           ? [{ text: "✅ " + (fa ? "Pro فعال است" : "Pro is active"), cb: "noop:noop:0" }]

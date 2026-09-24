@@ -215,10 +215,19 @@ export function paginateMd(md: string, perPage = README_PAGE_CHARS, maxPages = 1
   const pages: string[] = [];
   let cur = "";
   for (const b of blocks) {
-    if (cur && cur.length + b.length + 2 > perPage) { pages.push(cur); cur = ""; }
+    if (cur && cur.length + b.length + 2 > perPage) {
+      pages.push(cur);
+      cur = "";
+      /* The quota is checked only where a page is actually completed. The old
+         check — `pages.length >= maxPages - 1`, at the bottom of the loop — was
+         true from the first block whenever maxPages was 1, so the README reader
+         rendered the first paragraph and dropped the rest of the translation:
+         a screen that read as «nothing gets translated». With maxPages = 1 the
+         loop now accumulates until the page is full, then stops. */
+      if (pages.length >= maxPages) break;
+    }
     cur += (cur ? "\n\n" : "") + b;
-    if (pages.length >= maxPages - 1) break;
   }
-  if (cur) pages.push(cur);
+  if (cur && pages.length < maxPages) pages.push(cur);
   return pages.length ? pages : [text.slice(0, perPage)];
 }

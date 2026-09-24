@@ -74,26 +74,43 @@ export class SecurityFeature {
     const score = Math.max(0, 100 - (counts.CRITICAL ?? 0) * 30 - (counts.HIGH ?? 0) * 15 - (counts.MODERATE ?? 0) * 5 - (counts.LOW ?? 0));
     const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 40 ? "D" : "F";
 
-    const manifestLines = result.manifests.map((m: any) => `• <code>${tgEscape(m.path)}</code> — ${m.eco}, ${m.deps} ${fa ? "وابستگی" : "deps"}`).join("\n");
-    const vulnLines = result.vulns.slice(0, 10).map((v: any) =>
-      `${sevIcon[v.severity]} <b>${v.severity}</b> — <code>${tgEscape(v.package)}</code>${v.fixed ? ` → ${fa ? "اصلاح در" : "fix"} ${code(v.fixed)}` : ""}\n` +
-      `   ${tgEscape(truncate(v.summary, 110))}\n   ${v.url ? `<a href="${v.url}">${tgEscape(v.id)}</a>` : tgEscape(v.id)}${v.aliases?.length ? ` · ${v.aliases.slice(0, 2).map((a: string) => code(a)).join(" ")}` : ""}`,
-    ).join("\n");
+    /* A security report wants to be scanned in one glance: the grade and the
+       severity counts as a table, each vulnerability a row, the manifests in
+       a collapsible section, the secret warnings in an aside of their own. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { table, details, aside, ul, p } = await import("../tg/rich");
+    const sevRows: string[][] = [["severity", fa ? "تعداد" : "count"]];
+    for (const s of order) if (counts[s]) sevRows.push([`${sevIcon[s]} ${s}`, `<b>${counts[s]}</b>`]);
+    const vulnItems = result.vulns.slice(0, 10).map((v: any) =>
+      `${sevIcon[v.severity]} <b>${v.severity}</b> — <code>${tgEscape(v.package)}</code>${v.fixed ? ` → ${fa ? "اصلاح در" : "fix"} ${code(v.fixed)}` : ""}<br>` +
+      `${tgEscape(truncate(v.summary, 110))}<br>` +
+      `${v.url ? `<a href="${v.url}">${tgEscape(v.id)}</a>` : tgEscape(v.id)}${v.aliases?.length ? ` · ${v.aliases.slice(0, 2).map((a: string) => code(a)).join(" ")}` : ""}`,
+    );
+    const manifestItems = result.manifests.map((m: any) => `<code>${tgEscape(m.path)}</code> — ${m.eco}, ${m.deps} ${fa ? "وابستگی" : "deps"}`);
+    const body = [
+      sevRows.length > 1 ? table(sevRows, { caption: fa ? "آسیب‌پذیری‌های وابستگی‌ها (OSV.dev)" : "dependency advisories (OSV.dev)" }) : "",
+      total
+        ? ul(vulnItems) + (total > 10 ? p(`<i>…${fa ? `و ${total - 10} مورد دیگر` : `and ${total - 10} more`}</i>`) : "")
+        : aside(fa ? "هیچ آسیب‌پذیری شناخته‌شده‌ای در وابستگی‌ها پیدا نشد ✅" : "No known vulnerabilities found ✅", fa ? "سالم" : "clean"),
+      manifestItems.length
+        ? details(`📦 ${fa ? `مانیفست‌های بررسی‌شده (${manifestItems.length})` : `manifests scanned (${manifestItems.length})`}`, ul(manifestItems))
+        : "",
+      secrets.length
+        ? aside(
+            `🔑 <b>${fa ? "هشدار کلید" : "Secret warnings"}</b><br>` +
+              secrets.map((s: any) => `⚠️ <code>${tgEscape(s.file)}</code> — ${tgEscape(s.kind)}`).join("<br>") +
+              `<br><i>${fa ? "این‌ها الگوی احتمالی‌اند؛ مطمئن شو کلید واقعی جا نمانده و فوراً rotate کن." : "heuristic matches — rotate anything real."}</i>`,
+            fa ? "کلیدهای احتمالی" : "possible secrets")
+        : "",
+      p(`📚 ${fa ? "منابع" : "Sources"}: <a href="https://osv.dev">OSV.dev</a> · <a href="https://github.com/${full}/security">GitHub advisories</a>`),
+    ].filter(Boolean).join("\n");
 
-    const countLine = order.filter((s) => counts[s]).map((s) => `${sevIcon[s]} ${s}: <b>${counts[s]}</b>`).join("   ");
-
-    await h.reply(
-      `🛡 <b>${tgEscape(full)}</b> — ${fa ? "گزارش امنیتی" : "Security report"}\n\n` +
-        `🎓 ${fa ? "نمره" : "score"}: <b>${score}/100 (${grade})</b>\n` +
-        (countLine ? `${countLine}\n` : `<i>${fa ? "هیچ آسیب‌پذیری شناخته‌شده‌ای در وابستگی‌ها پیدا نشد ✅" : "No known vulnerabilities found ✅"}</i>\n`) +
-        (total ? "\n" + vulnLines + (total > 10 ? `\n\n<i>…${fa ? `و ${total - 10} مورد دیگر` : `and ${total - 10} more`}</i>` : "") : "") +
-        `\n\n<b>${fa ? "مانیفست‌های بررسی‌شده" : "Manifests scanned"}</b>\n${manifestLines || (fa ? "— موردی نبود" : "— none found")}` +
-        (secrets.length
-          ? `\n\n🔑 <b>${fa ? "هشدار کلید" : "Secret warnings"}</b>\n` +
-            secrets.map((s) => `⚠️ <code>${tgEscape(s.file)}</code> — ${tgEscape(s.kind)}`).join("\n") +
-            `\n<i>${fa ? "این‌ها الگوی احتمالی‌اند؛ مطمئن شو کلید واقعی جا نمانده و فوراً rotate کن." : "heuristic matches — rotate anything real."}</i>`
-          : "") +
-        `\n\n📚 ${fa ? "منابع" : "Sources"}: <a href="https://osv.dev">OSV.dev</a> · <a href="https://github.com/${full}/security">GitHub advisories</a>`,
+    await h.replyRich(
+      richDoc({
+        title: `🛡 ${tgEscape(full)} — ${fa ? "گزارش امنیتی" : "Security report"}`,
+        meta: `🎓 ${fa ? "نمره" : "score"}: <b>${score}/100 (${grade})</b> · ${total} ${fa ? "آسیب‌پذیری" : "advisories"}`,
+        body,
+      }),
       kb(
         [
           { text: "🔔 " + (fa ? "هشدار CVE برای این مخزن" : "Alert me on CVEs"), cb: `sub:add:${full}:security` },

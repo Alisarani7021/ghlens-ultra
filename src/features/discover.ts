@@ -93,15 +93,18 @@ export class Discover {
     const r = items[Math.floor(Math.random() * items.length)];
     const meta = normalise({ ...r, full_name: r.full_name, stars: r.stargazers_count, forks: r.forks_count, issues: r.open_issues_count, topics: r.topics ?? [], languages: [], health: 0, redFlags: [], raw: r });
     const card = await h.card.render(meta, { loc: h.loc });
-    await h.reply(
-      `🎲 <b>${fa ? "کشف تصادفی" : "Random discovery"}</b>\n\n` + card.text,
+    /* The rich card carries its own heading, so the «کشف تصادفی» banner rides
+       above it as a kicker line instead of being glued onto the plain text. */
+    const { aside } = await import("../tg/rich");
+    await h.replyRich(
+      aside(`🎲 ${fa ? "کشف تصادفی" : "Random discovery"}`) + (card.rich ?? card.text),
       kb(
         [
           { text: "🎲 " + (fa ? "یکی دیگر" : "Another"), cb: "x:random" },
           { text: "✨ " + (fa ? "گنج‌های پنهان" : "Hidden gems"), cb: "x:gems" },
         ],
         ...card.keyboard.inline_keyboard.slice(2, 6),
-        
+
       ),
       !!h.cbId,
     );

@@ -243,43 +243,69 @@ export class ToolsFeature {
     const org = conn.org ?? conn.isp ?? asns[0]?.holder ?? netName ?? "—";
     const tz = geo?.timezone ? `${geo.timezone.id} (${geo.timezone.abbr}, UTC${geo.timezone.utc})` : "—";
 
-    const lines = [
-      `📡 <b>${tgEscape(clean)}</b> — ${fa ? "استعلام شبکه" : "network intel"}${geo?.flag?.emoji ? "  " + geo.flag.emoji : ""}`,
-      ``,
-      `<blockquote>${fa
-        ? "هر خط از منبع خودش آمده و همان‌جا نام برده شده. جایی که منبع جواب نداده «—» است؛ عدد ساخته نمی‌شود."
-        : "Every line cited; «—» where the source had nothing."}</blockquote>`,
-      ``,
-      `🌍 ${tgEscape(place)}${geo?.continent ? `  <i>(${tgEscape(geo.continent)})</i>` : ""}`,
-      `🏢 ${tgEscape(org)}${conn.isp && conn.isp !== conn.org ? ` — ISP: ${tgEscape(conn.isp)}` : ""}${conn.domain ? ` · <i>${tgEscape(conn.domain)}</i>` : ""}`,
-      `🛰 ${asns.length
-        ? asns.map((a: any) => `AS${a.asn} <a href="https://bgp.tools/as/${a.asn}">${tgEscape(a.holder ?? "")}</a>`).join(" \n🛰 ")
-        : code(conn.asn ? "AS" + conn.asn : "—")}`,
-      prefix ? `📦 ${fa ? "پیشوند" : "prefix"}: <code>${tgEscape(prefix)}</code>${announced === true ? " · " + (fa ? "اعلام‌شده ✅" : "announced ✅") : announced === false ? " · " + (fa ? "اعلام نشده ⛔️" : "not announced ⛔️") : ""} · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>` : "",
-      block?.resource ? `🧱 ${fa ? "بلوک بالادست" : "parent block"}: <code>${tgEscape(block.resource)}</code> <i>${tgEscape(block.desc ?? "")}</i>` : "",
-      `${rirName ? `🏛 RIR: <b>${tgEscape(rirName)}</b>` : ""}${netName ? `   🧾 ${tgEscape(netName)}` : ""}${type ? ` · ${tgEscape(type)}` : ""}`,
-      range ? `📐 ${fa ? "بازه" : "range"}: <code>${tgEscape(range)}</code>${registered ? ` · ${fa ? "ثبت" : "recorded"} <code>${registered}</code>` : ""}` : "",
-      `📬 rDNS: <code>${tgEscape(ptr || "—")}</code>`,
-      `🕐 ${tgEscape(tz)}${geo?.latitude ? `  📍 <code>${geo.latitude},${geo.longitude}</code>` : ""}`,
-      abuse ? `📮 ${fa ? "تماس سوءاستفادهٔ ثبت‌شده" : "registered abuse contact"}: <code>${tgEscape(abuse)}</code>` : "",
-      ``,
-      `🔗 ${fa ? "منابع" : "sources"}: <a href="https://ipwho.is/${encodeURIComponent(clean)}">ipwho.is</a> · ` +
-        `<a href="https://rdap.org/ip/${encodeURIComponent(clean)}">RDAP</a> · ` +
-        `<a href="https://stat.ripe.net/${encodeURIComponent(clean)}">RIPEstat</a> · ` +
-        `<a href="https://dns.google/resolve?name=${encodeURIComponent(reverseName(clean))}&type=PTR">Google DNS</a>`,
-      ``,
-      `🛡 <b>${fa ? "بررسی سوءاستفاده و امنیت" : "abuse & security"}</b>\n` +
-        `<i>${fa
-          ? "این بخش عمداً عدد نمی‌سازد: اعتبار سوءاستفاده فقط با کلید همین سرویس‌ها در دسترس است. با یک ضربه بازشان کن:"
-          : "No invented score: reputation data needs these services' own keys."}</i>\n` +
-        `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(clean)}">AbuseIPDB</a> · ` +
-        `<a href="https://viz.greynoise.io/ip/${encodeURIComponent(clean)}">GreyNoise</a> · ` +
-        `<a href="https://www.shodan.io/host/${encodeURIComponent(clean)}">Shodan</a> · ` +
-        `<a href="https://www.virustotal.com/gui/ip-address/${encodeURIComponent(clean)}">VirusTotal</a> · ` +
-        `<a href="https://ipinfo.io/${encodeURIComponent(clean)}">IPinfo</a>`,
-    ].filter((l) => l !== "").join("\n");
+    /* The card as a document: one two-column table where every row is a fact
+       (and «—» where its source had nothing), the sources in a collapsible
+       section, and the paid-reputation links in another — instead of a wall of
+       emoji-led lines. The plain path (h.reply) remains for the automatic
+       fallback of the rich send. */
+    const { richDoc } = await import("../hub/richdoc");
+    const { aside, table, details, h3, p } = await import("../tg/rich");
+    const rows: string[][] = [
+      [fa ? "فیلد" : "field", fa ? "مقدار" : "value"],
+      [`🌍 ${fa ? "موقعیت" : "location"}`, `${tgEscape(place)}${geo?.continent ? ` <i>(${tgEscape(geo.continent)})</i>` : ""}`],
+      [`🏢 ${fa ? "سازمان" : "org"}`, `${tgEscape(org)}${conn.isp && conn.isp !== conn.org ? ` — ISP: ${tgEscape(conn.isp)}` : ""}${conn.domain ? ` · <i>${tgEscape(conn.domain)}</i>` : ""}`],
+      [`🛰 ASN`, asns.length
+        ? asns.map((a2: any) => `AS${a2.asn} <a href="https://bgp.tools/as/${a2.asn}">${tgEscape(a2.holder ?? "")}</a>`).join("<br>")
+        : code(conn.asn ? "AS" + conn.asn : "—")],
+    ];
+    if (prefix) {
+      rows.push([`📦 ${fa ? "پیشوند" : "prefix"}`,
+        `<code>${tgEscape(prefix)}</code>${announced === true ? " · " + (fa ? "اعلام‌شده ✅" : "announced ✅") : announced === false ? " · " + (fa ? "اعلام نشده ⛔️" : "not announced ⛔️") : ""} · <a href="https://bgp.tools/prefix/${encodeURIComponent(prefix)}">bgp.tools</a>`]);
+    }
+    if (block?.resource) {
+      rows.push([`🧱 ${fa ? "بلوک بالادست" : "parent block"}`, `<code>${tgEscape(block.resource)}</code> <i>${tgEscape(block.desc ?? "")}</i>`]);
+    }
+    if (rirName || netName || type) {
+      rows.push([`🏛 RIR`, `${rirName ? `<b>${tgEscape(rirName)}</b>` : ""}${netName ? ` 🧾 ${tgEscape(netName)}` : ""}${type ? ` · ${tgEscape(type)}` : ""}`.trim() || "—"]);
+    }
+    if (range) {
+      rows.push([`📐 ${fa ? "بازهٔ تخصیص" : "range"}`, `<code>${tgEscape(range)}</code>${registered ? ` · ${fa ? "ثبت" : "recorded"} <code>${registered}</code>` : ""}`]);
+    }
+    rows.push([`📬 rDNS`, `<code>${tgEscape(ptr || "—")}</code>`]);
+    rows.push([`🕐 ${fa ? "منطقهٔ زمانی" : "timezone"}`, `${tgEscape(tz)}${geo?.latitude ? `  📍 <code>${geo.latitude},${geo.longitude}</code>` : ""}`]);
+    if (abuse) rows.push([`📮 ${fa ? "تماس سوءاستفاده" : "abuse contact"}`, `<code>${tgEscape(abuse)}</code>`]);
 
-    await h.reply(lines, kbRow, !!h.cbId);
+    const lines = richDoc({
+      title: `📡 <code>${tgEscape(clean)}</code> — ${fa ? "استعلام شبکه" : "network intel"}${geo?.flag?.emoji ? "  " + geo.flag.emoji : ""}`,
+      meta: `<i>${fa
+        ? "هر ردیف از منبع خودش آمده و «—» یعنی منبعی جواب نداده؛ عدد ساخته نمی‌شود."
+        : "Every row cited; «—» where the source had nothing."}</i>`,
+      body: [
+        table(rows, { caption: fa ? "داده‌های ثبت‌شده در رجیستری و جغرافیا" : "registry & geo data" }),
+        h3(`🛡 ${fa ? "بررسی سوءاستفاده و امنیت" : "abuse & security"}`),
+        p(fa
+          ? "این بخش عمداً عدد نمی‌سازد: اعتبار سوءاستفاده فقط با کلید همین سرویس‌ها در دسترس است. با یک ضربه بازشان کن:"
+          : "No invented score: reputation data needs these services' own keys."),
+        p([
+          `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(clean)}">AbuseIPDB</a>`,
+          `<a href="https://viz.greynoise.io/ip/${encodeURIComponent(clean)}">GreyNoise</a>`,
+          `<a href="https://www.shodan.io/host/${encodeURIComponent(clean)}">Shodan</a>`,
+          `<a href="https://www.virustotal.com/gui/ip-address/${encodeURIComponent(clean)}">VirusTotal</a>`,
+          `<a href="https://ipinfo.io/${encodeURIComponent(clean)}">IPinfo</a>`,
+        ].join(" · ")),
+        details(
+          `🔗 ${fa ? "منابع داده" : "data sources"}`,
+          p([
+            `<a href="https://ipwho.is/${encodeURIComponent(clean)}">ipwho.is</a>`,
+            `<a href="https://rdap.org/ip/${encodeURIComponent(clean)}">RDAP</a>`,
+            `<a href="https://stat.ripe.net/${encodeURIComponent(clean)}">RIPEstat</a>`,
+            `<a href="https://dns.google/resolve?name=${encodeURIComponent(reverseName(clean))}&type=PTR">Google DNS</a>`,
+          ].join(" · ")),
+        ),
+      ].join("\n"),
+    });
+
+    await h.replyRich(lines, kbRow, !!h.cbId);
   }
 
   /** Domain intelligence: DNS records, TLS cert, registrar, hosting hints. */
