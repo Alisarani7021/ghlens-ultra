@@ -464,7 +464,10 @@ export function extractHighlights(body: string, max = 5): string[] {
       continue;
     }
     if (!/^(?:[-*•]|\d+[.)])\s+/.test(line)) continue;
-    let item = line.replace(/^(?:[-*•]|\d+[.)])\s+/, "");
+    // strip *every* leading marker: a changelog writes «- • text» often enough
+    // that one pass leaves a bullet behind and the post reads «• • text»
+    let item = line;
+    while (/^(?:[-*•]|\d+[.)])\s+/.test(item)) item = item.replace(/^(?:[-*•]|\d+[.)])\s+/, "");
     if (/first contribution|full changelog|what'?s changed|@\w+ made their|^thanks |sponsor/i.test(item)) continue;
     item = item
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")      // [text](url) → text

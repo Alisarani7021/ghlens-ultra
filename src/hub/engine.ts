@@ -170,7 +170,11 @@ export async function runWorkflow(
       // simple array in the stored DAG (a real fork/join engine is a bigger
       // change than this slice needs, and inline keeps ordering obvious).
       for (const extra of nextList.slice(1)) {
-        const sub = await runWorkflow(ctx, { ...wf, dag: { entry: extra, nodes: wf.dag.nodes } }, bag, id);
+        /* Its own row. Reusing the parent's id made the second insert fail
+           (`UNIQUE constraint failed: hub_runs.id`) and then *overwrite* the
+           parent's steps, so the run log of a fan-out described only the last
+           branch. */
+        const sub = await runWorkflow(ctx, { ...wf, dag: { entry: extra, nodes: wf.dag.nodes } }, bag, `${id}~${extra}`);
         steps.push(...sub.steps.map((s) => ({ ...s, summary: `↳ ${s.summary}` })));
         if (sub.state === "waiting") { state = "waiting"; waiting = sub.waiting; }
       }

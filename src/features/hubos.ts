@@ -5,7 +5,7 @@ import { setMode, clearMode } from "../core/mode";
 import { publish } from "../hub/bus";
 import { readAutonomy, setAutonomy } from "../hub/policy";
 import {
-  describeDag, planMission, savePlan, type MissionPlan,
+  describeDag, planMission, savePlan, installPlan, type MissionPlan,
 } from "../hub/mission";
 import { PLAYBOOKS, playbook } from "../hub/playbooks";
 import {
@@ -489,19 +489,22 @@ export class HubOS {
     await h.loading(fa ? "🧠 در حال ترجمهٔ مأموریت به ورک‌فلو…" : "Compiling…");
 
     const plan: MissionPlan = await planMission(h.env, h.ai, h.u.id, text);
-    const id = await savePlan(h.env, h.u.id, plan, text);
 
     /* A plan is not an installation. The repositories the mission talks about
-       are extracted from the owner's own words, stored with the workflow, and
-       the readiness screen is built from reality — connector rows, the bot's
-       channel rights, the workflow row. This is the difference between "the DAG
-       exists" and "the thing will fire at three in the morning". */
+       are extracted from the owner's own words, and installing the same mission
+       again replaces its twin instead of piling up a second machine on the same
+       event — three identical enabled workflows meant three posts per release. */
     const repos = reposInMission(text);
+    const { id, replaced } = await installPlan(h.env, h.u.id, plan, text, repos);
     await saveRepos(h.env, id, repos);
 
     const badge = plan.source === "ai" ? (fa ? "🧠 ساختهٔ AI" : "🧠 AI") : plan.source === "repaired" ? (fa ? "🔧 ساختهٔ AI (اصلاح‌شده)" : "🔧 repaired") : (fa ? "📚 برنامهٔ آماده" : "📚 playbook");
+    const twin = replaced
+      ? `♻️ ${fa ? "نسخهٔ قبلی همین ورک‌فلو جایگزین شد (نه یکی دیگر روی همان رویداد)" : "replaced its twin"}\n\n`
+      : "";
 
     return h.reply(
+      twin +
       `🧪 <b>${tgEscape(plan.name)}</b>  ·  ${badge}\n\n` +
         `<blockquote>${tgEscape(plan.notes || text.slice(0, 200))}</blockquote>\n\n` +
         `<b>${fa ? "نقشهٔ اجرا" : "Plan"}</b>\n<pre>${tgEscape(describeDag(plan))}</pre>\n` +

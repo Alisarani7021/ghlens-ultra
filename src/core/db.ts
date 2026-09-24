@@ -17,6 +17,12 @@ export class Store {
     if ((u as any).is_bot) return;
     const now = Date.now();
     await this.env.DB.prepare(
+      /* `?`, `-` and `Self` are not names, they are what a handler that was not
+         given a real one writes. The deferred-work path builds a synthetic
+         update (`first_name: "?"`) to run a queued feature, so every queued
+         button was renaming its user to «?» — which then showed up on the
+         public leaderboard as `🥇 ?`. Placeholders neither overwrite a real
+         name (first branch) nor get stored as one (second branch). */
       `INSERT INTO users (id, username, first_name, locale, referral_code, created_at, last_seen_at)
        VALUES (?,?,?,?,?,?,?)
        /* Names only ever move forward. An incoming *empty* name is a caller with
@@ -26,7 +32,15 @@ export class Store {
           him off his own leaderboard. A real rename is not empty, so it lands. */
        ON CONFLICT(id) DO UPDATE SET
          username=COALESCE(NULLIF(excluded.username, ''), users.username),
-         first_name=COALESCE(NULLIF(excluded.first_name, ''), users.first_name),
+         /* A placeholder is not a rename either. The deferred-work path builds a
+            synthetic update with the name "?" to run a queued feature, and the
+            audits drive real ids as identity «Self» — both used to land on a
+            person's row, which is how the public board showed a lone "?" in
+            first place. Real names still land; placeholders never do. */
+         first_name=CASE
+           WHEN COALESCE(excluded.first_name,'') IN ('', '?', '-', 'Self') THEN users.first_name
+           ELSE excluded.first_name
+         END,
          last_seen_at=excluded.last_seen_at,
          locale=COALESCE(NULLIF(excluded.locale, ''), users.locale)`,
     ).bind(u.id, u.username ?? null, u.first_name ?? null, (locale ?? u.language_code?.slice(0, 2) ?? this.env.DEFAULT_LOCALE), randCode(u.id), now, now)

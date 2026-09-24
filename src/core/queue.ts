@@ -44,7 +44,9 @@ export async function consumeQueue(batch: MessageBatch<Job>, env: Env, ctx: Ctx)
           const guard = { chatId: job.chat_id, loading: false, settled: true, startedAt: Date.now(), budgetMs: 180_000 };
           const { buildH, runDeferredFeature } = await import("../index");
           const h = await buildH(
-            { from: { id: job.user_id, is_bot: false, first_name: "?" } as any, chat: { id: job.chat_id } as any, message_id: job.message_id },
+            // no invented name: the stored one belongs to the person who pressed
+            // the button, and a queued job has no business touching it
+            { from: { id: job.user_id, is_bot: false } as any, chat: { id: job.chat_id } as any, message_id: job.message_id },
             env, ctx, tg2, store2, ai2, card2, { text: job.arg, guard, editTarget: job.message_id },
           );
           try {

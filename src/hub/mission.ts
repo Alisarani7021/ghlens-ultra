@@ -3,6 +3,7 @@ import type { AiBrain } from "../ai/brain";
 import { type Workflow, type WfNode, type NodeKind, saveWorkflow } from "./engine";
 import { PLAYBOOKS, EDITOR_SYSTEM, type Playbook } from "./playbooks";
 import { CONNECTORS } from "./connectors";
+import { loadRepos } from "./wiring";
 
 /**
  *  MISSION MODE
@@ -106,20 +107,28 @@ export async function planMission(
     { tier: "smart", max_tokens: 1600, temperature: 0.15, json: true, feature: "hub:mission", userId: ownerId },
   );
 
+  /* What the sentence demands beats what the model returned: if the mission is
+     event-shaped, the trigger is not optional. */
+  const forced = triggerForMission(mission);
+  const withTrigger = (p: MissionPlan): MissionPlan =>
+    forced && p.on_event !== forced
+      ? { ...p, on_event: forced, notes: `${p.notes} · محرک از خودِ جمله: ${forced}` }
+      : p;
+
   const parsed = extractJson(raw);
   if (parsed && Array.isArray(parsed.nodes) && parsed.nodes.length) {
     const repaired = repairPlan(parsed);
-    if (repaired) return { ...repaired, on_event: pickTrigger(repaired.on_event), source: repaired.repaired ? "repaired" : "ai" };
+    if (repaired) return withTrigger({ ...repaired, on_event: pickTrigger(repaired.on_event), source: repaired.repaired ? "repaired" : "ai" });
   }
 
   // ── fallback: match the mission against the shipped playbooks ────────────
   const pb = bestPlaybook(mission);
   if (pb) {
-    return {
+    return withTrigger({
       name: pb.name, on_event: pb.on_event, nodes: pb.dag.nodes, entry: pb.dag.entry,
       requires: [pb.needs], source: "playbook",
       notes: `برنامهٔ آماده «${pb.name}» انتخاب شد (برنامه‌ریز نتوانست DAG معتبر بسازد).`,
-    };
+    });
   }
   return {
     name: "مأموریت دستی", on_event: "", nodes: [{ id: "in", kind: "trigger", next: ["done"] }, { id: "done", kind: "stop" }],
@@ -266,6 +275,72 @@ function sanitizeCfg(cfg: any): Record<string, any> {
 function pickTrigger(value: string): string {
   const v = (value ?? "").trim();
   return TRIGGERS.includes(v) ? v : "";
+}
+
+/**
+ * The trigger a mission *says out loud*, independent of the model.
+ *
+ * The planner was allowed to leave `on_event` empty, and it did exactly that for
+ * «هر وقت مخزن X نسخهٔ جدید داد، در کانال بگذار» — a sentence whose first two
+ * words are a schedule. The owner then had a workflow that only ran when he
+ * pressed a button, which is the opposite of what he asked for, and the GitHub
+ * connector had nothing to feed it. The words decide this; the model cannot
+ * forget them.
+ */
+export function triggerForMission(mission: string): string {
+  const m = String(mission ?? "").toLowerCase();
+  const recurring = /هر وقت|هر زمان|هروقت|whenever|each time|every time|بعد از (?:هر|هزینه)|تا (?:نسخه|ریلیز) جدید|وقتی .* (?:شد|داد|آمد)|به محض/.test(m);
+  if (!recurring) return "";
+  const hasRepo = /[\w.-]+\/[\w.-]+/.test(m);
+  if (/نسخه|ریلیز|release|version|تگ|tag|آپدیت|update/.test(m) && hasRepo) return "github.release.*";
+  if (/کامیت|commit|push|پوش|شاخه|branch/.test(m) && hasRepo) return "github.push.*";
+  if (/ایشو|issue|مشکل|باگ گزارش/.test(m) && hasRepo) return "github.issue.*";
+  if (/فید|rss|feed/.test(m)) return "rss.item.new";
+  if (/صفحه|وب\s?سایت|api|تغییر کرد|عوض شد|پایش|monitor|watch/.test(m)) return "http.value.changed";
+  if (hasRepo) return "github.release.*";
+  return "";
+}
+
+/**
+ * Persist a plan as a real workflow the owner can read and edit.
+ *
+ * Installing the *same* mission twice is one workflow, not two. The owner asked
+ * for «این مخزن هر وقت آپدیت شد خودکار پست کن», repeated it while tuning the
+ * wording, and ended up with three identical enabled workflows on one event —
+ * three posts per release, three times the model spend, and no way to tell which
+ * one to delete. Identity here is (trigger, repositories, owner): a different
+ * mission in the same shape is an edit, not a new machine. A plan with no
+ * trigger and no repositories stays additive, because two manual workflows are
+ * legitimately two things.
+ */
+export async function installPlan(
+  env: Env, ownerId: number, plan: MissionPlan, mission: string, repos: string[],
+): Promise<{ id: string; replaced: boolean }> {
+  const sameShape = plan.on_event && repos.length;
+  if (sameShape) {
+    const { results } = await env.DB.prepare(
+      `SELECT id FROM hub_workflows WHERE owner_id=? AND on_event=? ORDER BY created_at DESC LIMIT 5`,
+    ).bind(ownerId, plan.on_event).all<{ id: string }>().catch(() => ({ results: [] as any[] }));
+    for (const row of results ?? []) {
+      const theirs = await loadRepos(env, row.id);
+      const same = theirs.length === repos.length && theirs.every((r) => repos.includes(r));
+      if (!same) continue;
+      await env.DB.prepare(
+        `UPDATE hub_workflows SET name=?, mission=?, dag=? WHERE id=? AND owner_id=?`,
+      ).bind(plan.name, mission, JSON.stringify({ entry: plan.entry, nodes: plan.nodes }), row.id, ownerId)
+        .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      return { id: row.id, replaced: true };
+    }
+  }
+  const id = await saveWorkflow(env, {
+    owner_id: ownerId,
+    name: plan.name,
+    mission,
+    dag: { entry: plan.entry, nodes: plan.nodes },
+    on_event: plan.on_event,
+    enabled: 1,
+  });
+  return { id, replaced: false };
 }
 
 /** Persist a plan as a real workflow the owner can read and edit. */

@@ -972,5 +972,16 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("dry run never asks and never posts", dry.steps[0].summary.includes("آزمایشی") && sent.length === 0);
 }
 
+// ── a mission that says «هر وقت» is an event, not a button ────────────────
+{
+  const MI = MS;   // bundled with the first hub group
+  eq("mission: «هر وقت … نسخهٔ جدید» becomes a release event", MI.triggerForMission("هر وقت مخزن panel-zeus/Z-E-U-S نسخهٔ جدید داد، در کانال بگذار"), "github.release.*");
+  eq("mission: commits are their own event", MI.triggerForMission("whenever acme/widget pushes a commit, tell me"), "github.push.*");
+  eq("mission: an rss mission listens to the feed", MI.triggerForMission("هر وقت آیتم تازه در فید rss آمد خلاصه کن"), "rss.item.new");
+  eq("mission: a manual mission stays manual", MI.triggerForMission("این مخزن را تحلیل کن"), "");
+  ok("mission: the planner cannot leave an event-shaped mission manual",
+     /github\.release/.test(MI.triggerForMission("هر زمان نسخهٔ جدید oven-sh/bun منتشر شد، خودکار پست کن")));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

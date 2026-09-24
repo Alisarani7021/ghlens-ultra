@@ -260,7 +260,13 @@ export class ProfileFeature {
     await h.reply(
       `🏆 <b>${fa ? "لیدربورد این هفته" : "Weekly leaderboard"}</b> — ${Store.week()}\n\n` +
         (rows.map((r, i2) => {
-          const name = r.first_name ?? r.username ?? `#${r.user_id}`;
+          /* A row with no name is a real person the bot has not been introduced
+             to yet (their name arrives with a message, not a button press).
+             Say that, instead of a bare «?». */
+          const clean = String(r.first_name ?? "").trim();
+          const name = clean && !["?", "-", "Self"].includes(clean)
+            ? clean
+            : r.username ? `@${r.username}` : `#…${String(r.user_id).slice(-4)}`;
           const meMark = r.user_id === h.u.id ? " ⬅️" : "";
           return `${medals[i2] ?? `${i2 + 1}.`} ${tgEscape(name)} — <b>${fmt(r.value)}</b> ${fa ? "امتیاز" : "pts"} <i>(lvl ${r.level ?? 1})</i>${meMark}`;
         }).join("\n") || "—") +
