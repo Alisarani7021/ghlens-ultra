@@ -5,7 +5,7 @@
  *   node scripts/selftest.mjs
  */
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -883,6 +883,15 @@ const enc = (s) => new TextEncoder().encode(s);
   const help = W.renderHookHelp(report, true);
   ok("wiring: the manual page carries the payload url", help.includes("https://w.example/hooks/github/hk1"));
   ok("wiring: the manual page links each repo", help.includes("https://github.com/panel-zeus/Z-E-U-S/settings/hooks/new"));
+
+  /* Shape, not just content. Both screens shipped once with `\\n` where a real
+     newline belonged — the whole checklist rendered as one line with the text
+     «\n» between the items, and every includes()-style assertion above still
+     passed. These four say what a screen must look like, not merely contain. */
+  ok("wiring: the checklist breaks into real lines", screen.includes("\n"));
+  ok("wiring: no literal «\\n» leaks into the checklist", !screen.includes("\\n"));
+  ok("wiring: the manual page breaks into real lines", help.includes("\n"));
+  ok("wiring: no literal «\\n» leaks into the manual page", !help.includes("\\n"));
 }
 
 // ── a licence is text, whatever shape GitHub sends ────────────────────────
@@ -981,6 +990,26 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("mission: a manual mission stays manual", MI.triggerForMission("این مخزن را تحلیل کن"), "");
   ok("mission: the planner cannot leave an event-shaped mission manual",
      /github\.release/.test(MI.triggerForMission("هر زمان نسخهٔ جدید oven-sh/bun منتشر شد، خودکار پست کن")));
+}
+
+// ── no screen may print «\n» as text ─────────────────────────────────────
+{
+  /* `\\n` written where a real newline was meant renders the two characters
+     «\n» into the user's chat — the whole wiring checklist once shipped that
+     way, as a single line. The renderer tests above catch the instance; this
+     reads the sources themselves, so the class is dead in every file, not just
+     the one that was caught. A regex that truly wants to match a literal
+     backslash-n can spell it without the double escape (`[\\]n` or `\\x5cn`). */
+  const bad = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".ts") && readFileSync(p, "utf8").includes("\\\\n")) bad.push(p);
+    }
+  };
+  walk("src");
+  eq("sources: no double-escaped newline anywhere under src/", bad, []);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

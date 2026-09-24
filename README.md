@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml)
-[![tests](https://img.shields.io/badge/tests-345%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
+[![tests](https://img.shields.io/badge/tests-350%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![D1](https://img.shields.io/badge/D1-33%20tables-0b7285?style=flat-square)](schema/d1.sql)
@@ -18,7 +18,7 @@
 
 <img src="docs/assets/hero.jpg" width="620" alt="GitHub Lens Ultra">
 
-**[ربات](https://t.me/Gitguts_bot)** · **[سلامت زنده](https://ghlens-ultra.gitguts.workers.dev/health)** · **[راهنامهٔ فارسی](docs/USAGE-FA.md)** · **[معماری](docs/ARCHITECTURE.md)** · **[هاب](docs/HUB-OS.md)**
+**[ربات](https://t.me/Gitguts_bot)** · **[سلامت زنده](https://ghlens-ultra.gitguts.workers.dev/health)** · **[راهنامهٔ فارسی](docs/USAGE-FA.md)** · **[معماری](docs/ARCHITECTURE.md)** · **[هاب](docs/HUB-OS.md)** · **[توکن کلودفلر](docs/CF-TOKEN-FA.md)**
 
 </div>
 
@@ -128,7 +128,7 @@ npx wrangler deploy
 WORKER_URL=https://ghlens-ultra.<sub>.workers.dev ./scripts/set-webhook.sh
 ```
 
-[`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/USAGE-FA.md`](docs/USAGE-FA.md)
+[`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/USAGE-FA.md`](docs/USAGE-FA.md) · [`docs/CF-TOKEN-FA.md`](docs/CF-TOKEN-FA.md)
 
 ## دروازهٔ کیفیت
 

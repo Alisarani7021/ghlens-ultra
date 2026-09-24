@@ -329,7 +329,7 @@ export function renderWiring(r: WiringReport, fa: boolean): string {
 
   if (r.hooks.length) {
     for (const h of r.hooks) {
-      lines.push(`${tick(h.ok)} <b>وب‌هوک</b> <code>${h.repo}</code> — ${h.detail}${h.ok ? "" : `\\n   👈 <a href="${h.manualUrl}">${fa ? "افزودن دستی (۱۰ ثانیه)" : "add manually"}</a>`}`);
+      lines.push(`${tick(h.ok)} <b>وب‌هوک</b> <code>${h.repo}</code> — ${h.detail}${h.ok ? "" : `\n   👈 <a href="${h.manualUrl}">${fa ? "افزودن دستی (۱۰ ثانیه)" : "add manually"}</a>`}`);
     }
   } else {
     lines.push(`⏸ <b>${fa ? "وب‌هوک‌ها" : "hooks"}</b> — ${fa ? "با دکمهٔ «🔧 وصلش کن» بررسی و ثبت می‌شوند" : "checked on wiring"}`);
@@ -339,28 +339,28 @@ export function renderWiring(r: WiringReport, fa: boolean): string {
   if (r.workflow) lines.push(`${tick(r.workflow.ok)} <b>${fa ? "ورک‌فلو" : "workflow"}</b> — ${r.workflow.detail}${r.workflow.on_event ? ` · <code>${r.workflow.on_event}</code>` : ""}`);
 
   lines.push(``, r.blockers.length
-    ? `<blockquote>${fa ? "تا این‌ها حل نشود، رویداد می‌رسد ولی پستی منتشر نمی‌شود:" : "until these are fixed nothing publishes:"}\\n` +
-      r.blockers.map((b) => `• ${b}`).join("\\n") + `</blockquote>`
+    ? `<blockquote>${fa ? "تا این‌ها حل نشود، رویداد می‌رسد ولی پستی منتشر نمی‌شود:" : "until these are fixed nothing publishes:"}\n` +
+      r.blockers.map((b) => `• ${b}`).join("\n") + `</blockquote>`
     : `<blockquote>${fa ? "✅ همه‌چیز وصل است: رویداد ← متن ← سیاست ← انتشار. همین حالا می‌توانی با «🧪 اجرای آزمایشی» ببینی چه می‌شود." : "all wired"}</blockquote>`);
 
-  return lines.join("\\n");
+  return lines.join("\n");
 }
 
 /** The manual path, for when a token cannot touch the repository. */
 export function renderHookHelp(r: WiringReport, fa: boolean): string {
   const secretSet = true;
   return (
-    `📎 <b>${fa ? "ثبت دستی وب‌هوک" : "Manual webhook"}</b>\\n\\n` +
+    `📎 <b>${fa ? "ثبت دستی وب‌هوک" : "Manual webhook"}</b>\n\n` +
     `<blockquote>${fa
       ? "اگر توکن تو اجازهٔ مدیریت وب‌هوک ندارد (یا مخزن مال کسی دیگر است)، همین سه مقدار را در گیت‌هاب بگذار. یک بار برای همیشه."
-      : "paste these three values once."}</blockquote>\\n\\n` +
-    `1️⃣ <b>Payload URL</b>\\n<code>${r.hookUrl}</code>\\n\\n` +
-    `2️⃣ <b>Content type</b>: <code>application/json</code>\\n\\n` +
-    `3️⃣ <b>Secret</b>: ${secretSet ? (fa ? "همان مقداری که در Secrets ورکر با نام <code>GITHUB_WEBHOOK_SECRET</code> گذاشته‌ای" : "the value of GITHUB_WEBHOOK_SECRET") : ""}\\n\\n` +
-    (fa ? "<b>رویدادها</b>: فقط <code>Releases</code> (و اگر کامیت‌ها هم مهم‌اند <code>Pushes</code>).\\n\\n" : "") +
+      : "paste these three values once."}</blockquote>\n\n` +
+    `1️⃣ <b>Payload URL</b>\n<code>${r.hookUrl}</code>\n\n` +
+    `2️⃣ <b>Content type</b>: <code>application/json</code>\n\n` +
+    `3️⃣ <b>Secret</b>: ${secretSet ? (fa ? "همان مقداری که در Secrets ورکر با نام <code>GITHUB_WEBHOOK_SECRET</code> گذاشته‌ای" : "the value of GITHUB_WEBHOOK_SECRET") : ""}\n\n` +
+    (fa ? "<b>رویدادها</b>: فقط <code>Releases</code> (و اگر کامیت‌ها هم مهم‌اند <code>Pushes</code>).\n\n" : "") +
     (r.repos.length
-      ? r.repos.map((x) => `🔗 <a href="https://github.com/${x}/settings/hooks/new">${x} → Add webhook</a>`).join("\\n")
+      ? r.repos.map((x) => `🔗 <a href="https://github.com/${x}/settings/hooks/new">${x} → Add webhook</a>`).join("\n")
       : (fa ? "اول مخزن را مشخص کن." : "name a repo first.")) +
-    `\\n\\n<i>${fa ? "بدون وب‌هوک هم کار می‌کند: کرون هر چند دقیقه کانکتور را می‌پوید. وب‌هوک فقط تأخیر را صفر می‌کند." : "polling is the safety net."}</i>`
+    `\n\n<i>${fa ? "بدون وب‌هوک هم کار می‌کند: کرون هر چند دقیقه کانکتور را می‌پوید. وب‌هوک فقط تأخیر را صفر می‌کند." : "polling is the safety net."}</i>`
   );
 }
