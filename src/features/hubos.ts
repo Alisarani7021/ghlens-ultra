@@ -616,9 +616,30 @@ export class HubOS {
   }
 
   // ── workflows ───────────────────────────────────────────────────────────
+  /**
+   * Twin workflows: same name, same event, both enabled.
+   *
+   * Repeating a mission while tuning its wording used to install a second (and
+   * third) copy of the same machine, so one release produced three posts. New
+   * missions replace their twin; this finds the ones already installed, so the
+   * owner can collapse them with one press instead of hunting through the list.
+   */
+  twins(wfs: { id: string; name: string; on_event: string; enabled: number }[]) {
+    const seen = new Map<string, string>();
+    const out: { keep: string; drop: string; name: string; on_event: string }[] = [];
+    for (const w of wfs) {
+      const key = `${w.name}|${w.on_event}|${w.enabled}`;
+      const first = seen.get(key);
+      if (first) out.push({ keep: first, drop: w.id, name: w.name, on_event: w.on_event });
+      else seen.set(key, w.id);
+    }
+    return out;
+  }
+
   async workflows(h: H) {
     const fa = h.loc === "fa";
     const wfs = await listWorkflows(h.env, h.u.id);
+    const dups = this.twins(wfs as any);
     const body = wfs.length
       ? wfs.map((w) => {
           const steps = w.dag.nodes.length;
@@ -627,14 +648,58 @@ export class HubOS {
       : (fa ? "<i>هنوز ورک‌فلویی نساخته‌ای. از «برنامه‌های آماده» شروع کن.</i>" : "<i>No workflows yet.</i>");
 
     return h.reply(
-      (fa ? `⚙️ <b>ورک‌فلوها</b>\n\n` : `⚙️ <b>Workflows</b>\n\n`) + body,
+      (fa ? `⚙️ <b>ورک‌فلوها</b>\n\n` : `⚙️ <b>Workflows</b>\n\n`) + body +
+        (dups.length
+          ? (fa
+            ? `\n\n🧹 <b>${dups.length} نسخهٔ تکراری روی <code>${tgEscape(dups[0].on_event)}</code></b>\n` +
+              `<blockquote>هر سه روی یک رویداد فعال‌اند؛ یعنی هر نسخهٔ جدید چند پست می‌شود. یکی می‌مانَد، بقیه پاک می‌شوند.</blockquote>`
+            : `\n\n🧹 <b>${dups.length} duplicate(s)</b> on <code>${tgEscape(dups[0].on_event)}</code>`)
+          : ""),
       kb(
+        ...(dups.length ? [[{ text: fa ? `🧹 تکراری‌ها را جمع کن (${dups.length})` : `🧹 Collapse duplicates (${dups.length})`, cb: `hos:dedupe:${dups[0].keep}` }]] : []),
         ...wfs.slice(0, 4).map((w) => [{ text: `▶️ ${w.name.slice(0, 34)}`, cb: `hos:wfrun:${w.id}` }]),
         ...wfs.slice(0, 4).map((w) => [{ text: `🗑 ${w.name.slice(0, 34)}`, cb: `hos:wfdel:${w.id}` }]),
         [{ text: fa ? "📚 برنامه‌های آماده" : "📚 Playbooks", cb: "hos:books" }, { text: fa ? "🧪 مأموریت" : "🧪 Mission", cb: "hos:mission" }],
       ),
       !!h.cbId,
     );
+  }
+
+  /** Destructive, so it asks first — and it says which one survives. */
+  async dedupePrompt(h: H, keep: string) {
+    const fa = h.loc === "fa";
+    const wfs = await listWorkflows(h.env, h.u.id);
+    const dups = this.twins(wfs as any).filter((d) => d.keep === keep);
+    if (!dups.length) return this.workflows(h);
+    const name = (wfs.find((w) => w.id === keep) as any)?.name ?? keep;
+    return h.reply(
+      `🧹 <b>${fa ? "جمع‌کردن تکراری‌ها" : "Collapse duplicates"}</b>\n\n` +
+        `<blockquote>${fa
+          ? `«${tgEscape(name)}» می‌مانَد. ${dups.length} نسخهٔ دیگر روی همان رویداد پاک می‌شود — با اجراهایشان.`
+          : `Keeping «${tgEscape(name)}» and deleting ${dups.length} twin(s).`}</blockquote>\n\n` +
+        (fa ? "بعدش روی نسخهٔ مانده می‌توانی «اجرای آزمایشی» بزنی تا مطمئن شوی درست کار می‌کند." : ""),
+      kb(
+        [{ text: fa ? `✅ بله، ${dups.length} تکراری را پاک کن` : `✅ Yes, delete ${dups.length}`, cb: `hos:dedupe2:${keep}` }],
+        [{ text: fa ? "◀️ نگهش دار" : "◀️ Keep them", cb: "hos:wf" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  async dedupe(h: H, keep: string) {
+    const fa = h.loc === "fa";
+    const wfs = await listWorkflows(h.env, h.u.id);
+    const dups = this.twins(wfs as any).filter((d) => d.keep === keep);
+    for (const d of dups) {
+      await h.env.DB.prepare(`DELETE FROM hub_runs WHERE wf_id=? AND owner_id=?`).bind(d.drop, h.u.id)
+        .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      await h.env.DB.prepare(`DELETE FROM hub_workflows WHERE id=? AND owner_id=?`).bind(d.drop, h.u.id)
+        .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+      await h.env.DB.prepare(`DELETE FROM flags WHERE key=?`).bind(`wf:repos:${d.drop}`)
+        .run().catch(() => null);
+    }
+    await h.toast(fa ? `🧹 ${dups.length} تکراری پاک شد` : `🧹 ${dups.length} removed`, true);
+    return this.workflows(h);
   }
 
   async workflowView(h: H, id: string) {

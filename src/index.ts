@@ -1872,6 +1872,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "wftog") return hubOS.toggleWorkflow(h, arg);
         if (action === "wfdel") return hubOS.workflowDeletePrompt(h, arg);
         if (action === "wfdel2") return hubOS.deleteWorkflow(h, arg);
+        if (action === "dedupe") return hubOS.dedupePrompt(h, arg);
+        if (action === "dedupe2") return hubOS.dedupe(h, arg);
         if (action === "wfrun") return hubOS.runWorkflowById(h, arg);
         if (action === "wire") return hubOS.wiring(h, arg, true);
         if (action === "wiring") return hubOS.wiring(h, arg, false);
