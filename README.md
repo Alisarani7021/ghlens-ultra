@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml)
-[![tests](https://img.shields.io/badge/tests-268%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
+[![tests](https://img.shields.io/badge/tests-270%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![D1](https://img.shields.io/badge/D1-33%20tables-0b7285?style=flat-square)](schema/d1.sql)
@@ -139,7 +139,7 @@ bash scripts/check.sh
 # sqlcheck   → تطابق تعداد ? با bind() در هر دستور SQL
 # dup-keys   → یکتایی کلید همهٔ دکمه‌ها
 # cb-audit   → هر کلید دکمه‌ای که صفحه می‌سازد، شاخهٔ روتر دارد
-# selftest   → ۲۶۸ تست الگوریتمی
+# selftest   → ۲۷۰ تست الگوریتمی
 ```
 
 همین دروازه در CI روی هر push و PR اجرا می‌شود؛ استقرار، پس از انتشار، سلامت و ضربان زمان‌بند را روی نسخهٔ زنده بررسی می‌کند.
@@ -178,7 +178,7 @@ MIT — [LICENSE](LICENSE). داده از APIهای عمومی گیت‌هاب،
 
 # English
 
-**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 416 glass labels, 202 routed callback keys, 33 D1 tables, 268 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
+**GitHub Lens Ultra** — an open-source observatory for Telegram, on Cloudflare Workers: 93 commands, 416 glass labels, 202 routed callback keys, 33 D1 tables, 270 tests, 5 UI languages. **[Bot](https://t.me/Gitguts_bot)** · **[Health](https://ghlens-ultra.gitguts.workers.dev/health)**
 
 **Core** — hybrid semantic + lexical search (1024-dim `bge-m3` embeddings stored **in D1**, cosine similarity in SQL, no Vectorize dependency) · 12-tab dossier from a single GraphQL query (growth, bus factor, merge rate, releases, CI, security) · repo chat with citations · structure-preserving README translation · direct downloads with streaming splits · OSV dependency scans, leaked-key hunting, CVE alerts · package conversion (deb ⇄ rpm ⇄ pacman ⇄ apk).
 

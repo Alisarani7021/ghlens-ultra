@@ -709,6 +709,18 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("caption: says the prompt came from the fallback", caption.includes("از خودِ متن"));
 }
 
+// ── no model call may outlive the update's budget ─────────────────────────
+{
+  /* A fixed 90 s socket timeout on a pooled key is not a timeout at all: the
+     platform's window for the whole update is about half a minute, so a hanging
+     provider means the reply is cut off mid-sentence and the user sees a spinner.
+     Any fixed long value here is a bug, whichever line it appears on. */
+  const brain = readFileSync("src/ai/brain.ts", "utf8");
+  eq("brain: no fixed long timeout on a model call",
+     [...brain.matchAll(/AbortSignal\.timeout\((\d{4,})\)/g)].map((m) => m[1]), []);
+  ok("brain: pooled calls are bounded by the caller's budget", /AbortSignal\.timeout\(msLeft\(\)\)/.test(brain));
+}
+
 // ── autonomy: the gate belongs to the owner, not to the graph ─────────────
 {
   const sent = [];

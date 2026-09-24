@@ -424,13 +424,19 @@ export class AiBrain {
 
     const pool = new KeyPool(this.env);
     let lastPoolError = "";
+    /* The caller's budget is the whole answer's budget. A donated key that hangs
+       must not outlive it — the timeout here used to be a flat 90 s, which is how
+       a six-second answer became a thirty-six-second wait and then silence. */
+    const t0 = Date.now();
+    const msLeft = () => Math.max(1_500, budget - (Date.now() - t0));
     for (const k of keys) {
+      if (budget - (Date.now() - t0) < 1_500) { lastPoolError = "pool: out of time"; break; }
       try {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
           body: JSON.stringify({ model: k.model || "auto", messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
-          signal: AbortSignal.timeout(90000),
+          signal: AbortSignal.timeout(msLeft()),
         });
         if (!res.ok) {
           const body = (await res.text()).slice(0, 200);
@@ -443,7 +449,7 @@ export class AiBrain {
                 method: "POST",
                 headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
                 body: JSON.stringify({ model: fixed_, messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
-                signal: AbortSignal.timeout(90000),
+                signal: AbortSignal.timeout(msLeft()),
               }).catch(() => null);
               if (retry?.ok) {
                 const rj: any = await retry.json().catch(() => ({}));
@@ -479,7 +485,7 @@ export class AiBrain {
               ...(KeyPool.REASONING.test(better) ? { reasoning_effort: "low" } : {}),
               temperature: opts.temperature ?? 0.35,
             }),
-            signal: AbortSignal.timeout(90000),
+            signal: AbortSignal.timeout(msLeft()),
           }).catch(() => null);
           if (third?.ok) {
             const j3: any = await third.json().catch(() => ({}));
