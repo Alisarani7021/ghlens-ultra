@@ -184,6 +184,12 @@ export class HubOS {
         }).join("\n\n")
       : (fa ? "<i>هنوز کانکتوری وصل نیست.</i>" : "<i>No connectors yet.</i>");
 
+    /* Deleting a connector is a one-way door — a workflow that pointed at it
+       silently stops receiving anything — so the row key opens a confirm card
+       rather than removing it on the spot. */
+    const delRows = rows.map((r) => [
+      { text: `🗑 ${(r.label || r.kind).slice(0, 28)}`, cb: `hos:conndel:${r.id}` },
+    ]);
     return h.reply(
       (fa
         ? `🔌 <b>کانکتورها</b>\n\n<blockquote>هر سرویس بیرونی یک آداپتور دارد: تست می‌شود، رویداد می‌فرستد، و دستور می‌گیرد.</blockquote>\n\n`
@@ -192,9 +198,45 @@ export class HubOS {
         ...connectorKinds().map((k) => [{ text: `➕ ${CONNECTORS[k].label}`, cb: `hos:connadd:${k}` }]),
         rows.length ? [{ text: fa ? "🧪 تست همه" : "🧪 Test all", cb: "hos:conntest:all" }] : [],
         [{ text: fa ? "🧪 رویداد آزمایشی بفرست" : "🧪 Fire a test event", cb: "hos:selftest" }],
+        ...delRows,
       ),
       !!h.cbId,
     );
+  }
+
+  /** «🗑 @iguts9» → "are you sure", because a connector is not a draft. */
+  async connectorDeletePrompt(h: H, id: string) {
+    const fa = h.loc === "fa";
+    const row = await h.env.DB.prepare(
+      `SELECT id, kind, label, config FROM hub_connectors WHERE id=? AND owner_id=?`,
+    ).bind(id, h.u.id).first<any>().catch(() => null);
+    if (!row) return h.toast(fa ? "پیدا نشد" : "not found");
+    const c = connector(row.kind);
+    let cfg: any = {};
+    try { cfg = JSON.parse(row.config ?? "{}"); } catch { /* {} */ }
+    const target = cfg.channel || cfg.url || (cfg.repos ?? []).join(", ") || "—";
+    return h.reply(
+      `🗑 <b>${fa ? "حذف کانکتور" : "Delete connector"}</b>\n\n` +
+        `<blockquote>${tgEscape(c?.label ?? row.kind)} — <code>${tgEscape(String(target))}</code></blockquote>\n\n` +
+        (fa
+          ? "با حذف این کانکتور، ورک‌فلوهایی که به آن وصل بودند دیگر رویدادی نمی‌گیرند. می‌توانی بعداً از نو اضافه‌اش کنی."
+          : "Workflows wired to it stop receiving events. You can add it again later."),
+      kb(
+        [{ text: fa ? "✅ بله، حذف کن" : "✅ Yes, delete", cb: `hos:conndel2:${id}` }],
+        [{ text: fa ? "◀️ نگهش دار" : "◀️ Keep it", cb: "hos:conn" }],
+      ),
+      !!h.cbId,
+    );
+  }
+
+  async deleteConnector(h: H, id: string) {
+    const fa = h.loc === "fa";
+    const row = await h.env.DB.prepare(`SELECT label FROM hub_connectors WHERE id=? AND owner_id=?`)
+      .bind(id, h.u.id).first<any>().catch(() => null);
+    await h.env.DB.prepare(`DELETE FROM hub_connectors WHERE id=? AND owner_id=?`).bind(id, h.u.id)
+      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    await h.toast(fa ? "🗑 حذف شد" : "🗑 deleted", true);
+    return this.connectors(h);
   }
 
   async connectorAddPrompt(h: H, kind: string) {
@@ -480,6 +522,7 @@ export class HubOS {
       (fa ? `⚙️ <b>ورک‌فلوها</b>\n\n` : `⚙️ <b>Workflows</b>\n\n`) + body,
       kb(
         ...wfs.slice(0, 4).map((w) => [{ text: `▶️ ${w.name.slice(0, 34)}`, cb: `hos:wfrun:${w.id}` }]),
+        ...wfs.slice(0, 4).map((w) => [{ text: `🗑 ${w.name.slice(0, 34)}`, cb: `hos:wfdel:${w.id}` }]),
         [{ text: fa ? "📚 برنامه‌های آماده" : "📚 Playbooks", cb: "hos:books" }, { text: fa ? "🧪 مأموریت" : "🧪 Mission", cb: "hos:mission" }],
       ),
       !!h.cbId,
@@ -514,10 +557,32 @@ export class HubOS {
     return this.workflowView(h, id);
   }
 
+  /** Destructive buttons ask first — deleting a workflow also deletes its history. */
+  async workflowDeletePrompt(h: H, id: string) {
+    const fa = h.loc === "fa";
+    const wf = await getWorkflow(h.env, id);
+    if (!wf) return h.toast("?");
+    const runs = await h.env.DB.prepare(`SELECT COUNT(*) AS n FROM hub_runs WHERE workflow_id=?`)
+      .bind(id).first<{ n: number }>().catch(() => null);
+    return h.reply(
+      `🗑 <b>${fa ? "حذف ورک‌فلو" : "Delete workflow"}</b>\n\n` +
+        `<blockquote>${tgEscape(wf.name)}</blockquote>\n\n` +
+        `<b>${wf.dag.nodes.length}</b> ${fa ? "گره" : "nodes"} · <b>${Number(runs?.n ?? 0)}</b> ${fa ? "اجرا" : "runs"} · ` +
+        (wf.on_event ? fa ? `روی <code>${tgEscape(wf.on_event)}</code>` : "manual" : fa ? "دستی" : "manual") +
+        `\n\n${fa ? "اگر فقط می‌خواهی خاموش شود، «⏸ غیرفعال» کافی است — تاریخچه می‌ماند." : "To just stop it, disable it instead — the history stays."}`,
+      kb(
+        [{ text: fa ? "✅ بله، حذف کن" : "✅ Yes, delete", cb: `hos:wfdel2:${id}` }],
+        [{ text: fa ? "⏸ غیرفعالش کن" : "⏸ Disable instead", cb: `hos:wftog:${id}` }],
+        [{ text: fa ? "◀️ نگهش دار" : "◀️ Keep it", cb: `hos:wfv:${id}` }],
+      ),
+      !!h.cbId,
+    );
+  }
+
   async deleteWorkflow(h: H, id: string) {
     await h.env.DB.prepare(`DELETE FROM hub_workflows WHERE id=? AND owner_id=?`).bind(id, h.u.id)
       .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
-    await h.toast("🗑");
+    await h.toast("🗑", true);
     return this.workflows(h);
   }
 

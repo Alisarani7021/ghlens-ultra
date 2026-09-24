@@ -668,5 +668,46 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("ai: the reason is a timeout, not a shrug", brain.failure, "timeout");
 }
 
+// ── media kit ──────────────────────────────────────────────────────────
+// The cover is what gets published, so it has to be well-formed, right-to-left
+// for Persian, and the kit has to be complete even when no model answers.
+{
+  const out = join(scratch, "media.mjs");
+  execSync(`npx esbuild src/hub/media.ts --bundle --format=esm --platform=neutral --outfile=${out} --log-level=error`, { stdio: "inherit" });
+  const MD = await import(out);
+
+  const fa = MD.renderCover({ title: "انتشار نسخهٔ جدید در کانال", subtitle: "Bun v1.2.0", badge: "ریلیز", handle: "@Gitguts_bot" });
+  ok("cover: is svg", /^<svg[\s\S]*<\/svg>$/.test(fa.trim()));
+  // containers must close; void elements must self-close. (A rect is written
+  // <rect .../>, so counting it as "unclosed" is a bug in a naive check, not in
+  // the cover.)
+  const containers = ["svg", "defs", "g", "text", "linearGradient", "radialGradient", "pattern"];
+  ok("cover: every container tag is balanced", containers.every((t) => {
+    const open = (fa.match(new RegExp(`<${t}[ >]`, "g")) ?? []).length;
+    const close = (fa.match(new RegExp(`</${t}>`, "g")) ?? []).length;
+    return open === close && open > 0;
+  }));
+  const voids = ["rect", "circle", "path", "stop"];
+  ok("cover: every void element self-closes", voids.every((t) =>
+    (fa.match(new RegExp(`<${t}\\b[^>]*>`, "g")) ?? []).every((el) => el.trimEnd().endsWith("/>"))));
+  ok("cover: persian title is right-aligned", fa.includes('direction="rtl"') && fa.includes('text-anchor="end"'));
+  ok("cover: title text is present", fa.includes("انتشار نسخهٔ جدید"));
+
+  const en = MD.renderCover({ title: "New release published", handle: "@Gitguts_bot" });
+  ok("cover: latin title stays left-aligned", en.includes('text-anchor="start"') && !en.includes('direction="rtl"'));
+
+  // the fallback chain: no model → a prompt built from the post itself
+  const rule = MD.rulePrompt("Bun v1.2.0 منتشر شد: ساخت بستهٔ مرورگر و رفع نشتی حافظه", "fa");
+  ok("media: rule prompt exists when every model fails", typeof rule.prompt === "string" && rule.prompt.length > 30);
+  eq("media: it is honest about its origin", rule.origin, "rule");
+
+  const noAi = { chat: async () => "", json: async () => null };
+  const kit = await MD.mediaKit({}, noAi, { title: "ریلیز تازه", body: "خط اول\nخط دوم", lang: "fa" }, { withPrompt: true });
+  ok("media: the kit is never incomplete", !!kit.svg && !!kit.prompt && kit.prompt.origin === "rule");
+
+  const caption = MD.mediaKitCaption({ title: "ریلیز تازه" }, kit.prompt, true);
+  ok("caption: says the prompt came from the fallback", caption.includes("از خودِ متن"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

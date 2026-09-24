@@ -24,6 +24,17 @@ export interface H {
   userToken?: string;
   args: string[];
   text: string;
+  /**
+   * Milliseconds left before this update's own deadline.
+   *
+   * Telegram updates are handled in `ctx.waitUntil`, which the platform only
+   * guarantees for about thirty seconds after the response has been sent. A
+   * handler that makes two AI calls in a row (a classifier, then the answer) can
+   * spend that twice, and then the isolate is torn down with the work half done:
+   * the "thinking…" message stays and no answer ever arrives. Every AI call a
+   * handler makes passes this number so the *whole* handler fits in the window.
+   */
+  budget(): number;
   msg?: Message;
   /** Edits the current message if we're in a callback, otherwise sends. */
   reply(body: string, keyboard?: InlineKeyboardMarkup, edit?: boolean): Promise<void>;

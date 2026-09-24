@@ -275,7 +275,7 @@ export class MultiHub {
       `- DO NOT output conversational preambles like "Here is your post:". Output ONLY the raw post.`;
 
     const generated = await h.ai.chat(prompt, {
-      tier: "smart",
+      deadlineMs: h.budget(), tier: "smart",
       max_tokens: 1600,
       temperature: 0.25,
       feature: "channel_editorial",
@@ -345,7 +345,7 @@ export class MultiHub {
       `Output ONLY the formatted result. Do not wrap in markdown quotes.`;
 
     const execution = await h.ai.chat(prompt, {
-      tier: "smart",
+      deadlineMs: h.budget(), tier: "smart",
       max_tokens: 1200,
       temperature: 0.1,
       feature: "py_sandbox_profile",

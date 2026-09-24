@@ -41,7 +41,7 @@ export class AppGen {
       `Output ONLY the raw JSON array. Do not wrap in markdown quotes or preamble.`;
 
     const res = await h.ai.chat(prompt, {
-      tier: "smart",
+      deadlineMs: h.budget(), tier: "smart",
       max_tokens: 3000,
       temperature: 0.2,
       feature: "app_gen",

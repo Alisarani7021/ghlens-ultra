@@ -69,7 +69,7 @@ export class ArchitectureExplainer {
       `- Total length strictly under 2800 characters.`;
 
     const analysis = await h.ai.chat(prompt, {
-      tier: "smart",
+      deadlineMs: h.budget(), tier: "smart",
       max_tokens: 1500,
       temperature: 0.2,
       feature: "architecture",

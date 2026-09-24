@@ -104,6 +104,14 @@ export function renderCover(spec: CoverSpec): string {
   const W = spec.width ?? 1200;
   const H = spec.height ?? 630;
   const theme = spec.theme ?? "dark";
+  /* Persian and Arabic are read right to left, and an SVG <text> is laid out by
+     the renderer — without this the title of every Persian cover sits on the
+     wrong side, which is exactly the kind of half-finished detail that shows up
+     the moment it is published. */
+  const rtl = /[\u0600-\u06FF]/.test(spec.title);
+  const anchor = rtl ? "end" : "start";
+  const edge = rtl ? W - 72 : 72;
+  const dir = rtl ? ` direction="rtl"` : "";
   const accent = spec.accent ?? accentFor(spec.title, theme);
   const bg0 = theme === "dark" ? "#0b1120" : "#f8fafc";
   const bg1 = theme === "dark" ? "#111c33" : "#e2e8f0";
@@ -123,32 +131,46 @@ export function renderCover(spec: CoverSpec): string {
       <stop offset="0%" stop-color="${bg0}"/>
       <stop offset="100%" stop-color="${bg1}"/>
     </linearGradient>
-    <radialGradient id="glow" cx="18%" cy="12%" r="72%">
+    <radialGradient id="glow" cx="${rtl ? "82%" : "18%"}" cy="12%" r="72%">
       <stop offset="0%" stop-color="${accent}" stop-opacity="0.42"/>
       <stop offset="60%" stop-color="${accent}" stop-opacity="0.08"/>
       <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0.15"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="${theme === "dark" ? "#ffffff" : "#0f172a"}" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
   </defs>
 
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <rect width="${W}" height="${H}" fill="url(#grid)"/>
   <rect width="${W}" height="${H}" fill="url(#glow)"/>
   <rect x="0" y="0" width="14" height="${H}" fill="${accent}"/>
+  <!-- a hairline frame: it makes the cover read as a designed card, not a slide -->
+  <rect x="24" y="24" width="${W - 48}" height="${H - 48}" rx="18" fill="none" stroke="${theme === "dark" ? "#ffffff" : "#0f172a"}" stroke-opacity="0.08"/>
 
-  ${spec.badge ? `<g transform="translate(72,72)">
+  ${spec.badge ? `<g transform="translate(${rtl ? W - 72 : 72},72)${rtl ? " translate(-100%,0)" : ""}">
     <rect rx="14" ry="14" width="${Math.max(120, spec.badge.length * 19 + 48)}" height="56" fill="${accent}" fill-opacity="0.16" stroke="${accent}" stroke-opacity="0.5"/>
-    <text x="24" y="37" font-size="27" fill="${accent}" font-weight="700">${esc(spec.badge)}</text>
+    <text x="${rtl ? Math.max(120, spec.badge.length * 19 + 48) - 24 : 24}" y="37" text-anchor="${anchor}" font-size="27" fill="${accent}" font-weight="700"${dir}>${esc(spec.badge)}</text>
   </g>` : ""}
 
   <g>
-    ${titleLines.map((line, i) => `<text x="72" y="${startY + i * lineH}" font-size="${titleSize}" font-weight="800" fill="${fg}">${esc(line)}</text>`).join("\n    ")}
+    ${titleLines.map((line, i) => `<text x="${edge}" y="${startY + i * lineH}" text-anchor="${anchor}" font-size="${titleSize}" font-weight="800" fill="${fg}"${dir}>${esc(line)}</text>`).join("\n    ")}
   </g>
 
-  ${spec.subtitle ? `<text x="72" y="${startY + blockH + 8}" font-size="34" fill="${muted}">${esc(wrapText(spec.subtitle, 54, 1)[0])}</text>` : ""}
+  <!-- the accent rule separates title from subtitle and gives the eye a place
+       to rest between them -->
+  <rect x="${rtl ? W - 72 - 96 : 72}" y="${Math.round((H - blockH) / 2) - 46}" width="96" height="6" rx="3" fill="url(#rule)"/>
 
-  ${spec.handle ? `<g transform="translate(72,${H - 68})">
+  ${spec.subtitle ? `<text x="${edge}" y="${startY + blockH + 8}" text-anchor="${anchor}" font-size="34" fill="${muted}"${dir}>${esc(wrapText(spec.subtitle, 54, 1)[0])}</text>` : ""}
+
+  ${spec.handle ? `<g transform="translate(${rtl ? W - 72 : 72},${H - 68})">${rtl ? '<g transform="translate(-100,0) scale(-1,1)">' : ""}
     <circle cx="14" cy="0" r="10" fill="${accent}"/>
     <text x="40" y="10" font-size="28" fill="${muted}" font-weight="600">${esc(spec.handle)}</text>
-  </g>` : ""}
+  ${rtl ? "</g>" : ""}</g>` : ""}
 
   <g opacity="0.5">
     ${[0, 1, 2, 3, 4, 5].map((i) => `<circle cx="${W - 60 - i * 34}" cy="${H - 58}" r="${4 + i}" fill="${accent}" fill-opacity="${0.55 - i * 0.08}"/>`).join("\n    ")}
@@ -159,6 +181,8 @@ export function renderCover(spec: CoverSpec): string {
 // ── the AI half ────────────────────────────────────────────────────────────
 
 export interface ImagePrompt {
+  /** "ai" when a model wrote it, "rule" when the fallback did */
+  origin?: "ai" | "rule";
   prompt: string;
   style: string;
   negative: string;
@@ -175,6 +199,22 @@ export interface ImagePrompt {
  * screen reader or a channel reader scrolling past actually needs.
  */
 export async function imagePromptFor(ai: AiBrain, post: string, lang = "fa"): Promise<ImagePrompt | null> {
+  /* Model first, then a second model, then a rule.
+     The owner's instruction was "if a model cannot, switch to the next" — and the
+     kit must never arrive half-built, because it is meant to be published. So:
+     fast tier → smart tier (a different model family, so a provider-side failure
+     of one does not repeat) → a deterministic art direction built from the post
+     itself. The last one is not as clever, and it is honest about being a
+     fallback. */
+  for (const tier of ["fast", "smart"] as const) {
+    const out = await imagePromptForTier(ai, post, lang, tier);
+    if (out) return out;
+  }
+  return rulePrompt(post, lang);
+}
+
+/** One attempt at a given tier; null when that model produced nothing usable. */
+async function imagePromptForTier(ai: AiBrain, post: string, lang: string, tier: "fast" | "smart"): Promise<ImagePrompt | null> {
   const raw = await ai.chat(
     `You art-direct a cover image for a technology channel post.\n\n` +
       `POST:\n"""${post.slice(0, 1200)}"""\n\n` +
@@ -184,10 +224,34 @@ export async function imagePromptFor(ai: AiBrain, post: string, lang = "fa"): Pr
       `"negative":"what to avoid, 5-10 words","aspect":"16:9 | 1:1 | 9:16",` +
       `"alt":"one short sentence in ${lang === "fa" ? "Persian" : lang} describing the image for a screen reader"}\n\n` +
       `The image must make sense next to the post and must contain NO lettering — covers with text are rendered separately.`,
-    { tier: "fast", max_tokens: 400, temperature: 0.6, json: true, feature: "hub:imgprompt" },
-  );
+    { tier, max_tokens: 400, temperature: 0.6, json: true, feature: "hub:imgprompt", deadlineMs: 12_000 },
+  ).catch(() => "");
   const j = safeJson<ImagePrompt>(raw);
-  return j?.prompt ? j : null;
+  if (!j?.prompt) return null;
+  return { ...j, origin: "ai" };
+}
+
+/**
+ * The fallback art direction.
+ *
+ * Built from the post itself: its leading nouns, its language and a fixed
+ * palette per theme. It is deliberately generic — the alternative is an empty
+ * field in a kit the owner is about to publish.
+ */
+export function rulePrompt(post: string, lang = "fa"): ImagePrompt {
+  const plain = stripHtml(post).replace(/\s+/g, " ").trim();
+  const words = plain.split(" ").filter((w) => w.length > 3).slice(0, 6).join(", ");
+  const fa = lang === "fa";
+  return {
+    origin: "rule",
+    prompt: fa
+      ? `تصویر مفهومي براي موضوع «${plain.slice(0, 80)}» — عناصر اصلي: ${words || "نرم‌افزار و داده"}؛ ترکیب تیره با نور سبز-فیروزه‌ای، بدون هیچ متني در تصویر`
+      : `A conceptual cover for "${plain.slice(0, 80)}" — key elements: ${words || "software and data"}; dark composition with teal-green light, no lettering in the image`,
+    style: "neon-cyber",
+    negative: fa ? "متن، لوگو، صورت انسان، کلیشهٔ سهام" : "text, logos, faces, stock-photo clichés",
+    aspect: "16:9",
+    alt: fa ? `تصویر مفهومي دربارهٔ ${plain.slice(0, 60)}` : `Conceptual illustration about ${plain.slice(0, 60)}`,
+  };
 }
 
 function safeJson<T>(raw: string): T | null {
@@ -240,7 +304,11 @@ export function mediaKitCaption(spec: CoverSpec, prompt: ImagePrompt | null, fa 
     ``,
     `• ${fa ? "عنوان" : "title"}: <b>${tgEscape(spec.title)}</b>`,
     spec.badge ? `• ${fa ? "نشان" : "badge"}: <code>${tgEscape(spec.badge)}</code>` : "",
-    prompt ? `\n🎨 <b>${fa ? "پرامپت تصویر" : "image prompt"}</b>\n<blockquote>${tgEscape(prompt.prompt)}\n\n<i>${tgEscape(prompt.style)} · ${tgEscape(prompt.aspect)}</i></blockquote>` : "",
+    prompt ? `\n🎨 <b>${fa ? "پرامپت تصویر" : "image prompt"}</b>` +
+      (prompt.origin === "rule"
+        ? `\n<i>${fa ? "مدل‌ها جواب ندادند، این پرامپت از خودِ متن ساخته شد — همچنان قابل استفاده است." : "no model answered; built from the post itself."}</i>`
+        : "") +
+      `\n<blockquote>${tgEscape(prompt.prompt)}\n\n<i>${tgEscape(prompt.style)} · ${tgEscape(prompt.aspect)}</i></blockquote>` : "",
     prompt?.alt ? `\n♿️ <b>alt</b>: ${tgEscape(prompt.alt)}` : "",
   ].filter(Boolean);
   return lines.join("\n");

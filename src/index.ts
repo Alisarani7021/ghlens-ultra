@@ -421,7 +421,19 @@ interface ProgressGuard {
   loading: boolean;
   settled: boolean;
   lastLoader?: string;
+  /** when this update started, so ai calls can share one deadline */
+  startedAt?: number;
 }
+
+/**
+ * How long an update may take end to end.
+ *
+ * 22s, not 30s: the platform's guarantee is "about thirty seconds after the
+ * response", and the handler still has to send its answer after the model has
+ * finished. Anything that runs long must give up and say so — a message that
+ * arrives is worth more than a perfect one that never does.
+ */
+const UPDATE_BUDGET_MS = 22_000;
 
 async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
   const tg = new Telegram(env);
@@ -429,7 +441,7 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
   const ai = new AiBrain(env);
   const card = new RepoCard(env, store);
 
-  const guard: ProgressGuard = { chatId: 0, loading: false, settled: true };
+  const guard: ProgressGuard = { chatId: 0, loading: false, settled: true, startedAt: Date.now() };
   try {
     if (update.callback_query) {
       guard.chatId = update.callback_query.from.id;
@@ -444,11 +456,20 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
   } finally {
     if (guard.loading && !guard.settled && guard.chatId) {
       console.error("stuck-flow", guard.lastLoader ?? "?");
+      /* Say the most useful true thing. Three cases, in order of likelihood:
+         the model was slow (the platform's window closed first — the cause of
+         every "thinking…" that never ends), the quota is spent, or genuinely
+         nothing answered. */
       const aiOff = await aiHalted(env);
+      const ai = new AiBrain(env);
       const text = aiOff
         ? "⚠️ این بخش به هوش مصنوعی نیاز دارد و سهمیه‌اش امروز تمام شده.\n" +
           "تا برگشتنش می‌توانی از کارت مخزن، داغ‌ترین‌ها، کاوش عمیق، ابزارها و جست‌وجوی واژگانی استفاده کنی."
-        : "⚠️ این بخش پاسخ نداد. یک بار دیگر بزن؛ اگر تکرار شد از منوی اصلی ادامه بده.";
+        : ai.failure === "timeout"
+          ? "⏱ مدل در این نوبت کند بود و جواب در وقت مقرر نرسید — خراب نیست.\n" +
+            "• یک بار دیگر بزن (اغلب بار دوم سریع است)\n" +
+            "• یا کوتاه‌تر بپرس"
+          : "⚠️ این بخش پاسخ نداد. یک بار دیگر بزن؛ اگر تکرار شد از منوی اصلی ادامه بده.";
       // a stuck flow gets two exits: home, or the deep-scout section
       const keyboard = { inline_keyboard: [[{ text: "🏠 منوی اصلی", callback_data: "m:home" }, { text: "🛰 کاوش عمیق", callback_data: "s:home" }]] };
       try {
@@ -570,6 +591,10 @@ async function buildH(
     userToken: userToken ?? undefined,
     session,
     gh: () => gh,
+    budget() {
+      const started = guard?.startedAt ?? Date.now();
+      return Math.max(2_000, started + UPDATE_BUDGET_MS - Date.now());
+    },
     async reply(body, keyboard, edit = false) {
       if (guard) guard.settled = true;
       if (edit && h.cbId && msgId) {
@@ -1659,11 +1684,14 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "conn") return hubOS.connectors(h);
         if (action === "connadd") return hubOS.connectorAddPrompt(h, arg);
         if (action === "conntest") return hubOS.connectorTest(h, arg || "all");
+        if (action === "conndel") return hubOS.connectorDeletePrompt(h, arg);
+        if (action === "conndel2") return hubOS.deleteConnector(h, arg);
         if (action === "poll") return hubOS.connectorPoll(h, arg);
         if (action === "wf") return hubOS.workflows(h);
         if (action === "wfv") return hubOS.workflowView(h, arg);
         if (action === "wftog") return hubOS.toggleWorkflow(h, arg);
-        if (action === "wfdel") return hubOS.deleteWorkflow(h, arg);
+        if (action === "wfdel") return hubOS.workflowDeletePrompt(h, arg);
+        if (action === "wfdel2") return hubOS.deleteWorkflow(h, arg);
         if (action === "wfrun") return hubOS.runWorkflowById(h, arg);
         if (action === "queue") return hubOS.queue(h);
         if (action === "view") return hubOS.viewContent(h, arg);
@@ -2227,7 +2255,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
 
 <div class="foot">
   <span>✅ سرویس‌ورکر فعال — <a href="${health}">${health}</a></span>
-  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۵۲ تست</span>
+  <span>🗄 ۳۳ جدول D1 · ⚙️ ۹۳ فرمان · ✅ ۲۶۲ تست</span>
   <span>💻 <a href="https://github.com/${repo}">github.com/${repo}</a></span>
   <span>© ${year}</span>
 </div>
@@ -2236,7 +2264,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 252 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 262 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

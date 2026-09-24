@@ -65,10 +65,15 @@ export class Assistant {
     await h.store.addMessage(chatId, "user", question);
     await h.loading(fa ? "🧠 دارم فکر می‌کنم…" : "🧠 thinking…");
 
-    // 1. Does the question need live data? Ask a cheap classifier, then fetch.
+    /* 1. Does the question need live data? Ask a cheap classifier, then fetch.
+       Both calls come out of the *same* update budget: a classifier given its own
+       full deadline plus an answer given another can exceed the platform's window
+       between them, and then neither is delivered. The classifier is a binary
+       judgement — a few seconds is plenty, and the rest belongs to the answer the
+       user is actually waiting for. */
     const plan = await h.ai.json<{ needs_github: boolean; query: string | null }>(
       `User question: "${question}"\nDoes answering this well require looking up repositories on GitHub right now? Return {"needs_github":true/false,"query":"github search query or null"}`,
-      { tier: "fast", max_tokens: 120, cacheKey: `cls:${hash(question)}`, cacheTtl: 86400 },
+      { tier: "fast", max_tokens: 120, cacheKey: `cls:${hash(question)}`, cacheTtl: 86400, deadlineMs: Math.min(5_000, h.budget()) },
     );
 
     let grounding = "";
@@ -93,7 +98,8 @@ export class Assistant {
         `\nUser: ${question}${grounding}`,
       // 900 rather than 1400: a long answer is worthless if the platform's time
       // for this update runs out before the model finishes writing it.
-      { tier: "smart", max_tokens: 900, temperature: 0.5, userId: h.u.id, feature: "assistant" },
+      // whatever is left of this update, not a fresh full deadline
+      { tier: "smart", max_tokens: 900, temperature: 0.5, userId: h.u.id, feature: "assistant", deadlineMs: h.budget() },
     );
 
     await h.store.addMessage(chatId, "assistant", answer || "");
