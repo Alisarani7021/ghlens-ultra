@@ -585,16 +585,31 @@ async function buildH(
   // (5000/h) belongs to the user instead of the deployment
   const userToken = user?.github_token_enc ? await decryptToken(env, user.github_token_enc) : null;
   const gh = new GithubRest(env, userToken ?? undefined);
+  /* The platform allows roughly half a minute per update and every model call in
+     this handler draws from that one allowance. A call that forgets its deadline
+     runs on the default 20 s; two of them can never both land, and the user sees a
+     spinner that never resolves. Clamping here — at the single place every feature
+     gets its `ai` from — means a call site added later inherits the bound instead
+     of having to remember it. */
+  const left = () => Math.max(2_000, (guard?.startedAt ?? Date.now()) + UPDATE_BUDGET_MS - Date.now());
+  const aiClamped = new Proxy(ai, {
+    get(target: any, prop: string | symbol, recv: any) {
+      const v = Reflect.get(target, prop, recv);
+      if (typeof v !== "function") return v;              // `ai.failure` reads pass through
+      const bound = v.bind(target);
+      if (prop !== "chat" && prop !== "json") return bound;
+      return (prompt: string, o: any = {}) =>
+        bound(prompt, { ...(o ?? {}), deadlineMs: Math.min(Number(o?.deadlineMs ?? 1e9) || 1e9, left()) });
+    },
+  }) as AiBrain;
+
   const h: H = {
-    env, store, tg, ai, card, u, user, loc, chatId, msgId,
+    env, store, tg, ai: aiClamped, card, u, user, loc, chatId, msgId,
     cbId: opts.cbId, args: opts.args ?? [], text: opts.text ?? "", msg: opts.msg,
     userToken: userToken ?? undefined,
     session,
     gh: () => gh,
-    budget() {
-      const started = guard?.startedAt ?? Date.now();
-      return Math.max(2_000, started + UPDATE_BUDGET_MS - Date.now());
-    },
+    budget: left,
     async reply(body, keyboard, edit = false) {
       if (guard) guard.settled = true;
       if (edit && h.cbId && msgId) {
@@ -1126,7 +1141,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
         : h.reply(
             "📂 <b>فایل‌های مخزن</b>\nفرمت: <code>/files owner/repo</code> · مثلاً <code>/files facebook/react</code>\n" +
               "<i>درخت فایل‌ها را با پوشه‌بندی نشان می‌دهم؛ روی پوشه بزن تا داخلش را ببینی.</i>",
-            kb([{ text: "🛰 کاوش مخزن", cb: "dis:home" }, ]),
+            kb([{ text: "🛰 کاوش مخزن", cb: "s:home" }, ]),
           );
     case "/card": case "/share":
       return arg.trim()
@@ -1710,7 +1725,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "integ") return hubOS.integrations(h);
         if (action === "deploy") return hubOS.deployPrompt(h);
         if (action === "guide") return hubOS.guide(h);
-        if (action === "auto") return hubOS.autonomy(h);
+        if (action === "auto") {
+          // the screen's own two buttons: `hos:auto:on|off`
+          if (arg === "on" || arg === "off") return hubOS.setAutonomy(h, arg === "on" ? "auto" : "manual");
+          return hubOS.autonomy(h);
+        }
         if (action === "setauto") return hubOS.setAutonomy(h, arg === "auto" ? "auto" : "manual");
         break;
       // ── admin ──
@@ -2264,7 +2283,7 @@ code{background:#0b1220;border:1px solid var(--line);padding:1px 6px;border-radi
   <b>GitHub Lens Ultra</b> — an open-source observatory for Telegram: semantic search, 12-tab repository dossiers,
   multi-model AI with cited repo chat, streaming downloads with OSV security scans, and an event-driven hub that
   drafts channel posts and waits for a human. Entirely on Cloudflare Workers.
-  <br>93 commands · 33 D1 tables · 262 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
+  <br>93 commands · 33 D1 tables · 268 tests · 5 languages · <a href="https://t.me/${bot}">open the bot</a>
 </div>
 
 </div></body></html>`;

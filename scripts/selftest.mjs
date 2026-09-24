@@ -709,5 +709,37 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("caption: says the prompt came from the fallback", caption.includes("از خودِ متن"));
 }
 
+// ── autonomy: the gate belongs to the owner, not to the graph ─────────────
+{
+  const sent = [];
+  const stubEnv = { DB: { prepare: () => ({ bind: () => ({ run: async () => ({}), first: async () => null }) }) } };
+  const ctx = (autonomy, dry) => ({
+    env: stubEnv,
+    ai: { chat: async () => "", json: async () => null },
+    tg: { sendMessage: async (to, text) => { sent.push({ to, text }); return { ok: true, result: { message_id: 1 } }; } },
+    owner_id: 111, trace: "tr_test", autonomy, dry,
+  });
+  const wf = {
+    id: "wf_test", owner_id: 111, name: "t", mission: "", enabled: 1, runs: 0, created_at: 0, on_event: "release",
+    dag: { entry: "gate", nodes: [
+      { id: "gate", kind: "approval", cfg: { from: "post" }, next: ["end"] },
+      { id: "end", kind: "stop" },
+    ] },
+  };
+  const auto = await EN.runWorkflow(ctx("auto", false), wf, { post: "متن آمادهٔ انتشار" });
+  eq("autonomy auto: the run does not stop at the gate", auto.state, "ok");
+  ok("autonomy auto: the step says it was skipped", /بدون تأیید/.test(auto.steps[0].summary));
+  ok("autonomy auto: the owner is still told", sent.some((s) => /حالت خودکار/.test(s.text)));
+
+  sent.length = 0;
+  const manual = await EN.runWorkflow(ctx("manual", false), wf, { post: "متن آمادهٔ انتشار" });
+  eq("autonomy manual: the run waits for a human", manual.state, "waiting");
+  ok("autonomy manual: the card carries the approve/reject keys", sent.some((s) => /در انتظار تأیید/.test(s.text)));
+
+  sent.length = 0;
+  const dry = await EN.runWorkflow(ctx("auto", true), wf, { post: "x" });
+  ok("dry run never asks and never posts", dry.steps[0].summary.includes("آزمایشی") && sent.length === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -194,7 +194,7 @@ async function daily(env: Env, store: Store, ctx: Ctx) {
 
   const digestMarkup = kb(
     [
-      { text: "🎙 پادکست صوتی", cb: "p:today" },
+      { text: "📈 روند ۷ روز", cb: "t:growth:7" },
       { text: "🔥 لیست کامل", cb: "t:b:0,daily,all" },
     ],
     [{ text: "🔎 جست‌وجوی امروز", cb: "n:search" }],

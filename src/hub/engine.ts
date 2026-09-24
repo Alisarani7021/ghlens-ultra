@@ -449,6 +449,28 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
     case "approval": {
       // A preview never knocks on anyone's door; it reports what it would ask.
       if (ctx.dry) return { patch: {}, summary: "آزمایشی — بدون پرسش تأیید", branch: node.next ?? [] };
+      const autonomy = ctx.autonomy ?? "manual";
+      /* The gate belongs to the owner's setting, not to the graph. A workflow with
+         an approval node used to wait for a human even in `auto`, so the switch the
+         owner flipped changed nothing and the run sat in the queue until it
+         expired. In `auto` the node becomes a step that reports it was skipped; in
+         `auto-with-review` it still shows the draft, but as information — the run
+         does not stop for it. */
+      if (autonomy !== "manual") {
+        const draft = String(bag[String(cfg.from ?? "post")] ?? "").slice(0, 1200);
+        await ctx.tg.sendMessage(
+          cfg.to ? String(cfg.to) : ctx.owner_id,
+          `🔓 <b>حالت خودکار — بدون توقف منتشر می‌شود</b>\n\n` +
+            `<blockquote>${tgEscape(String(bag.policy?.summary ?? "این خروجی رفت"))}</blockquote>\n\n` +
+            draft,
+          { parse_mode: "HTML" },
+        ).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+        return {
+          patch: { approval_skipped: autonomy },
+          summary: autonomy === "auto" ? "بدون تأیید (حالت خودکار)" : "گزارش خودکار (بدون توقف)",
+          branch: node.next ?? [],
+        };
+      }
       // Draft first, ask second: the owner must be able to read the thing they
       // are approving, so the content row always exists before the gate.
       const preview = String(bag[String(cfg.from ?? "post")] ?? "").slice(0, 3500);
