@@ -245,8 +245,7 @@ export class HubOS {
     const c = connector(kind);
     if (!c) return h.toast("?");
     await setMode(h.session, "hos:conn:add", { kind });
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       (kind === "telegram"
         ? (fa
           ? `🔌 <b>افزودن کانکتور تلگرام</b>\n\n` +
@@ -262,7 +261,7 @@ export class HubOS {
         (kind === "github"
           ? `<code>cloudflare/workers-sdk, oven-sh/bun</code>`
           : `<code>https://blog.cloudflare.com/rss/</code>`)),
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:conn" }]]) as any },
+      kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:conn" }]]) as any,
     );
   }
 
@@ -301,11 +300,10 @@ export class HubOS {
         ? "\n\n👈 ربات را در کانال <b>ادمین</b> کن، بعد دوباره «➕ تلگرام» را بزن — یا یک پست از کانال را همین‌جا فوروارد کن."
         : "\n\nAdd the bot as an <b>admin</b> of the channel and retry, or forward a post from it here.")
       : "";
-    await h.tg.sendMessage(
-      h.chatId,
+    await h.reply(
       (fa ? `✅ کانکتور <b>${tgEscape(c.label)}</b> اضافه شد\n\n` : `✅ ${c.label} connector added\n\n`) +
         `${test?.ok ? "🟢" : "🔴"} ${tgEscape(test?.detail ?? "—")}${hint}`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "🧪 دریافت رویدادها الان" : "🧪 Poll now", cb: `hos:poll:${id}` }]]) as any },
+      kb([[{ text: fa ? "🧪 دریافت رویدادها الان" : "🧪 Poll now", cb: `hos:poll:${id}` }]]) as any,
     );
     return this.connectors(h);
   }
@@ -469,8 +467,7 @@ export class HubOS {
   async missionPrompt(h: H) {
     const fa = h.loc === "fa";
     await setMode(h.session, "hos:mission");
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       fa
         ? `🧪 <b>مأموریت تازه</b>\n\n` +
           `<blockquote>هدف را با جملهٔ خودت بنویس. سیستم آن را به یک ورک‌فلو (DAG) ترجمه می‌کند.</blockquote>\n\n` +
@@ -479,7 +476,7 @@ export class HubOS {
           `• «هر آیتم تازهٔ این فید را خلاصه کن و برایم بفرست»\n` +
           `• «هر وقت نسخهٔ Bun عوض شد خبرم کن»`
         : `🧪 <b>New mission</b>\n\nDescribe the outcome you want and I'll compile it into a workflow.`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:home" }]]) as any },
+      kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:home" }]]) as any,
     );
   }
 
@@ -563,15 +560,14 @@ export class HubOS {
   async repoPrompt(h: H, wfId: string) {
     const fa = h.loc === "fa";
     await setMode(h.session, "hos:wfrepo", { wfId });
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       fa
         ? `📦 <b>کدام مخزن؟</b>\n\n` +
           `<blockquote>این ورک‌فلو باید بداند رویداد کدام مخزن مهم است. یک یا چند مورد را با کاما بنویس.</blockquote>\n\n` +
           `<code>panel-zeus/Z-E-U-S</code>\n<code>oven-sh/bun, cloudflare/workers-sdk</code>\n\n` +
           `<i>نام را همان‌طور که در گیت‌هاب است بنویس (owner/repo). اگر مطمئن نیستی، اول <code>/search</code> کن.</i>`
         : `📦 <b>Which repository?</b>\n\nSend one or more as \`owner/repo\`, comma separated.`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: `hos:wfv:${wfId}` }]]) as any },
+      kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: `hos:wfv:${wfId}` }]]) as any,
     );
   }
 
@@ -1139,13 +1135,12 @@ export class HubOS {
   async searchPrompt(h: H) {
     const fa = h.loc === "fa";
     await setMode(h.session, "hos:search");
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       fa
         ? `🔎 <b>جست‌وجوی معنایی</b>\n\n<blockquote>هر چه یادت هست بنویس — لازم نیست کلمهٔ دقیق را بدانی. «اون پست مربوط به آپدیت کلادفلر ورکرز که هفته پیش ساختیم» کافی است.</blockquote>\n\n` +
           `سه مسیر جست‌وجو به ترتیب: <b>موجودیت</b> (اگر اسمی در گراف باشد) → <b>برداری</b> (معنا) → <b>کلیدواژه</b>. و همیشه می‌گوید از کدام مسیر جواب داده.`
         : `🔎 <b>Semantic search</b>`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:know" }]]) as any },
+      kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:know" }]]) as any,
     );
   }
 
@@ -1192,8 +1187,7 @@ export class HubOS {
       : (fa ? "<i>هنوز فایلی نفرستاده‌ای.</i>" : "<i>no files yet</i>");
 
     await setMode(h.session, "hos:file");
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       (fa
         ? `📄 <b>کالبدشکافی فایل</b>\n\n` +
           `<blockquote>هر فایل متنی، PDF، CSV، JSON، XML، کد یا آرشیو را بفرست: نوعش تشخیص داده می‌شود، متن و ساختارش استخراج می‌شود، موجودیت‌هایش به گراف دانش می‌رود و قابل جست‌وجو می‌شود.</blockquote>\n\n` +
@@ -1201,7 +1195,7 @@ export class HubOS {
           `<b>پشتیبانی نمی‌شود:</b> صوت و ویدیو (طبق درخواست خودت، هیچ بخش صوتی در ربات نیست)\n\n`
         : `📄 <b>File dissection</b>\n\nSend a document and I will extract, index and graph it.\n\n`) +
         `<b>${fa ? "آخرین فایل‌ها" : "Recent"}</b>\n${list}`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "◀️" : "◀️", cb: "hos:home" }]]) as any },
+      kb([[{ text: fa ? "◀️" : "◀️", cb: "hos:home" }]]) as any,
     );
   }
 
@@ -1250,14 +1244,13 @@ export class HubOS {
   async mediaPrompt(h: H) {
     const fa = h.loc === "fa";
     await setMode(h.session, "hos:media");
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       fa
         ? `🖼 <b>کارخانهٔ رسانه</b>\n\n` +
           `<blockquote>موضوع یا متن پست را بفرست. یک کاور برداری (SVG) می‌سازم که برای عنوان یکسان همیشه یکسان است، و یک پرامپت هنری دقیق برای تولید تصویر.</blockquote>\n\n` +
           `<i>کاور رندر می‌شود نه تولید: برداری، شارپ در هر اندازه، با فارسی درست (نویسندهٔ تصویر نمی‌تواند متن فارسی را سالم بنویسد) و بدون هزینهٔ نورون.</i>`
         : `🖼 <b>Media factory</b>`,
-      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:home" }]]) as any },
+      kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: "hos:home" }]]) as any,
     );
   }
 

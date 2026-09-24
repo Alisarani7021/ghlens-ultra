@@ -121,6 +121,7 @@ export function telegramHtmlToRich(html: string): string {
   let para: string[] = [];
   let items: string[] = [];
   let titleDone = false;
+  let i = 0;
 
   const flushPara = () => {
     if (para.length) { out.push(`<p>${para.join("<br>")}</p>`); para = []; }
@@ -130,11 +131,44 @@ export function telegramHtmlToRich(html: string): string {
   };
   const flush = () => { flushPara(); flushItems(); };
 
-  for (const raw of lines) {
-    const line = raw.trim();
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    i++;
     if (!line) { flush(); continue; }
 
-    // the tab header: `📊 <b>repo</b> — عنوان` (or a plain lone bold line)
+    // a <pre> block the screen already fenced — kept whole, verbatim
+    if (line.startsWith("<pre>")) {
+      flush();
+      const first = line.replace(/^<pre>/, "");
+      const buf = [first];
+      if (!/<\/pre>\s*$/.test(first)) {
+        while (i < lines.length && !/<\/pre>\s*$/.test(lines[i])) buf.push(lines[i++]);
+        if (i < lines.length) buf.push(lines[i++].replace(/<\/pre>\s*$/, ""));
+      } else {
+        buf[0] = first.replace(/<\/pre>\s*$/, "");
+      }
+      out.push(`<pre>${buf.join("\n").trim()}</pre>`);
+      continue;
+    }
+
+    // a quote block, possibly spanning several lines (the wiring checklist
+    // writes one) — the whole block becomes one aside
+    if (line.startsWith("<blockquote>")) {
+      flush();
+      const first = line.replace(/^<blockquote>/, "");
+      const buf = [first];
+      if (!/<\/blockquote>\s*$/.test(first)) {
+        while (i < lines.length && !/<\/blockquote>\s*$/.test(lines[i])) buf.push(lines[i++]);
+        if (i < lines.length) buf.push(lines[i++].replace(/<\/blockquote>\s*$/, ""));
+      } else {
+        buf[0] = first.replace(/<\/blockquote>\s*$/, "");
+      }
+      const inner = buf.join("<br>").replace(/^<br>|<br>$/g, "");
+      out.push(`<aside>${inner}</aside>`);
+      continue;
+    }
+
+    // the screen header: `📊 <b>repo</b> — عنوان` (or a plain lone bold line)
     const head = /^[^<>]{0,8}?<b>(.+?)<\/b>(?:\s*[—–-]\s*(.*))?$/.exec(line);
     if (head && !titleDone && !para.length && !items.length) {
       out.push(`<h1>${head[1]}${head[2] ? ` — ${head[2]}` : ""}</h1>`);
@@ -144,9 +178,6 @@ export function telegramHtmlToRich(html: string): string {
 
     // a sparkline: a line that is entirely <code>…</code>
     if (/^<code>[\s\S]*<\/code>$/.test(line)) { flush(); out.push(`<pre>${line.replace(/^<code>|<\/code>$/g, "")}</pre>`); continue; }
-
-    // a quote block
-    if (/^<blockquote>[\s\S]*<\/blockquote>$/.test(line)) { flush(); out.push(`<aside>${line.replace(/^<blockquote>|<\/blockquote>$/g, "")}</aside>`); continue; }
 
     // a list item: bullet-led or a bare bold label leading a section
     if (/^[•\-*]\s+/.test(line) || /^(?:🌱|⚠️|✅|❌|🚀|📦)\s+<b>/.test(line)) {
@@ -211,7 +242,10 @@ export async function sendRich(
     return "rich";
   } catch (e: any) {
     console.error("rich-send-fallback", String(e?.message ?? e).slice(0, 200));
-    await tg.sendMessage(chatId, richToLegacy(html), { parse_mode: "HTML", ...(opts.extra ?? {}) } as any);
+    /* sendLong, not sendMessage: the plain twin of a long document has to be
+       split, or the fallback itself dies on Telegram's 4096 limit and the
+       message is lost — the one outcome this module exists to prevent. */
+    await tg.sendLong(chatId, richToLegacy(html), { parse_mode: "HTML", ...(opts.extra ?? {}) } as any);
     return "legacy";
   }
 }
@@ -236,7 +270,14 @@ export async function editRich(
     return "rich";
   } catch (e: any) {
     console.error("rich-edit-fallback", String(e?.message ?? e).slice(0, 200));
-    await tg.editMessageText(chatId as any, messageId, richToLegacy(html), { parse_mode: "HTML", ...(opts.extra ?? {}) } as any);
+    /* An edit can fail because the message is too old or was deleted — for the
+       reader that must not read as «the button did nothing»: the answer goes
+       out as a fresh message instead. «not modified» is the one failure that
+       means nothing needs doing. */
+    const res = await tg.editMessageText(chatId as any, messageId, richToLegacy(html), { parse_mode: "HTML", ...(opts.extra ?? {}) } as any);
+    if (res && (res as any).ok === false && !/not modified/i.test(String((res as any).description ?? ""))) {
+      await tg.sendLong(chatId as any, richToLegacy(html), { parse_mode: "HTML", ...(opts.extra ?? {}) } as any);
+    }
     return "legacy";
   }
 }

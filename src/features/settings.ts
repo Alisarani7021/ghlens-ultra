@@ -38,28 +38,6 @@ export class Settings {
   }
 
   /**
-   * The welcome photo and its caption.
-   *
-   * Telegram stores the image and hands back a `file_id`; sending by that id
-   * costs no upload and needs no bucket, CDN or static route for one picture.
-   * The caption carries the branding so the photo is never a bare image, and if
-   * the id ever goes stale `sendPhoto` fails harmlessly — the card below it is
-   * the actual interface.
-   */
-  private static readonly WELCOME_PHOTO =
-    "AgACAgQAAxkDAAICcWq0SrIH0MJBdSYRDwG7zNJMMW2iAALcD2sbM6WgUeoS3A-W4xtuAQADAgADdwADPQQ";
-
-  private static readonly WELCOME_CAPTION_FA =
-    "🔭 <b>GitHub Lens Ultra</b>\n" +
-    "<b>هر مخزنی، هر نسخه‌ای، هر آسیب‌پذیری — از پشت یک لنز.</b>\n" +
-    "<i>کاوش · ترجمه · امنیت · دانلود · هاب جهانی رویدادها — کاملاً روی کلودفلر</i>";
-
-  private static readonly WELCOME_CAPTION_EN =
-    "🔭 <b>GitHub Lens Ultra</b>\n" +
-    "<b>Every repo, every release, every vulnerability — through one lens.</b>\n" +
-    "<i>Search · translate · audit · download · an event-driven hub — all on Cloudflare</i>";
-
-  /**
    * The welcome screen.
    *
    * The owner's ask: after /start it must (a) say hello and explain what the
@@ -176,16 +154,9 @@ export class Settings {
         ` · <a href="https://github.com/Alisarani7021/ghlens-ultra">github.com/Alisarani7021/ghlens-ultra</a>`,
       );
 
-    // A fresh /start opens with the artwork; the card below carries the buttons.
-    // Notified silently so the two messages do not ring twice.
-    if (fresh) {
-      await h.tg
-        .sendPhoto(h.chatId, Settings.WELCOME_PHOTO, fa ? Settings.WELCOME_CAPTION_FA : Settings.WELCOME_CAPTION_EN, {
-          parse_mode: "HTML",
-          disable_notification: true,
-        } as any)
-        .catch(() => null);
-    }
+    // The artwork photo used to ride in front of this card on a fresh /start.
+    // Removed by the owner's instruction: the card below is the interface; a
+    // picture before it is one more message to scroll past every time.
     await h.replyRich(
       helloRich,
       mainMenuKb(lang, u?.plan === "admin") as any,

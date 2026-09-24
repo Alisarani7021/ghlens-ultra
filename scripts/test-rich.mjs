@@ -86,6 +86,58 @@ console.log("▸ telegram-html screens → rich documents");
   }));
   const back = R.richToLegacy(doc);
   ok("the document still degrades to sane legacy text", back.includes("oven-sh/bun") && back.includes("زبان‌ها") && !/\n{3}/.test(back));
+
+  // multi-line shapes: the wiring checklist writes a blockquote over several
+  // lines, and code screens write fenced <pre> blocks
+  const multi = R.telegramHtmlToRich([
+    "🔧 <b>زیرساخت</b>",
+    "",
+    "<blockquote>تا این‌ها حل نشود چیزی منتشر نمی‌شود:",
+    "• وبهوک ثبت نشده",
+    "• کانکتور تلگرام آماده نیست</blockquote>",
+    "",
+    "<pre>",
+    "$ wrangler deploy",
+    "$ wrangler tail",
+    "</pre>",
+  ].join("\n"));
+  ok("a multi-line quote is one aside",
+     multi.includes("<aside>تا این‌ها") && multi.includes("<br>• وبهوک ثبت نشده<br>") && multi.includes("کانکتور تلگرام آماده نیست</aside>") && !multi.includes("</blockquote>"));
+  ok("a multi-line pre is one pre", multi.includes("<pre>$ wrangler deploy\n$ wrangler tail</pre>"));
+  ok("the rest of the multi-line screen survives", multi.includes("<h1>زیرساخت</h1>"));
+}
+
+console.log("▸ the fallback never loses the message");
+{
+  /* What the whole-bot conversion leans on: if a rich send or edit is refused,
+     the plain twin goes out — split when it is long, and as a fresh message
+     when the old one can no longer be edited. */
+  const longBody = "متن بلند ".repeat(900);   // ~7 000 chars — beyond one legacy message
+
+  const tgRefused = {
+    sendRichMessage: async () => ({ ok: false, description: "rich not supported" }),
+    sendLong: async (chat, text, opts) => { tgRefused.sent = { text, opts }; return { ok: true }; },
+    sendMessage: async () => { throw new Error("sendMessage must not be used directly"); },
+  };
+  const how1 = await R.sendRich(tgRefused, 1, R.telegramHtmlToRich(`<b>عنوان</b>\n\n${longBody}`), { rtl: true, extra: { parse_mode: "HTML" } });
+  ok("a refused rich send falls back to legacy", how1 === "legacy");
+  ok("the fallback goes through the splitter, undamaged", tgRefused.sent && tgRefused.sent.text.length > 4000 && tgRefused.sent.opts.parse_mode === "HTML");
+
+  const tgTooOld = {
+    editRichMessage: async () => ({ ok: false, description: "message can't be edited" }),
+    editMessageText: async () => ({ ok: false, description: "message to edit not found" }),
+    sendLong: async (chat, text) => { tgTooOld.sent = text; return { ok: true }; },
+  };
+  const how2 = await R.editRich(tgTooOld, 1, 99, "<p>پاسخ تازه</p>", { rtl: true });
+  ok("a too-old edit becomes a fresh message", how2 === "legacy" && tgTooOld.sent && tgTooOld.sent.includes("پاسخ تازه"));
+
+  const tgNotModified = {
+    editRichMessage: async () => ({ ok: false, description: "rich not supported" }),
+    editMessageText: async () => ({ ok: false, description: "Bad Request: message is not modified" }),
+    sendLong: async () => { throw new Error("«not modified» must not send a duplicate"); },
+  };
+  const how3 = await R.editRich(tgNotModified, 1, 99, "<p>همان متن</p>", { rtl: true });
+  ok("«not modified» is left alone, not duplicated", how3 === "legacy");
 }
 
 if (failed) { console.error(`\n${failed} rich-message check(s) failed`); process.exit(1); }

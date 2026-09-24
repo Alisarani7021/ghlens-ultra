@@ -254,10 +254,10 @@ export class Downloader {
       // it turned out to fit in one part anyway
       await h.reply(`✅ <b>${tgEscape(base)}</b> — ${(total / 1048576).toFixed(2)} MB`, kb([{ text: "📥 " + (fa ? "دانلود دیگر" : "Another ref"), cb: `d:repo:${full}` }], []));
     } else {
-      await h.tg.sendMessage(h.chatId,
+      await h.reply(
         `✅ <b>${fa ? "همه پارت‌ها ارسال شد" : "All parts sent"}</b> — ${sent} × ${(this.partSize / 1048576).toFixed(0)} MB\n` +
           `${fa ? "دستور ادغام در هر پیام پارت آمده" : "merge command is in each part's caption"}`,
-        { parse_mode: "HTML", reply_markup: this.afterKb(h, full) as any });
+        this.afterKb(h, full) as any);
     }
     await this.record(h, full, ref, format, total, null);
     await h.store.addXp(h.u.id, 4, "download_split");
@@ -279,9 +279,7 @@ export class Downloader {
   }
 
   private tg_summary(h: H, full: string) {
-    return h.tg.sendMessage(h.chatId, `✅ ${h.loc === "fa" ? "تکمیل شد" : "done"}`, {
-      reply_markup: this.afterKb(h, full) as any,
-    });
+    return h.reply(`✅ ${h.loc === "fa" ? "تکمیل شد" : "done"}`, this.afterKb(h, full) as any);
   }
 
   private async fetchFailed(h: H, full: string, status: number) {

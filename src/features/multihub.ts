@@ -309,8 +309,7 @@ export class MultiHub {
   async pySandboxPrompt(h: H) {
     const fa = h.loc === "fa";
     // Send as fresh new message instead of editMessageText so Telegram client immediately focuses input
-    return h.tg.sendMessage(
-      h.chatId,
+    return h.reply(
       fa
         ? `⚡ <b>محیط اجرای زنده و بنچمارک پایتون (Python Cloud Engine)</b>\n\n` +
           `<blockquote>آمادهٔ دریافت کد: کد یا اسکریپت پایتون خود را در کادر پیام زیر بنویس و ارسال کن تا در کانتینر ابری اجرا و بنچمارک شود:</blockquote>\n\n` +
@@ -319,10 +318,7 @@ export class MultiHub {
           `یا\n` +
           `<code>import math\nprint(math.factorial(10))</code>`
         : `⚡ <b>Python Cloud Engine</b>\n\nSend any Python code snippet to execute and profile.`,
-      {
-        parse_mode: "HTML",
-        reply_markup: kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]) as any,
-      }
+      kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]) as any,
     );
   }
 

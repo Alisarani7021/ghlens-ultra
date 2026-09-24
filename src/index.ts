@@ -703,24 +703,14 @@ export async function buildH(
     budget: left,
     async reply(body, keyboard, edit = false) {
       if (guard) guard.settled = true;
-      // a queued answer claims the card it was announced in, once
-      if (!edit && h.editTarget) {
-        const target = h.editTarget;
-        h.editTarget = undefined;
-        const res = await tg.editMessageText(chatId, target, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
-        if ((res as any).ok !== false) return;
-        // the card was deleted or is too old to edit → fall through to a send
-      }
-      if (edit && h.cbId && msgId) {
-        const res = await tg.editMessageText(chatId, msgId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
-        if ((res as any).ok === false && /not modified/i.test((res as any).description ?? "")) return;
-        if ((res as any).ok === false) {
-          // message too old / identical → send new
-          await tg.sendLong(chatId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
-        }
-        return;
-      }
-      await tg.sendLong(chatId, body, { parse_mode: "HTML", reply_markup: keyboard, disable_web_page_preview: true });
+      /* Every screen is a document now. The body a feature writes as Telegram
+         HTML is given document shape — heading, lists, quotes, code — and sent
+         as a rich message; if the API or the client refuses rich, the send
+         falls back to exactly the plain message this always was, so nothing is
+         ever lost to a formatting preference. Screens that build real
+         documents (tables, collapsibles) call replyRich directly. */
+      const { telegramHtmlToRich } = await import("./tg/rich");
+      return h.replyRich(telegramHtmlToRich(String(body ?? "")), keyboard, edit);
     },
     async replyRich(html, keyboard, edit = false) {
       if (guard) guard.settled = true;
