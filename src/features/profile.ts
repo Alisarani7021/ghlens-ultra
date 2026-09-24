@@ -8,28 +8,6 @@ import { kb, L } from "../tg/keyboards";
 import { Store } from "../core/db";
 
 /** Profile, gamification, favourites, subscriptions, dashboard and referral. */
-/**
- * Pro requests are stored as a flag, not as a new table: D1 schema changes do not
- * reach an already-deployed database, and a request is one small object.
- * `status` moves pending → granted/denied when an admin presses the card, so the
- * plans screen can tell the user the truth instead of showing a spinner forever.
- */
-export async function readPlanRequest(env: any, userId: number):
-  Promise<{ status: "pending" | "granted" | "denied"; at: number; plan?: string } | null> {
-  try {
-    const row: { value?: string } | null = await env.DB.prepare(`SELECT value FROM flags WHERE key=?`)
-      .bind(`planreq:${userId}`).first();
-    if (!row?.value) return null;
-    const j = JSON.parse(row.value);
-    return {
-      status: j.status === "granted" ? "granted" : j.status === "denied" ? "denied" : "pending",
-      at: Number(j.at ?? 0), plan: j.plan,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export class ProfileFeature {
   async home(h: H) {
     const fa = h.loc === "fa";
@@ -320,113 +298,115 @@ export class ProfileFeature {
 
   async plans(h: H) {
     const fa = h.loc === "fa";
-    const u = await h.store.user(h.u.id);
-    const plan = (u?.plan ?? "free") as string;
-    const req = await readPlanRequest(h.env, h.u.id);
-    const planLine =
-      plan === "pro" ? (fa ? "💎 <b>Pro فعال است</b>" : "💎 <b>Pro active</b>")
-      : plan === "sponsor" ? (fa ? "🤝 <b>حامی</b>" : "🤝 <b>Sponsor</b>")
-      : (fa ? "🆓 <b>Free</b>" : "🆓 <b>Free</b>");
-
-    /* The button used to re-render this same screen: the request was written,
-       the user never saw a change, and the admins were never told. It now opens a
-       confirmation, records the request, tells the admins, and — when the plan is
-       granted — the same card reports it. */
-    const status = req
-      ? req.status === "pending"
-        ? `\n\n⏳ ${fa ? `درخواست Pro تو <b>در بررسی است</b> (${new Date(req.at).toISOString().slice(0, 10)}). به‌محض فعال شدن خبر می‌دهم.` : "your Pro request is pending"}`
-        : `\n\n✅ ${fa ? "آخرین درخواستت بررسی و ثبت شد." : "last request resolved"}`
-      : "";
-
-    const buttons = req?.status === "pending"
-      ? [[{ text: "❌ " + (fa ? "لغو درخواست" : "Cancel request"), cb: "me:procancel" }],
-         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]]
-      : [[{ text: "💎 " + (fa ? "درخواست Pro" : "Request Pro"), cb: "me:pro" }],
-         [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]];
-
+    const state = await this.planState(h);
     await h.reply(
-      `⚡ <b>${fa ? "پلن‌ها" : "Plans"}</b>\n\n` +
-        `${fa ? "پلن فعلی تو" : "your plan"}: ${planLine}${status}\n\n` +
-        `🆓 <b>Free</b> — ${fa ? "روزی ۲۰۰ پرس‌وجوی AI، کاوش کامل، ترجمهٔ README، دانلود تا ۱۰۰ مگ" : "200 AI queries/day"}\n` +
-        `💎 <b>Pro</b> — ${fa ? "سقف AI سه برابر، کاوش عمیق بی‌سقف، ترجمهٔ README بی‌سقف، دانلود بدون سقف، هشدار لحظه‌ای" : "unlimited"}\n` +
-        `🏢 <b>Team</b> — ${fa ? "۵۰ عضو، داشبورد سازمانی، وبهوک اختصاصی، SLA" : "50 seats, org dashboard"}\n\n` +
-        `<i>${fa ? "کل ربات رایگان و اوپن‌سورس است؛ پلن‌ها فقط سقف مصرف را جابه‌جا می‌کنند و به کلیدی در انبار نیاز ندارند." : ""}</i>`,
-      kb(buttons as any),
-      !!h.cbId,
-    );
-  }
-
-  /** Confirm before a request is filed — a button that asks, then does. */
-  async proRequest(h: H) {
-    const fa = h.loc === "fa";
-    const existing = await readPlanRequest(h.env, h.u.id);
-    if (existing?.status === "pending") {
-      await h.toast(fa ? "⏳ درخواستت در بررسی است" : "⏳ pending", true);
-      return this.plans(h);
-    }
-    return h.reply(
-      `💎 <b>${fa ? "درخواست پلن Pro" : "Request Pro"}</b>\n\n` +
-        `<blockquote>${fa ? "درخواست تو برای ادمین‌ها ثبت می‌شود و همین‌جا وضعیتش را می‌بینی. Pro فقط سقف مصرف را بالا می‌برد: سقف AI روزانه سه برابر، کاوش عمیق بی‌سقف و دانلود بدون سقف. هیچ هزینه‌ای ندارد." : "Your request is recorded for the admins."}</blockquote>`,
+      `⚡ <b>${fa ? "پلن‌ها" : "Plans"}</b>\n` +
+        `${fa ? "وضعیت تو" : "your plan"}: <b>${state.plan === "pro" ? "💎 Pro" : "🆓 Free"}</b>` +
+        (state.requested && state.plan !== "pro" ? ` · <i>${fa ? "درخواست Pro ثبت شده" : "Pro requested"}</i>` : "") +
+        `\n\n` +
+        `🆓 <b>Free</b> — ${fa ? "روزی ۱۲۰ جست‌وجو، کاوش کامل، ترجمه README، دانلود تا ۱۰۰ مگ" : "120 queries/day"}\n` +
+        `💎 <b>Pro</b> — ${fa ? "نامحدود، کاوش عمیق نامحدود، ترجمهٔ README بی‌سقف، دانلود بدون سقف، هشدار لحظه‌ای، آلرت امنیتی اختصاصی" : "unlimited"}\n` +
+        `🏢 <b>Team</b> — ${fa ? "۵۰ عضو، داشبورد سازمانی، Webhook اختصاصی، SLA" : "50 seats, org dashboard"}\n\n` +
+        `<i>${fa ? "نسخه فعلی این ربات کاملاً رایگان و اوپن‌سورس است؛ پلن‌ها فقط برای مصارف سنگین (Actions و AI) تعریف شده‌اند." : ""}</i>`,
       kb(
-        [{ text: "✅ " + (fa ? "ثبت درخواست" : "Submit"), cb: "me:pro2" }],
-        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:plan" }],
+        state.plan === "pro"
+          ? [{ text: "✅ " + (fa ? "Pro فعال است" : "Pro is active"), cb: "noop:noop:0" }]
+          : state.requested
+            ? [{ text: "⏳ " + (fa ? "درخواست در انتظار تأیید" : "request pending"), cb: "me:pro" }]
+            : [{ text: "💎 " + (fa ? "درخواست Pro" : "Request Pro"), cb: "me:pro" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
       ),
       !!h.cbId,
     );
   }
 
-  /** File it: one row for the bot, one message for the admins. */
-  async submitPro(h: H) {
-    const fa = h.loc === "fa";
-    const u = await this.store_user(h);
-    const at = Date.now();
-    await h.env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
-      .bind(`planreq:${h.u.id}`, JSON.stringify({ status: "pending", at, xp: u?.xp ?? 0, plan: u?.plan ?? "free" }), at)
-      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+  /** Pro state for this user: the plan flag and any open request. */
+  async planState(h: H): Promise<{ plan: "free" | "pro"; requested: boolean }> {
+    const get = async (key: string) =>
+      (await h.env.DB.prepare(`SELECT value FROM flags WHERE key=?`).bind(key).first<{ value: string }>().catch(() => null))?.value ?? "";
+    const plan = (await get(`plan:${h.u.id}`)) === "pro" ? "pro" : "free";
+    const requested = !!(await get(`pro:req:${h.u.id}`));
+    return { plan, requested };
+  }
 
-    // the admins get a card they can act on, not a silent database row
-    const admins = String(h.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    for (const a of admins.slice(0, 5)) {
-      await h.tg.sendMessage(
-        a,
-        `💎 <b>${fa ? "درخواست Pro تازه" : "New Pro request"}</b>\n\n` +
-          `👤 ${tgEscape(u?.first_name ?? "?")}${u?.username ? ` (@${tgEscape(u.username)})` : ""} · <code>${h.u.id}</code>\n` +
-          `🏅 XP: <b>${fmt(u?.xp ?? 0)}</b> · 📊 ${fa ? "امتیاز هفته" : "weekly"}: <b>${await this.weekPoints(h, h.u.id)}</b>\n` +
-          `🗓 ${new Date(at).toISOString().slice(0, 16).replace("T", " ")}`,
-        { parse_mode: "HTML", reply_markup: kb(
-          [{ text: "✅ " + (fa ? "فعال کن (Pro)" : "Grant Pro"), cb: `adm:plan:${h.u.id}:pro` }],
-          [{ text: "🆓 " + (fa ? "رد کن (Free بماند)" : "Keep Free"), cb: `adm:plan:${h.u.id}:free` }],
-        ) as any },
-      ).catch(() => null);
+  /**
+   * «💎 درخواست Pro».
+   *
+   * The button used to re-render the price list — a press with no effect, which
+   * is indistinguishable from a broken button. It now does the thing it says:
+   * records the request, tells the owner's admins with two buttons that settle
+   * it, and gives the requester a card showing exactly what changes and what the
+   * wait looks like. What Pro *means* is stated honestly: the deployment is free
+   * and open-source, and Pro lifts the quotas that cost real money (model quota,
+   * heavy Actions jobs, unlimited downloads).
+   */
+  async requestPro(h: H) {
+    const fa = h.loc === "fa";
+    const state = await this.planState(h);
+    const who = `@${h.u.username ?? "—"} · <code>${h.u.id}</code>`;
+
+    if (state.plan === "pro") {
+      return h.reply(
+        `💎 <b>${fa ? "Pro روی حساب تو فعال است" : "Pro is active"}</b>\n\n` +
+          (fa
+            ? `سقف روزانهٔ تو برداشته شده، صف کارهای سنگین برای تو باز است و آرشیو کامل بدون سقف حجم دانلود می‌شود.`
+            : `Your daily cap is lifted, heavy jobs are open to you, and downloads are uncapped.`),
+        kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]),
+        !!h.cbId,
+      );
     }
 
-    await h.reply(
-      `✅ <b>${fa ? "درخواست ثبت شد" : "Request recorded"}</b>\n\n` +
-        `<blockquote>${admins.length
-          ? (fa ? `به ${admins.length} ادمین اطلاع داده شد. وضعیت را می‌توانی همین‌جا ببینی.` : `notified ${admins.length} admins`)
-          : (fa ? "ادمینی تنظیم نشده؛ درخواست در پروندهٔ تو ثبت شد و در داشبورد دیده می‌شود." : "no admin configured")}</blockquote>`,
-      kb([[{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:plan" }]]),
+    if (state.requested) {
+      return h.reply(
+        `⏳ <b>${fa ? "درخواست Pro ثبت شده است" : "Pro request is in"}</b>\n\n` +
+          (fa
+            ? `درخواستت در صف بررسی است. تا آن موقع همهٔ قابلیت‌ها با سقف رایگان کار می‌کنند؛ فقط سهمیهٔ روزانه و کارهای سنگین محدودند.\n\n` +
+              `اگر عجله داری، یک بار در چت یادآوری کن — همان درخواست دوباره بررسی می‌شود.`
+            : `Your request is queued. Everything keeps working on the free tier meanwhile.`),
+        kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }]),
+        !!h.cbId,
+      );
+    }
+
+    await h.env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+      .bind(`pro:req:${h.u.id}`, String(Date.now()), Date.now()).run()
+      .catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+
+    // Tell every configured admin, with the two buttons that settle it.
+    const admins = (h.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const a of admins) {
+      await h.tg.sendMessage(Number(a),
+        `💎 <b>${fa ? "درخواست Pro تازه" : "New Pro request"}</b>\n\n` +
+          `👤 ${who}${h.u.first_name ? ` — ${tgEscape(h.u.first_name)}` : ""}\n` +
+          `📊 ${fa ? "سهمیه امروز" : "today"}: ${h.user?.daily_queries ?? 0}/${h.env.FREE_TIER_DAILY_QUERIES ?? 120}\n` +
+          `🗓 <code>${new Date().toISOString().slice(0, 16).replace("T", " ")}</code>\n\n` +
+          (fa ? "با فعال‌کردن، سقف روزانه‌اش برداشته می‌شود و کارهای سنگین برایش باز می‌شود." : ""),
+        {
+          parse_mode: "HTML",
+          reply_markup: kb([
+            { text: "✅ " + (fa ? "فعال کن" : "Grant"), cb: `adm:prog:${h.u.id}` },
+            { text: "🗑 " + (fa ? "رد کن" : "Decline"), cb: `adm:pror:${h.u.id}` },
+          ]) as any,
+        },
+      ).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
+    }
+
+    return h.reply(
+      `💎 <b>${fa ? "درخواست Pro ثبت شد" : "Pro request recorded"}</b>\n\n` +
+        (fa
+          ? `<blockquote>نوبت تو در صف است. همان لحظه‌ای که فعال شود، همین‌جا پیام می‌گیری — لازم نیست کاری بکنی.</blockquote>\n\n` +
+            `<b>با Pro چه چیزی عوض می‌شود</b>\n` +
+            `• سقف روزانهٔ ${h.env.FREE_TIER_DAILY_QUERIES ?? 120} درخواست برداشته می‌شود\n` +
+            `• صف کارهای سنگین (تحلیل عمیق، ساخت بسته، اسکن کامل) برایت باز است\n` +
+            `• دانلود سورس بدون سقف، با اولویت در صف Actions\n\n` +
+            `<i>این نسخه رایگان و اوپن‌سورس است؛ Pro فقط سهمیه‌هایی را برمی‌دارد که واقعاً هزینه دارند (نئورون Workers AI و اجرای Actions).</i>`
+          : `You are queued. You will be told here the moment it is granted.`),
+      kb(
+        [{ text: "📊 " + (fa ? "وضعیت من" : "My status"), cb: "me:home" }],
+        [{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "me:home" }],
+      ),
       !!h.cbId,
     );
-    await h.store.event(h.u.id, "plan_request", "pro");
-  }
-
-  async cancelPro(h: H) {
-    const fa = h.loc === "fa";
-    await h.env.DB.prepare(`DELETE FROM flags WHERE key=?`).bind(`planreq:${h.u.id}`)
-      .run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
-    await h.toast(fa ? "❌ درخواست لغو شد" : "❌ cancelled", true);
-    return this.plans(h);
-  }
-
-  private async store_user(h: H) {
-    return h.store.user(h.u.id);
-  }
-
-  private async weekPoints(h: H, userId: number) {
-    const row = await h.env.DB.prepare(`SELECT value FROM leaderboard WHERE week=? AND user_id=? AND metric='queries'`)
-      .bind(Store.week(), userId).first<{ value: number }>().catch(() => null);
-    return Number(row?.value ?? 0);
   }
 
   /** Personalised feed, built from interests and favourites (used by /feed and daily digest). */

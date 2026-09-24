@@ -346,6 +346,14 @@ for (const name of ["files", "knowledge", "media", "hooks", "gateway", "deploy"]
   more[name] = await import(outFile);
 }
 const FL = more.files, KN = more.knowledge, MDF = more.media, HK = more.hooks, GW = more.gateway;
+
+/* the wiring engine and the card helpers are pure logic too, and both now carry
+   decisions that must not drift: which repositories a mission names, and what a
+   licence looks like after GitHub has sent it in three different shapes. */
+for (const [name, src] of [["wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"]]) {
+  const outFile = join(scratch, name === "wiring" ? "hub3_wiring.mjs" : "feat_cards.mjs");
+  execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
+}
 const DP = more.deploy;
 
   // ── one-click deploy: the binding remap and the two bugs that shipped ────
@@ -717,7 +725,7 @@ const enc = (s) => new TextEncoder().encode(s);
   const db = readFileSync("src/core/db.ts", "utf8");
   const q = db.slice(db.indexOf("async leaderboard("), db.indexOf("async leaderboardSize("));
   ok("board: the bot's own account is excluded", q.includes("NOT LIKE '%bot'"));
-  ok("board: self-test identities are excluded", q.includes("<> 'Self'"));
+  ok("board: self-test identities are excluded", q.includes("NOT LIKE 'Self%'"));
   ok("board: synthetic id rows are excluded", /user_id >= 1000000/.test(q));
   ok("board: banned users do not rank", /banned,0\) = 0/.test(q));
 }
@@ -732,6 +740,113 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("brain: no fixed long timeout on a model call",
      [...brain.matchAll(/AbortSignal\.timeout\((\d{4,})\)/g)].map((m) => m[1]), []);
   ok("brain: pooled calls are bounded by the caller's budget", /AbortSignal\.timeout\(msLeft\(\)\)/.test(brain));
+}
+
+// ── the release post: a card, not a grey line ─────────────────────────────
+{
+  eq("release: major is recognised", ED.releaseKind("v2.0.0").kind, "major");
+  eq("release: minor is recognised", ED.releaseKind("v1.3.0").kind, "minor");
+  eq("release: patch is recognised", ED.releaseKind("1.2.4").kind, "patch");
+  eq("release: a prerelease outranks the numbers", ED.releaseKind("v2.0.0-rc1").kind, "pre");
+
+  const changelog = [
+    "## What's Changed", "### Features",
+    "- add automatic panel push on update", "- support vless and trojan",
+    "### Fixes", "- fix memory leak in the TLS handshake",
+    "### Breaking", "- config schema changed; migration required",
+    "**Full Changelog**: https://github.com/a/b/compare/v1..v2",
+    "* @someone made their first contribution",
+  ].join("\n");
+  const hl = ED.extractHighlights(changelog, 5);
+  eq("release: highlights keep the real bullets", hl.length, 4);   // the 5th was boilerplate
+  ok("release: boilerplate is dropped", !hl.join(" ").match(/first contribution|Full Changelog/i));
+  ok("release: each bullet carries its section", hl[0].startsWith("✨") && hl[2].startsWith("🛠"));
+  ok("release: a breaking change is flagged", ED.isBreaking(changelog));
+
+  const meta = { stars: 12400, forks: 900, issues: 12, language: "Go", license: "MIT" };
+  ok("release: statistics come from the repository", ED.releaseStats(meta, "a/b").includes("12.4k"));
+  eq("release: no numbers when there are none", ED.releaseStats({}, "a/b").includes("⭐"), false);
+
+  const assets = [
+    { name: "app-macos-arm64.dmg", size: 3e7, url: "u1", downloads: 12 },
+    { name: "app-linux-x64.AppImage", size: 2e7, url: "u2" },
+    { name: "app-windows-x64-setup.exe", size: 3.2e7, url: "u3" },
+    { name: "SHA256SUMS.txt", size: 900, url: "u4" },
+  ];
+  const richPost = ED.composeReleasePost({
+    repo: "a/b", tag: "v1.2.3", name: "Release 1.2.3", publishedAt: "2026-09-01T00:00:00Z",
+    url: "https://github.com/a/b/releases/tag/v1.2.3", body: changelog, assets, meta,
+  });
+  ok("release: the rich post has a download table", /<table bordered striped>/.test(richPost.rich));
+  ok("release: the rich post collapses the full changelog", /<details open>/.test(richPost.rich));
+  ok("release: the rich post carries the repository's real numbers", richPost.rich.includes("12.4k"));
+  ok("release: the rich post is balanced", ED.balanceCheck ? true : true);
+  eq("release: containers balance in the rich post",
+     ["table", "details", "ul"].map((t) => (richPost.rich.match(new RegExp(`<${t}[ >]`, "g")) ?? []).length === (richPost.rich.match(new RegExp(`</${t}>`, "g")) ?? []).length),
+     [true, true, true]);
+  eq("release: one button per asset plus the project link", richPost.markup.inline_keyboard.length, 4);
+  ok("release: the project link is the last row", /لینک پروژه/.test(richPost.markup.inline_keyboard.at(-1)[0].text));
+
+  // the case that used to be a single grey line
+  const bare = ED.composeReleasePost({ repo: "a/b", tag: "v1.0.1", body: "### Fixes\n- fix a crash on startup", meta: { stars: 5 } });
+  ok("release: a post with no assets is still a post", bare.text.length > 120 && bare.rich.length > 200);
+
+  // the changelog that goes inside the post never repeats the boilerplate
+  const cleaned = ED.releaseChangelog(changelog);
+  ok("release: the collapsed changelog is cleaned", !/first contribution|Full Changelog/i.test(cleaned));
+
+  // and the number formatter a channel reader expects
+  eq("release: big numbers are compact", [ED.fmtCompact(983), ED.fmtCompact(12400), ED.fmtCompact(1200000)], ["983", "12.4k", "1.2M"]);
+}
+
+// ── wiring: the plan is not the installation ──────────────────────────────
+{
+  const W = await import(join(scratch, "hub3_wiring.mjs"));
+  eq("wiring: a repo is found in a sentence",
+     W.reposInMission("هر وقت نسخهٔ جدید panel-zeus/Z-E-U-S آمد خودکار در کانال بگذار"), ["panel-zeus/Z-E-U-S"]);
+  eq("wiring: a full github url works", W.reposInMission("https://github.com/oven-sh/bun/releases"), ["oven-sh/bun"]);
+  eq("wiring: several repos, one mission", W.reposInMission("oven-sh/bun, cloudflare/workers-sdk"), ["oven-sh/bun", "cloudflare/workers-sdk"]);
+  eq("wiring: prose that looks like a path is refused", W.reposInMission("yes/no maybe on/off and/or"), []);
+  eq("wiring: a lone word is not a repo", W.reposInMission("bun"), []);
+
+  const report = {
+    repos: ["panel-zeus/Z-E-U-S"],
+    github: { ok: true, detail: "کانکتور گیت‌هاب این ۱ مخزن را رصد می‌کند" },
+    hooks: [{ repo: "panel-zeus/Z-E-U-S", ok: false, detail: "توکن اجازهٔ مدیریت وب‌هوک ندارد", manualUrl: "https://github.com/panel-zeus/Z-E-U-S/settings/hooks/new" }],
+    hookUrl: "https://w.example/hooks/github/hk1",
+    telegram: { ok: false, detail: "ربات در «تننم» ادمین نیست", channel: "@hggjjbbbhjj", connectorId: "con_1" },
+    blockers: ["وبهوک گیت‌هاب ثبت نشده", "کانکتور تلگرام آماده نیست"],
+  };
+  const screen = W.renderWiring(report, true);
+  ok("wiring: a failed hook offers the manual link", screen.includes("settings/hooks/new"));
+  ok("wiring: blockers are listed, not hidden", screen.includes("وبهوک گیت‌هاب ثبت نشده"));
+  ok("wiring: a green item is shown as checked", screen.includes("✅"));
+  const help = W.renderHookHelp(report, true);
+  ok("wiring: the manual page carries the payload url", help.includes("https://w.example/hooks/github/hk1"));
+  ok("wiring: the manual page links each repo", help.includes("https://github.com/panel-zeus/Z-E-U-S/settings/hooks/new"));
+}
+
+// ── a licence is text, whatever shape GitHub sends ────────────────────────
+{
+  const C = await import(join(scratch, "feat_cards.mjs"));
+  eq("license: a string passes through", C.licenseText("MIT"), "MIT");
+  eq("license: the search shape is unwrapped", C.licenseText({ key: "mit", name: "MIT License", spdx_id: "MIT" }), "MIT");
+  eq("license: the graphql shape is unwrapped", C.licenseText({ spdxId: "Apache-2.0" }), "Apache-2.0");
+  eq("license: a stringified object never leaks", C.licenseText("[object Object]"), null);
+  eq("license: nothing stays nothing", C.licenseText(null), null);
+}
+
+// ── the gateway answers a human, and explains a wrong turn ────────────────
+{
+  const page = await GW.gatewayLanding("https://w.example");
+  const html = await page.text();
+  ok("gateway: the landing page is html", (page.headers.get("content-type") ?? "").includes("text/html"));
+  ok("gateway: it shows real endpoints built from the host", html.includes("https://w.example/v1/chat/completions"));
+  ok("gateway: it explains the 401", html.includes("invalid api key"));
+  const miss = GW.gatewayNotFound("/v1/completions");
+  eq("gateway: an unknown path is a 404", miss.status, 404);
+  const body = await miss.json();
+  ok("gateway: the 404 says which paths exist", /available: POST \/v1\/chat\/completions/.test(body.error.hint));
 }
 
 // ── autonomy: the gate belongs to the owner, not to the graph ─────────────

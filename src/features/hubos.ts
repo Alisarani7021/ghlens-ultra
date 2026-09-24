@@ -22,6 +22,7 @@ import { resumeRun } from "../hub/engine";
 import * as DP from "../hub/deploy";
 import { D1_STATEMENTS } from "../hub/schema.gen";
 import { hubId } from "../hub/event";
+import { reposInMission, saveRepos, loadRepos, ensureGithubConnector, wiringReport, renderWiring, renderHookHelp } from "../hub/wiring";
 import { MODELS } from "../hub/gateway";
 
 function safeJson(s: any): any {
@@ -490,18 +491,122 @@ export class HubOS {
     const plan: MissionPlan = await planMission(h.env, h.ai, h.u.id, text);
     const id = await savePlan(h.env, h.u.id, plan, text);
 
+    /* A plan is not an installation. The repositories the mission talks about
+       are extracted from the owner's own words, stored with the workflow, and
+       the readiness screen is built from reality — connector rows, the bot's
+       channel rights, the workflow row. This is the difference between "the DAG
+       exists" and "the thing will fire at three in the morning". */
+    const repos = reposInMission(text);
+    await saveRepos(h.env, id, repos);
+
     const badge = plan.source === "ai" ? (fa ? "🧠 ساختهٔ AI" : "🧠 AI") : plan.source === "repaired" ? (fa ? "🔧 ساختهٔ AI (اصلاح‌شده)" : "🔧 repaired") : (fa ? "📚 برنامهٔ آماده" : "📚 playbook");
 
     return h.reply(
       `🧪 <b>${tgEscape(plan.name)}</b>  ·  ${badge}\n\n` +
         `<blockquote>${tgEscape(plan.notes || text.slice(0, 200))}</blockquote>\n\n` +
         `<b>${fa ? "نقشهٔ اجرا" : "Plan"}</b>\n<pre>${tgEscape(describeDag(plan))}</pre>\n` +
-        (plan.on_event ? `\n🎯 ${fa ? "محرک" : "trigger"}: <code>${tgEscape(plan.on_event)}</code>` : `\n🎯 ${fa ? "اجرای دستی" : "manual"}`) +
-        (plan.requires.length ? `\n🔌 ${fa ? "نیازمند" : "needs"}: ${tgEscape(plan.requires.join(" · "))}` : ""),
+        (plan.on_event ? `\n🎯 ${fa ? "محرک" : "trigger"}: <code>${tgEscape(plan.on_event)}</code>` : `\n🎯 ${fa ? "اجرای دستی" : "manual"}`),
+      await this.wiringCard(h, id, repos, fa),
+      !!h.cbId,
+    );
+  }
+
+  /**
+   * The wiring card for a workflow: what is connected, what is missing, and one
+   * button that fixes the mechanical parts.
+   */
+  async wiringCard(h: H, wfId: string, repos: string[], fa: boolean): Promise<any> {
+    const base = String(h.env.WORKER_URL ?? "").replace(/\/+$/, "");
+    const report = await wiringReport({
+      env: h.env, ownerId: h.u.id, repos, base, token: h.userToken, workflowId: wfId,
+    });
+    const rows: any[] = [];
+    if (repos.length) {
+      rows.push([{ text: fa ? "🔧 وصلش کن" : "🔧 Wire it up", cb: `hos:wire:${wfId}` }]);
+    } else {
+      rows.push([{ text: fa ? "➕ مخزن را مشخص کن" : "➕ Name the repo", cb: `hos:repo:${wfId}` }]);
+    }
+    rows.push([{ text: fa ? "📎 آدرس وب‌هوک" : "📎 Webhook", cb: `hos:whook:${wfId}` }, { text: fa ? "🧪 اجرای آزمایشی" : "🧪 Dry run", cb: `hos:wfrun:${wfId}` }]);
+    rows.push([{ text: fa ? "🧩 جزئیات گره‌ها" : "🧩 Nodes", cb: `hos:wfv:${wfId}` }, { text: fa ? "🔌 کانکتورها" : "🔌 Connectors", cb: "hos:conn" }]);
+    rows.push([{ text: fa ? "🗑 حذف" : "🗑 Delete", cb: `hos:wfdel:${wfId}` }]);
+    return kb(...rows);
+  }
+
+  /** Render the readiness screen again, with fresh checks. */
+  async wiring(h: H, wfId: string, runFix = false) {
+    const fa = h.loc === "fa";
+    const repos = await loadRepos(h.env, wfId);
+    const base = String(h.env.WORKER_URL ?? "").replace(/\/+$/, "");
+
+    if (runFix) {
+      if (!repos.length) return this.repoPrompt(h, wfId);
+      await h.loading(fa ? "🔧 در حال وصل‌کردن…" : "wiring…");
+      await ensureGithubConnector(h.env, h.u.id, repos);
+    }
+
+    const report = await wiringReport({
+      env: h.env, ownerId: h.u.id, repos, base, token: h.userToken, workflowId: wfId,
+      // only the explicit "wire it up" press talks to GitHub about hooks
+      checkHooks: runFix,
+    });
+    const body = renderWiring(report, fa) +
+      (runFix && report.hooks.some((x) => !x.ok)
+        ? `\n\n${fa ? "<i>روی هر مخزن که وب‌هوک نشد، لینک «افزودن دستی» را بزن — سه فیلد دارد و یک بار برای همیشه است.</i>" : ""}`
+        : "");
+    return h.reply(body, await this.wiringCard(h, wfId, repos, fa), !!h.cbId);
+  }
+
+  /** Ask for the repositories when the mission did not name them. */
+  async repoPrompt(h: H, wfId: string) {
+    const fa = h.loc === "fa";
+    await setMode(h.session, "hos:wfrepo", { wfId });
+    return h.tg.sendMessage(
+      h.chatId,
+      fa
+        ? `📦 <b>کدام مخزن؟</b>\n\n` +
+          `<blockquote>این ورک‌فلو باید بداند رویداد کدام مخزن مهم است. یک یا چند مورد را با کاما بنویس.</blockquote>\n\n` +
+          `<code>panel-zeus/Z-E-U-S</code>\n<code>oven-sh/bun, cloudflare/workers-sdk</code>\n\n` +
+          `<i>نام را همان‌طور که در گیت‌هاب است بنویس (owner/repo). اگر مطمئن نیستی، اول <code>/search</code> کن.</i>`
+        : `📦 <b>Which repository?</b>\n\nSend one or more as \`owner/repo\`, comma separated.`,
+      { parse_mode: "HTML", reply_markup: kb([[{ text: fa ? "✖️ لغو" : "✖️ Cancel", cb: `hos:wfv:${wfId}` }]]) as any },
+    );
+  }
+
+  async setRepos(h: H, wfId: string, input: string) {
+    const fa = h.loc === "fa";
+    await clearMode(h.session);
+    const repos = reposInMission(input);
+    if (!repos.length) {
+      return h.reply(
+        fa ? `❌ چیزی که شبیه <code>owner/repo</code> باشد پیدا نشد.` : `❌ no owner/repo found`,
+        kb([[{ text: fa ? "🔁 دوباره" : "Retry", cb: `hos:repo:${wfId}` }]]), true,
+      );
+    }
+    await saveRepos(h.env, wfId, repos);
+    const wire = await ensureGithubConnector(h.env, h.u.id, repos);
+    await h.toast(fa ? `📦 ${repos.length} مخزن ثبت شد` : "saved", true);
+    return h.reply(
+      (fa
+        ? `📦 <b>مخزن ثبت شد</b>\n\n` +
+          repos.map((r) => `• <code>${tgEscape(r)}</code>`).join("\n") +
+          `\n\n${wire.created ? "کانکتور گیت‌هاب ساخته شد" : "به کانکتور گیت‌هاب اضافه شد"} — الان <b>${wire.repos.length}</b> مخزن را رصد می‌کند.`
+        : `📦 saved`) +
+        `\n\n${fa ? "قدم بعدی: «🔧 وصلش کن» تا وب‌هوک هم ثبت شود و لحظه‌ای خبر بیاید." : ""}`,
+      await this.wiringCard(h, wfId, repos, fa), true,
+    );
+  }
+
+  /** The manual webhook screen. */
+  async hookHelp(h: H, wfId: string) {
+    const fa = h.loc === "fa";
+    const repos = await loadRepos(h.env, wfId);
+    const base = String(h.env.WORKER_URL ?? "").replace(/\/+$/, "");
+    const report = await wiringReport({ env: h.env, ownerId: h.u.id, repos, base, token: h.userToken });
+    return h.reply(
+      renderHookHelp(report, fa),
       kb(
-        [{ text: fa ? "🧪 اجرای آزمایشی" : "🧪 Dry run", cb: `hos:wfrun:${id}` }],
-        [{ text: fa ? "🧩 جزئیات گره‌ها" : "🧩 Nodes", cb: `hos:wfv:${id}` }],
-        [{ text: fa ? "🗑 حذف" : "🗑 Delete", cb: `hos:wfdel:${id}` }],
+        repos.length ? [{ text: fa ? "🔧 خودت وصلش کن" : "Wire it up", cb: `hos:wire:${wfId}` }] : [],
+        [{ text: fa ? "◀️ بازگشت" : "Back", cb: `hos:wfv:${wfId}` }],
       ),
       !!h.cbId,
     );
@@ -1337,7 +1442,8 @@ export class HubOS {
       `SELECT COUNT(*) n, COALESCE(SUM(prompt_tokens+completion_tokens),0) tok FROM hub_gateway_log WHERE ts > ?`,
     ).bind(Date.now() - 7 * 86400000).first<any>().catch(() => null);
 
-    const hookLines = (hooks.results ?? []).length
+    const hookUrls = (hooks.results ?? []).map((r) => `${base}/hooks/${r.kind}/${r.hk ?? r.id}`);
+    const hookLines = hookUrls.length
       ? (hooks.results ?? []).map((r) => {
           const url = `${base}/hooks/${r.kind}/${r.hk ?? r.id}`;
           return `• <b>${tgEscape(r.kind)}</b>\n  <code>${tgEscape(url)}</code>`;
@@ -1356,6 +1462,12 @@ export class HubOS {
         (fa ? "مدل‌های در دسترس" : "Models") + `: ${MODELS.map((m) => `<code>${m.id}</code>`).join(" · ")}\n` +
         `📊 ${fa ? "۷ روز اخیر" : "last 7d"}: <b>${gw?.n ?? 0}</b> ${fa ? "درخواست" : "calls"} · ${FU.fmtNum(Number(gw?.tok ?? 0))} token`,
       kb(
+        /* Real buttons. A URL written inside <code> cannot be tapped, and the one
+           the owner retyped lost characters to line-wrapping — which is exactly
+           how «دروازهٔ هوش مصنوعی» answered «Not found». */
+        [{ text: "🌐 " + (fa ? "صفحهٔ دروازه" : "Gateway page"), url: `${base}/v1` },
+         { text: "📋 " + (fa ? "فهرست مدل‌ها" : "Models"), url: `${base}/v1/models` }],
+        hookUrls.length ? [{ text: "📎 " + (fa ? "کپی آدرس‌های وب‌هوک" : "Copy hook urls"), copy: hookUrls.join("\n") }] : [],
         [{ text: fa ? "🔌 کانکتورها" : "🔌 Connectors", cb: "hos:conn" }, { text: fa ? "📊 اجراها" : "📊 Runs", cb: "hos:runs" }],
       ),
       !!h.cbId,

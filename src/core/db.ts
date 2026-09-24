@@ -259,16 +259,29 @@ export class Store {
    *   • banned users do not rank
    */
   async leaderboard(metric = "queries", limit = 10) {
+    /* A leaderboard is a list of *people*, and three kinds of row were not:
+     * Telegram bots the bot registers when it meets one, the synthetic identity
+     * `/selfcheck` drives the real handler as (`Self`, which held second place),
+     * and the low-numbered rows the seed and tests write. At least one published
+     * attempt at this filter asked for a `users.is_bot` column that the deployed
+     * database has never had — SQLite rejected the query, the `catch` below
+     * swallowed it, and the board came back *empty* instead of honest. The filter
+     * is therefore written against columns that certainly exist, and it filters
+     * identity only: never a score. */
     const { results } = await this.env.DB.prepare(
       `SELECT l.user_id, l.value, u.first_name, u.username, u.level FROM leaderboard l
        LEFT JOIN users u ON u.id = l.user_id
        WHERE l.week=? AND l.metric=?
          AND l.user_id >= 1000000
-         AND COALESCE(u.first_name,'') <> 'Self'
+         AND COALESCE(u.first_name,'') NOT LIKE 'Self%'
          AND LOWER(COALESCE(u.username,'')) NOT LIKE '%bot'
          AND COALESCE(u.banned,0) = 0
        ORDER BY l.value DESC LIMIT ?`,
-    ).bind(Store.week(), metric, limit).all<any>().catch(() => ({ results: [] as any[] }));
+    ).bind(Store.week(), metric, limit).all<any>().catch((e: any) => {
+      // a silent empty board hides the reason; say it once and answer honestly
+      console.error("leaderboard-query-failed", String(e?.message ?? e));
+      return { results: [] as any[] };
+    });
     return results ?? [];
   }
 

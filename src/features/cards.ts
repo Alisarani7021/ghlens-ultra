@@ -119,6 +119,29 @@ export class RepoCard {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * A licence, as text.
+ *
+ * GitHub returns a licence in three different shapes depending on the endpoint:
+ * `"MIT"` from REST, `{ key, name, spdx_id }` from search and GraphQL, and the
+ * whole object again when it round-trips through D1 as JSON. Template literals
+ * stringify all of them, which is how a repository card ended up printing
+ * «⚖️ [object Object]» to the owner. One function, every shape.
+ */
+export function licenseText(v: unknown): string | null {
+  if (!v) return null;
+  if (typeof v === "string") {
+    const s = v.trim();
+    return !s || s === "[object Object]" ? null : s;
+  }
+  if (typeof v === "object") {
+    const o = v as any;
+    const s = o.spdx_id ?? o.spdxId ?? o.name ?? o.key ?? "";
+    return typeof s === "string" && s.trim() ? s.trim() : null;
+  }
+  return null;
+}
 export function normalise(r: any): RepoMeta {
   if (r.nameWithOwner || r.stargazerCount !== undefined) {
     // GraphQL shape → keep as-is but alias common fields
@@ -131,7 +154,7 @@ export function normalise(r: any): RepoMeta {
       health: r.health ?? r.health_score ?? 0,
       languages: (r.languages?.edges ?? []).map((e: any) => ({ name: e.node.name, color: e.node.color, bytes: e.size })),
       topics: (r.repositoryTopics?.nodes ?? r.topics ?? []).map((n: any) => n?.topic?.name ?? n),
-      license: r.licenseInfo?.spdxId ?? r.license ?? null,
+      license: licenseText(r.licenseInfo?.spdxId ?? r.license),
       description: r.description ?? r.shortDescriptionHTML?.replace(/<[^>]+>/g, "") ?? null,
     } as RepoMeta;
   }
@@ -139,7 +162,7 @@ export function normalise(r: any): RepoMeta {
     ...r,
     languages: typeof r.languages === "string" ? safeParse(r.languages, []) : (r.languages ?? []),
     topics: typeof r.topics === "string" ? safeParse(r.topics, []) : (r.topics ?? []),
-    license: r.license ?? null,
+    license: licenseText(r.license),
     health: r.health_score ?? r.health ?? 0,
     stars: r.stars ?? 0,
     forks: r.forks ?? 0,

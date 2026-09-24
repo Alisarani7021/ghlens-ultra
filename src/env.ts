@@ -51,7 +51,12 @@ export type Job =
   | { type: "snapshot"; day: string }
   | { type: "scan_security"; full_name: string; manifest?: string }
   | { type: "action_job"; job_id: string }
-  | { type: "digest"; kind: "daily" | "weekly"; user_id?: number };
+  | { type: "digest"; kind: "daily" | "weekly"; user_id?: number }
+  /* A model call that does not fit in the platform's reply window. The queue
+     consumer has minutes, not seconds, so the work happens there and the answer
+     arrives by editing the card the user is already looking at. */
+  | { type: "ai.defer"; feature: "repo" | "code" | "review" | "workflow" | "ask" | "mission";
+      arg: string; chat_id: number; message_id?: number; user_id: number; trace: string };
 
 export type Ctx = {
   waitUntil: (p: Promise<unknown>) => void;

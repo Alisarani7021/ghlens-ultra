@@ -292,9 +292,10 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
         prerelease: !!p.prerelease,
         assets: (p.assets ?? []) as Asset[],
         editorial,
+        meta: p.meta,
       });
       return {
-        patch: { post: post.text, markup: post.markup, asset_count: post.assetCount },
+        patch: { post: post.text, post_rich: post.rich, markup: post.markup, asset_count: post.assetCount },
         summary: `پست ساخته شد · ${post.assetCount} فایل`,
       };
     }
@@ -512,6 +513,8 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
       const conf = await loadConnectorConfig(ctx.env, ctx.owner_id, kind);
       const out = await c.act({ env: ctx.env, owner_id: ctx.owner_id, config: conf }, String(cfg.action ?? "publish"), {
         ...(cfg.args ?? {}),
+        // the rich rendering of the same post, when the pipeline produced one
+        rich: kind === "telegram" && !cfg.plain ? (bag.post_rich ? String(bag.post_rich) : undefined) : undefined,
         text: cfg.text ? render(String(cfg.text), bag) : String(bag[String(cfg.from ?? "post")] ?? ""),
         markup: cfg.markup === false ? undefined : bag.markup,
         channel: cfg.channel ? render(String(cfg.channel), bag) : conf.channel,

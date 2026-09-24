@@ -87,13 +87,29 @@ export class AiBrain {
   private static memo = new Map<string, { until: number; text: string }>();
   /** Set by the last chat() call: null when it produced text. */
   failure: AiFailure = null;
+  /**
+   * The wall-clock instant this brain must stop talking by (epoch ms, 0 = no
+   * limit). `chat()` never waits past it, whatever deadline the caller asks for,
+   * and every other method reaches the model through `chat()` — so a single
+   * assignment bounds the whole request. This is the mechanism that keeps a
+   * `waitUntil` handler inside the platform's ~30 s allowance; it replaced a
+   * per-call stop, which two calls in one handler could always outrun.
+   */
+  hardDeadline = 0;
+
+  /** The deadline actually used: the caller's wish, capped by the request clock. */
+  private until(askedMs?: number): number {
+    const asked = Math.max(1_500, askedMs ?? DEFAULT_DEADLINE_MS);
+    if (!this.hardDeadline) return asked;
+    return Math.max(1_500, Math.min(asked, this.hardDeadline - Date.now()));
+  }
 
   constructor(private env: Env) {}
 
   /** Prompt → text, with cache + fallback chain. */
   async chat(prompt: string, opts: ChatOpts = {}): Promise<string> {
     const tier = opts.tier ?? "fast";
-    const deadline = Date.now() + (opts.deadlineMs ?? DEFAULT_DEADLINE_MS);
+    const deadline = Date.now() + this.until(opts.deadlineMs);
     const left = () => deadline - Date.now();
     const system = opts.system ?? "You are GitHub Lens Ultra, an expert open-source intelligence analyst. Answer precisely and concisely.";
     const cacheKey = opts.cacheKey ? `ai:${tier}:${opts.cacheKey}` : null;
@@ -244,7 +260,7 @@ export class AiBrain {
    */
   async parallel(prompts: string[], opts: ChatOpts = {}): Promise<string[]> {
     // same clock as chat(): parts run in parallel, so each gets the full budget
-    const budget = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    const budget = this.until(opts.deadlineMs);
     if (prompts.length === 0) return [];
     if (prompts.length === 1) return [await this.chat(prompts[0]!, opts)];
 
