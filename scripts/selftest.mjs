@@ -340,6 +340,9 @@ const MS = hubMods.mission, EN = hubMods.engine;
 // ═══════════════════════════════════════════════════════════════════════════
 
 // the README pager, bundled on its own: it is pure arithmetic on bytes
+const brainOut = join(scratch, "brain_floor.mjs");
+execSync(`npx esbuild src/ai/brain.ts --bundle --format=esm --platform=neutral --outfile=${brainOut} --log-level=error`, { stdio: "inherit" });
+
 const pagesOut = join(scratch, "assistant_pages.mjs");
 execSync(`npx esbuild src/features/assistant.ts --bundle --format=esm --platform=neutral --outfile=${pagesOut} --log-level=error`, { stdio: "inherit" });
 
@@ -903,6 +906,17 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("gateway: an unknown path is a 404", miss.status, 404);
   const body = await miss.json();
   ok("gateway: the 404 says which paths exist", /available: POST \/v1\/chat\/completions/.test(body.error.hint));
+}
+
+// ── a stub is not a translation ───────────────────────────────────────────
+{
+  const B = await import(join(scratch, "brain_floor.mjs"));
+  const src = "x".repeat(2000);
+  eq("translation: a heading-only answer is rejected", B.translatedEnough("# Claude for Financial Services", src), false);
+  eq("translation: an empty answer is rejected", B.translatedEnough("", src), false);
+  eq("translation: a real translation passes", B.translatedEnough("ترجمهٔ کامل ".repeat(200), src), true);
+  eq("translation: a two-line source is not held to a big floor", B.translatedEnough("سلام", "hi\n"), true);
+  eq("translation: five words for a long source is still a stub", B.translatedEnough("این یک ترجمه است", src), false);
 }
 
 // ── a README is read one page at a time ───────────────────────────────────

@@ -96,6 +96,18 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED
  */
 export const MIN_CALL_MS = 1_500;
 
+/**
+ * A translation shorter than a seventh of its source, with a floor of 120
+ * characters, is a fragment rather than a translation. Callers use this to
+ * refuse to cache one; the model layer uses it to try again.
+ */
+export function translatedEnough(out: string, src: string): boolean {
+  const want = Math.min(120, Math.ceil(String(src ?? "").length * 0.15));
+  const trimmed = String(out ?? "").trim();
+  if (!trimmed) return false;
+  return trimmed.length >= want;
+}
+
 export class AiBrain {
   private static memo = new Map<string, { until: number; text: string }>();
   /** Set by the last chat() call: null when it produced text. */
@@ -295,7 +307,17 @@ export class AiBrain {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
-          body: JSON.stringify({ model: k.model || "auto", messages: [{ role: "user", content: prompt }], max_tokens: opts.max_tokens ?? 2048, temperature: opts.temperature ?? 0.2 }),
+          body: JSON.stringify({
+            model: k.model || "auto",
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: opts.max_tokens ?? 2048,
+            temperature: opts.temperature ?? 0.2,
+            /* A reasoning model gives its budget to thinking first: asked for a
+               long translation with max_tokens 4 000 it can spend all of it
+               reasoning and answer with the first heading — which then passed
+               the "non-empty" check and was cached for a month. */
+            ...(KeyPool.REASONING.test(k.model || "") ? { reasoning_effort: "low" } : {}),
+          }),
           // never spend more than what is left of the answer's budget
           signal: AbortSignal.timeout(Math.max(MIN_CALL_MS, Math.min(20000, budget))),
         });
@@ -337,8 +359,22 @@ export class AiBrain {
   /** Translate several chunks — one part per pooled key when the pool is big. */
   async translateMany(texts: string[], to = "fa", kind = "readme") {
     const prompts = texts.map((t) => this.translatePrompt(t, to, kind));
-    const parts = await this.parallel(prompts, { tier: "smart", max_tokens: 4000, temperature: 0.2, feature: "translate" });
-    return parts.map((p) => p ?? "").filter(Boolean);
+    const parts = await this.parallel(prompts, { tier: "smart", max_tokens: 6000, temperature: 0.2, feature: "translate" });
+    const out: string[] = [];
+    for (let i = 0; i < texts.length; i++) {
+      let p = parts[i] ?? "";
+      /* A real translation of a chunk is a large fraction of it. A stub — the
+         heading only, a truncated answer, a model that ran out of budget — used
+         to be accepted because it was non-empty, and then cached for a month, so
+         the screen kept showing two lines while the source said it was fine.
+         One honest retry through the normal chain, then nothing rather than a
+         fragment: the caller refuses to cache an empty part. */
+      if (!translatedEnough(p, texts[i])) {
+        p = await this.chat(prompts[i]!, { tier: "smart", max_tokens: 6000, temperature: 0.2, feature: "translate" }).catch(() => "");
+      }
+      out.push(translatedEnough(p, texts[i]) ? p : "");
+    }
+    return out.filter(Boolean);
   }
 
   /** The prompt used by translate(); split out so parallel() can reuse it. */
@@ -464,7 +500,13 @@ export class AiBrain {
         const res = await fetch(`${k.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
-          body: JSON.stringify({ model: k.model || "auto", messages, max_tokens: opts.max_tokens ?? 1024, temperature: opts.temperature ?? 0.3 }),
+          body: JSON.stringify({
+            model: k.model || "auto",
+            messages,
+            max_tokens: opts.max_tokens ?? 1024,
+            temperature: opts.temperature ?? 0.3,
+            ...(KeyPool.REASONING.test(k.model || "") ? { reasoning_effort: "low" } : {}),
+          }),
           signal: AbortSignal.timeout(msLeft()),
         });
         if (!res.ok) {
@@ -582,19 +624,31 @@ export class AiBrain {
   // ── specialised calls ───────────────────────────────────────────────────
 
   /** Multilingual → Persian technical translation, format-preserving. */
-  translate(text: string, to = "fa", kind = "readme") {
+  async translate(text: string, to = "fa", kind = "readme") {
     const clipped = text.slice(0, 22000);
-    return this.chat(
-      this.translatePrompt(clipped, to, kind),
-      {
-        tier: "smart",
-        max_tokens: 4000,
-        temperature: 0.2,
-        cacheKey: `tr:${to}:${kind}:${hash(clipped)}`,
-        cacheTtl: 2592000,
-        feature: "translate",
-      },
-    );
+    const prompt = this.translatePrompt(clipped, to, kind);
+    const first = await this.chat(prompt, {
+      tier: "smart",
+      max_tokens: 4000,
+      temperature: 0.2,
+      cacheKey: `tr:${to}:${kind}:${hash(clipped)}`,
+      cacheTtl: 2592000,
+      feature: "translate",
+    });
+    if (translatedEnough(first, clipped)) return first;
+    /* A stub was cached under the first key — drop it, or every later reader
+       gets the same two lines back from the cache and never asks the model
+       again. Then ask once more with room to answer. */
+    await this.env.CACHE.delete(`ai:smart:tr:${to}:${kind}:${hash(clipped)}`).catch(() => null);
+    const second = await this.chat(prompt, {
+      tier: "smart",
+      max_tokens: 6000,
+      temperature: 0.2,
+      cacheKey: `tr3:${to}:${kind}:${hash(clipped)}`,
+      cacheTtl: 2592000,
+      feature: "translate",
+    }).catch(() => "");
+    return translatedEnough(second, clipped) ? second : first;
   }
 
   /** Repo dossier → structured Persian intelligence brief. */

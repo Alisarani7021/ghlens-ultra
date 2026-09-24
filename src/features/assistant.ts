@@ -668,7 +668,8 @@ export function readmePages(sizeBytes: number, b64Len: number): number {
   return Math.max(1, Math.min(9, Math.ceil(bytes / README_PAGE_BYTES)));
 }
 export function readmePageKey(full: string, loc: string, page: number): string {
-  return `trlp:${full}:${loc}:${page}`;
+  // v2: pages cached while the stub bug was live are not translations at all
+  return `trlp2:${full}:${loc}:${page}`;
 }
 /** The markdown for one page — one decode, one page's worth of work. */
 export function readmeSlice(b64: string, page: number, total: number): string {
