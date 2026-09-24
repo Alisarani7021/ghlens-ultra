@@ -658,9 +658,10 @@ const enc = (s) => new TextEncoder().encode(s);
 {
   const out = join(scratch, "brain.mjs");
   execSync(`npx esbuild src/ai/brain.ts --bundle --format=esm --platform=neutral --outfile=${out} --log-level=error`, { stdio: "inherit" });
-  const { AiBrain, DEFAULT_DEADLINE_MS } = await import(out);
+  const { AiBrain, DEFAULT_DEADLINE_MS, MIN_CALL_MS } = await import(out);
 
   eq("ai: default deadline is under the platform's ~30s budget", DEFAULT_DEADLINE_MS <= 25000, true);
+  ok("ai: the floor is a named constant, not a magic number", MIN_CALL_MS >= 500 && MIN_CALL_MS <= 3000);
 
   const never = () => new Promise(() => {});
   const fakeEnv = {
@@ -672,7 +673,10 @@ const enc = (s) => new TextEncoder().encode(s);
   const t0 = Date.now();
   const answer = await brain.chat("hello", { deadlineMs: 700 });
   const took = Date.now() - t0;
-  ok("ai: a hung model gives up instead of hanging (<=1.5s for a 0.7s budget)", took <= 1500);
+  /* The budget below is deliberately smaller than the call floor: the honest
+     guarantee is "the floor plus scheduling slack", and asserting 1.5s flat made
+     a green build depend on runner speed — CI failed on this line by 1 ms. */
+  ok(`ai: a hung model gives up instead of hanging (<=${MIN_CALL_MS + 1200}ms for a 700ms budget)`, took <= MIN_CALL_MS + 1200);
   ok("ai: the hung model produced no text", answer === "");
   eq("ai: the reason is a timeout, not a shrug", brain.failure, "timeout");
 }

@@ -180,6 +180,72 @@ export function normaliseGithub(event: string, payload: any): { identity: string
  * two jobs: it identifies *whose* workflow should run, and it is the secret for
  * sources that have no signature scheme of their own. It is never logged.
  */
+/**
+ * `GET /hooks/<source>/<key>` — the page behind the URL the bot prints.
+ *
+ * A webhook address pasted into a browser answered "Not found", which makes a
+ * working endpoint look dead — and a hook is exactly the kind of thing people
+ * check by hand. The page answers the three questions anyone has about a
+ * webhook from the database rather than from memory: is this key registered,
+ * is the signature actually enforced, and what arrived lately.
+ */
+export async function hookPage(env: Env, source: string, key: string, base: string): Promise<Response> {
+  const row = key
+    ? await env.DB.prepare(
+        `SELECT id, owner_id, kind, label, config FROM hub_connectors WHERE id=? OR json_extract(config,'$.hook_key')=? LIMIT 1`,
+      ).bind(key, key).first<any>().catch(() => null)
+    : null;
+  const events = row
+    ? await env.DB.prepare(
+        `SELECT type, ts, payload FROM hub_events WHERE owner_id=? AND source=? ORDER BY ts DESC LIMIT 10`,
+      ).bind(row.owner_id, row.kind ?? source).all<any>().catch(() => ({ results: [] as any[] }))
+    : { results: [] as any[] };
+
+  let secret = "";
+  try { secret = String(JSON.parse(row?.config ?? "{}").secret ?? ""); } catch { /* none */ }
+  const esc = (s: any) => String(s ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] as string));
+  const rows = (events.results ?? []).map((e: any) =>
+    `<tr><td><code>${esc(e.type)}</code></td><td>${new Date(Number(e.ts)).toISOString().slice(0, 19).replace("T", " ")}</td>` +
+    `<td><code>${esc(String(e.payload ?? "").slice(0, 140))}</code></td></tr>`).join("");
+
+  const html = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>GHLens webhook — ${esc(source)}</title>
+<style>
+ :root{color-scheme:dark}
+ body{margin:0;background:#0b0f19;color:#e6edf3;font:15px/1.85 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif}
+ main{max-width:840px;margin:0 auto;padding:28px 20px 64px}
+ h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:26px 0 8px;color:#9fb4d0}
+ .sub{color:#8b9bb4;font-size:13px}
+ code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+ code{background:#161c2b;padding:2px 6px;border-radius:6px}
+ pre{background:#0f1626;border:1px solid #1e2739;border-radius:12px;padding:14px;overflow:auto;direction:ltr;text-align:left}
+ table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #1e2739;padding:7px 6px;font-size:13px;text-align:right}
+ th{color:#9fb4d0}
+ .pill{border-radius:999px;padding:2px 10px;font-size:12px;background:#12253a;color:#7dd3fc;display:inline-block}
+ .ok{background:#12301f;color:#4ade80}.warn{background:#3a2a12;color:#fbbf24}
+</style></head><body><main>
+<h1>دریافت وب‌هوک — ${esc(source)}</h1>
+<div class="sub">
+  ${row ? `<span class="pill ok">ثبت‌شده</span> <span class="pill">${esc(row.kind)}</span>` : `<span class="pill warn">کلید ناشناس</span>`}
+  ${secret ? `<span class="pill ok">امضای HMAC بررسی می‌شود</span>` : `<span class="pill warn">بدون بررسی امضا</span>`}
+</div>
+<p>${row
+    ? `این آدرس به کانکتور «${esc(row.label ?? row.kind)}» وصل است. سرویس بیرونی باید <b>POST</b> بزند؛ پاسخ <code>200</code> یعنی رویداد ثبت شد و گردش‌کارها اجرا شدند.`
+    : `این کلید در دیتابیس پیدا نشد. آدرس درست را از ربات بگیر: «🔌 کانکتورها → 🔗 وب‌هوک».`}</p>
+<h2>چطور وصل می‌کنی</h2>
+<pre>POST ${base}/hooks/${esc(source)}/${esc(key) || "&lt;hook_key&gt;"}
+content-type: application/json          # یا x-www-form-urlencoded
+x-hub-signature-256: sha256=&lt;hmac&gt;      # گیت‌هاب/استرایپ: امضا لازم است</pre>
+<h2>آخرین رویدادهای رسیده</h2>
+${rows
+    ? `<table><tr><th>نوع</th><th>زمان (UTC)</th><th>بار داده</th></tr>${rows}</table>`
+    : `<p class="sub">هنوز چیزی نرسیده. یک درخواست آزمایشی بگذار:</p>
+<pre>curl -X POST ${base}/hooks/${esc(source)}/${esc(key) || "&lt;hook_key&gt;"} -H "content-type: application/json" -d '{"ping":1}'</pre>`}
+<footer>GitHub Lens Ultra — وضعیت زندهٔ همین آدرس، از دیتابیس.</footer>
+</main></body></html>`;
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
 export async function handleHook(
   request: Request,
   env: Env,

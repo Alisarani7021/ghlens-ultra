@@ -83,6 +83,19 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED
   }
 }
 
+/**
+ * The shortest a model call is allowed to run, even when the caller asks for
+ * less.
+ *
+ * A call that is cut off after a few hundred milliseconds cannot produce an
+ * answer, so a tiny budget would only burn the socket. The floor is what makes
+ * the deadline meaningful, and it is exported because the guarantee is now
+ * testable: a hung model must return within `MIN_CALL_MS` plus scheduling
+ * slack — not "within 1.5 s", which a busy CI runner can miss by one
+ * millisecond and turn into a red build.
+ */
+export const MIN_CALL_MS = 1_500;
+
 export class AiBrain {
   private static memo = new Map<string, { until: number; text: string }>();
   /** Set by the last chat() call: null when it produced text. */
@@ -99,9 +112,9 @@ export class AiBrain {
 
   /** The deadline actually used: the caller's wish, capped by the request clock. */
   private until(askedMs?: number): number {
-    const asked = Math.max(1_500, askedMs ?? DEFAULT_DEADLINE_MS);
+    const asked = Math.max(MIN_CALL_MS, askedMs ?? DEFAULT_DEADLINE_MS);
     if (!this.hardDeadline) return asked;
-    return Math.max(1_500, Math.min(asked, this.hardDeadline - Date.now()));
+    return Math.max(MIN_CALL_MS, Math.min(asked, this.hardDeadline - Date.now()));
   }
 
   constructor(private env: Env) {}
@@ -284,7 +297,7 @@ export class AiBrain {
           headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
           body: JSON.stringify({ model: k.model || "auto", messages: [{ role: "user", content: prompt }], max_tokens: opts.max_tokens ?? 2048, temperature: opts.temperature ?? 0.2 }),
           // never spend more than what is left of the answer's budget
-          signal: AbortSignal.timeout(Math.max(1500, Math.min(20000, budget))),
+          signal: AbortSignal.timeout(Math.max(MIN_CALL_MS, Math.min(20000, budget))),
         });
         if (!res.ok) {
           const body = (await res.text()).slice(0, 200);
@@ -409,7 +422,7 @@ export class AiBrain {
           ...(KeyPool.REASONING.test(k.model) ? { reasoning_effort: "low" } : {}),
           temperature: opts.temperature ?? 0.35,
         }),
-        signal: AbortSignal.timeout(Math.max(1500, Math.min(20000, budget))),
+        signal: AbortSignal.timeout(Math.max(MIN_CALL_MS, Math.min(20000, budget))),
       }).catch(() => null);
       if (!res?.ok) continue;
       const j: any = await res.json().catch(() => ({}));

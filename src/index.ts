@@ -106,6 +106,15 @@ export default {
       if (url.pathname === "/selfcheck") {
         const secret = url.searchParams.get("deep");
         if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        /* Two modes, and the difference matters.
+           With `uid` the audit impersonates that account, which is how a screen
+           gets inspected exactly as its owner sees it.
+           Without `uid` it is a *probe*: the whole handler runs, every read is
+           real, and not one write lands. The cheap version drove the real code
+           path as a synthetic user and left him behind everywhere it touched —
+           a users row, a weekly leaderboard entry, AI counters, download
+           records. Reading is what a smoke test needs; writing was the bug. */
+        const probe = !url.searchParams.has("uid");
         const uid = Number(url.searchParams.get("uid") ?? 999999);
         const text = url.searchParams.get("text") ?? "";
         const cb = url.searchParams.get("cb");            // simulate a button press
@@ -152,7 +161,7 @@ export default {
         }
         const t0 = Date.now();
         try {
-          await handleUpdate(update, env, ctx);
+          await handleUpdate(update, probe ? probeEnv(env) : env, ctx);
           const u = await new Store(env).user(uid);
           const replies = sent.map((s) => ({
             m: s.method,
@@ -288,6 +297,13 @@ export default {
           entities: r.entities, embedded: r.embedded,
           facts: r.facts, note: r.note, preview: r.preview.slice(0, 800),
         });
+      }
+
+      // the same address, opened in a browser, explains itself instead of 404ing
+      if (url.pathname.startsWith("/hooks/") && request.method === "GET") {
+        const { hookPage } = await import("./hub/hooks");
+        const parts = url.pathname.split("/").filter(Boolean);
+        return hookPage(env, parts[1] ?? "generic", parts[2] ?? "", new URL(request.url).origin);
       }
 
       // ── inbound webhooks: one endpoint per source, one shared pipeline ──
@@ -744,6 +760,33 @@ export async function buildH(
 }
 
 // ── messages ───────────────────────────────────────────────────────────────
+/**
+ * A read-only view of the environment for `/selfcheck` probes.
+ *
+ * Reads pass straight through — a probe has to see the same data a user sees or
+ * it audits nothing. Writes report success without touching the database, so a
+ * synthetic run can walk every screen in the bot and leave no trace. The shape
+ * matches D1's, because code that inspects `meta.changes` must not crash.
+ */
+function probeEnv(env: Env): Env {
+  const real = env.DB as any;
+  const stub = (sql: string, binds: any[]): any => ({
+    bind: (...a: any[]) => stub(sql, a),
+    run: async () => ({ success: true, meta: { changes: 0, duration: 0 } }),
+    first: async (...a: any[]) => real.prepare(sql).bind(...(a.length ? a : binds)).first(),
+    all: async (...a: any[]) => real.prepare(sql).bind(...(a.length ? a : binds)).all(),
+    raw: async (...a: any[]) => real.prepare(sql).bind(...(a.length ? a : binds)).raw(),
+  });
+  return {
+    ...env,
+    DB: {
+      prepare: (sql: string) => stub(sql, []),
+      batch: async () => [],
+      exec: async () => ({ count: 0, duration: 0 }),
+    },
+  } as unknown as Env;
+}
+
 async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain, card: RepoCard, guard?: ProgressGuard) {
   const opts = (extra: { cbId?: string; args?: string[]; text?: string } = {}) => ({ ...extra, msg, guard });
   const text = (msg.text ?? msg.caption ?? "").trim();

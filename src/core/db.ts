@@ -9,6 +9,12 @@ export class Store {
 
   // ── users ───────────────────────────────────────────────────────────────
   async upsertUser(u: User, locale?: string) {
+    /* A bot is not a user. Telegram hands bots to this method whenever a bot
+       message is forwarded or a bot is met in a group, and the row it produced
+       had no language, no activity, and a place on the leaderboard. The audits
+       mark themselves as bots too, so they stop minting a passenger as well —
+       the audit identity is a *lens*, not a person. */
+    if ((u as any).is_bot) return;
     const now = Date.now();
     await this.env.DB.prepare(
       `INSERT INTO users (id, username, first_name, locale, referral_code, created_at, last_seen_at)
