@@ -91,7 +91,9 @@ export class Assistant {
         `Use short paragraphs and bullet lists. If you are unsure, say what you would check. Never invent repository names.\n` +
         (convo ? `\nConversation so far:\n${convo}\n` : "") +
         `\nUser: ${question}${grounding}`,
-      { tier: "smart", max_tokens: 1400, temperature: 0.5, userId: h.u.id, feature: "assistant" },
+      // 900 rather than 1400: a long answer is worthless if the platform's time
+      // for this update runs out before the model finishes writing it.
+      { tier: "smart", max_tokens: 900, temperature: 0.5, userId: h.u.id, feature: "assistant" },
     );
 
     await h.store.addMessage(chatId, "assistant", answer || "");

@@ -40,10 +40,23 @@ const FALLBACK: Record<string, AiModel[]> = {
 };
 
 /** Why the last call produced nothing — surfaced to users instead of a shrug. */
-export type AiFailure = "quota" | "missing" | "unconfigured" | "pool-cooling" | null;
+export type AiFailure = "quota" | "missing" | "unconfigured" | "pool-cooling" | "timeout" | null;
 export type Tier = keyof typeof FALLBACK;
 
+/**
+ * How long a whole answer may take, in milliseconds.
+ *
+ * The Telegram handler runs every update inside `ctx.waitUntil` and Cloudflare
+ * only guarantees that work for about thirty seconds after the response has gone
+ * out. A model call was allowed 90 seconds on its own and the chain could try
+ * four of them, so a slow model did not produce a slow answer — it produced no
+ * answer at all, and the "thinking…" message stayed on screen forever.
+ */
+export const DEFAULT_DEADLINE_MS = 20_000;
+
 export interface ChatOpts {
+  /** total wall-clock budget for this answer; default DEFAULT_DEADLINE_MS */
+  deadlineMs?: number;
   tier?: Tier;
   system?: string;
   max_tokens?: number;
@@ -53,6 +66,21 @@ export interface ChatOpts {
   userId?: number;
   feature?: string;
   json?: boolean;
+}
+
+/** Distinguishes "the model said nothing" from "the model never came back". */
+const TIMED_OUT = Symbol("ai-timeout");
+
+/** Resolve with TIMED_OUT once `ms` elapse — the call itself cannot be cancelled. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  if (ms <= 0) return TIMED_OUT;
+  let timer: any;
+  const alarm = new Promise<typeof TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
+  try {
+    return await Promise.race([work, alarm]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class AiBrain {
@@ -65,6 +93,8 @@ export class AiBrain {
   /** Prompt → text, with cache + fallback chain. */
   async chat(prompt: string, opts: ChatOpts = {}): Promise<string> {
     const tier = opts.tier ?? "fast";
+    const deadline = Date.now() + (opts.deadlineMs ?? DEFAULT_DEADLINE_MS);
+    const left = () => deadline - Date.now();
     const system = opts.system ?? "You are GitHub Lens Ultra, an expert open-source intelligence analyst. Answer precisely and concisely.";
     const cacheKey = opts.cacheKey ? `ai:${tier}:${opts.cacheKey}` : null;
 
@@ -103,7 +133,7 @@ export class AiBrain {
     /* Donated keys first: pooled, health-ordered, and independent of the
      * account's neuron budget. A key that fails hard is dropped immediately. */
     if (!text) {
-      text = await this.tryPool(messages, opts);
+      text = await this.tryPool(messages, opts, left());
       if (text) {
         this.failure = null;
         // pooled keys answered → the account-wide breaker is stale, clear it
@@ -132,13 +162,23 @@ export class AiBrain {
      * Workers AI outage (auth/limit) behind a friendly "no answer" message, so
      * keep the last error and surface it when the whole chain misses. */
     const failures: string[] = [];
+    let timedOut = false;
     for (const model of chain) {
+      /* Stop before starting a call that cannot finish. A model that never
+         answers must not eat the whole budget and take the reply down with it —
+         the answer to a slow model is a different model, or an honest notice. */
+      const remaining = left();
+      if (remaining < 1_500) { timedOut = true; failures.push(`${model}: skipped, ${remaining}ms left`); break; }
       try {
-        const res: any = await this.env.AI.run(model as any, {
-          messages,
-          max_tokens: opts.max_tokens ?? 1024,
-          temperature: opts.temperature ?? 0.35,
-        } as any);
+        const res: any = await within(
+          this.env.AI.run(model as any, {
+            messages,
+            max_tokens: opts.max_tokens ?? 1024,
+            temperature: opts.temperature ?? 0.35,
+          } as any),
+          remaining,
+        );
+        if (res === TIMED_OUT) { timedOut = true; failures.push(`${model}: timed out`); break; }
         text = (res?.response ?? "").toString().trim();
         if (text) break;
         failures.push(`${model}: empty response`);
@@ -152,7 +192,7 @@ export class AiBrain {
        at "AI is down" — the worst case is one more request, the best case is a
        real answer. */
     if (!text && this.poolAttempted) {
-      text = await this.tryCooling(messages, opts).catch(() => "");
+      text = await this.tryCooling(messages, opts, left()).catch(() => "");
       if (text) {
         this.failure = null;
         await this.env.CACHE.delete("ai:halt").catch(() => null);
@@ -166,7 +206,8 @@ export class AiBrain {
       console.error("ai-chain-exhausted", failures.join(" | "));
       // If donated keys were tried and did not answer, that is the cause the
       // user needs to hear — not the account-wide quota message.
-      this.failure = this.poolAttempted ? "pool-cooling"
+      this.failure = timedOut ? "timeout"
+        : this.poolAttempted ? "pool-cooling"
         : failures.some((f) => /4006|neuron/i.test(f)) ? "quota"
         : failures.every((f) => /deprecat|no such model|not allowed|not available/i.test(f)) ? "missing"
         : "unconfigured";
@@ -202,6 +243,8 @@ export class AiBrain {
    * next healthy key (or on Workers AI when it is available).
    */
   async parallel(prompts: string[], opts: ChatOpts = {}): Promise<string[]> {
+    // same clock as chat(): parts run in parallel, so each gets the full budget
+    const budget = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
     if (prompts.length === 0) return [];
     if (prompts.length === 1) return [await this.chat(prompts[0]!, opts)];
 
@@ -224,7 +267,8 @@ export class AiBrain {
           method: "POST",
           headers: { ...(k.key ? { authorization: `Bearer ${k.key}` } : {}), "content-type": "application/json" },
           body: JSON.stringify({ model: k.model || "auto", messages: [{ role: "user", content: prompt }], max_tokens: opts.max_tokens ?? 2048, temperature: opts.temperature ?? 0.2 }),
-          signal: AbortSignal.timeout(90000),
+          // never spend more than what is left of the answer's budget
+          signal: AbortSignal.timeout(Math.max(1500, Math.min(20000, budget))),
         });
         if (!res.ok) {
           const body = (await res.text()).slice(0, 200);
@@ -335,7 +379,7 @@ export class AiBrain {
    * Called only when every other engine (Workers AI and the healthy pool) gave
    * up, so a working key is never left unused just because of its timer.
    */
-  private async tryCooling(messages: any[], opts: ChatOpts): Promise<string> {
+  private async tryCooling(messages: any[], opts: ChatOpts, budget = DEFAULT_DEADLINE_MS): Promise<string> {
     const pool = new KeyPool(this.env);
     const keys = await pool.cooling(2).catch(() => []);
     for (const k of keys) {
@@ -349,7 +393,7 @@ export class AiBrain {
           ...(KeyPool.REASONING.test(k.model) ? { reasoning_effort: "low" } : {}),
           temperature: opts.temperature ?? 0.35,
         }),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(Math.max(1500, Math.min(20000, budget))),
       }).catch(() => null);
       if (!res?.ok) continue;
       const j: any = await res.json().catch(() => ({}));
@@ -359,7 +403,7 @@ export class AiBrain {
     return "";
   }
 
-  private async tryPool(messages: any[], opts: ChatOpts): Promise<string> {
+  private async tryPool(messages: any[], opts: ChatOpts, budget = DEFAULT_DEADLINE_MS): Promise<string> {
     let keys: { id: number; provider: string; baseUrl: string; model: string; key: string }[] = [];
     try {
       keys = await new KeyPool(this.env).candidates(6);
@@ -727,6 +771,17 @@ export async function aiDownNotice(env: Env, loc: string): Promise<string> {
         "• یا اپراتور می‌تواند یک کلید سازگار با OpenAI (Groq / OpenRouter / Gemini) بسازد و با <code>OPENAI_COMPAT_KEY</code> وصل کند؛ آن سهمیه جداست.\n" +
         "بقیهٔ ربات بدون AI کار می‌کند."
       : "⚠️ The account's free Workers AI neurons are spent for today. It resets automatically, or add an OpenAI-compatible key (Groq / OpenRouter / Gemini) as OPENAI_COMPAT_KEY. Everything else keeps working.";
+  }
+  if (reason === "timeout") {
+    /* The honest version of "nothing happened": the model was thinking when the
+       platform's time for this update ran out. Saying so beats a spinner that
+       never stops, and the two fixes are both one tap away. */
+    return fa
+      ? "⏱ مدل در این نوبت کند بود و در ۲۰ ثانیه جواب نداد — نه اینکه خراب باشد.\n" +
+        "• دوباره بپرس (اغلب بار دوم سریع است)\n" +
+        "• یا سؤال را کوتاه‌تر/دقیق‌تر بپرس تا سریع‌تر جواب بگیرد\n" +
+        "بقیهٔ ربات بی‌ربط به این موضوع کار می‌کند."
+      : "⏱ The model was slow and did not answer within 20 seconds this time. Ask again, or ask something shorter — everything else works.";
   }
   if (reason === "pool-cooling") {
     /* Say what actually happened. «همهٔ کلیدها را یکی‌یکی امتحان کردم و این
