@@ -1,5 +1,4 @@
 import type { H } from "../core/handler";
-import { GithubRest } from "../github/rest";
 import { parseRepoRef } from "../core/repo-ref";
 import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
@@ -15,7 +14,7 @@ export class ArchitectureExplainer {
       } else if (clean.length >= 2) {
         // User typed bare repo or keyword like "v2rayNG"
         await h.loading(fa ? `🔎 جست‌وجوی دقیق مخزن برای «${clean}»…` : `Searching repository for "${clean}"…`);
-        const searchGh = new GithubRest(h.env);
+        const searchGh = h.gh();
         const res = await searchGh.searchRepos(clean, "stars", "desc", 1).catch(() => null);
         if (res?.items?.[0]?.full_name) {
           full = res.items[0].full_name;
@@ -34,7 +33,7 @@ export class ArchitectureExplainer {
     }
 
     await h.loading(fa ? "🗺 در حال استخراج ساختار فایل‌ها و تحلیل معماری…" : "Analyzing repository architecture…");
-    const gh = new GithubRest(h.env);
+    const gh = h.gh();
     const [repo, rootFiles, readmeRaw] = await Promise.all([
       gh.repo(full, 600).catch(() => null),
       gh.contents(full, "", 600).catch(() => [] as any[]),

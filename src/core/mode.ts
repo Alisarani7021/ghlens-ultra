@@ -56,6 +56,8 @@ export async function clearMode(s: Sess): Promise<void> {
 export function modeKeeps(kind: string, cb: string): boolean {
   if (!cb) return false;
   if (kind === "keys") return cb.startsWith("keys:");
+  // the deep-link gate lives until answered or walked away from
+  if (kind === "dl:go") return cb === "dl:yes" || cb === "dl:no";
   if (kind === "wf") return cb.startsWith("wf:") || cb.startsWith("a:wf");
   const ns = cb.split(":")[0];
   if (kind.startsWith("dvu:")) return ns === "dvu";

@@ -36,15 +36,17 @@ export function repoFromText(text: string): string | null {
 export function channelRepoKb(full: string, botUser: string): { inline_keyboard: any[][] } {
   const arg = full.replace("/", "_");
   const link = (q: string) => `https://t.me/${botUser}?start=${q}`;
+  /* Coloured, the way the owner's favourite store bot paints its rows:
+     the left column rides the accent colour, the right goes green then red. */
   return {
     inline_keyboard: [
       [
-        { text: "🏛 معماری", url: link(`arch_${arg}`) },
-        { text: "🧠 تحلیل", url: link(`c_${arg}`) },
+        { text: "🏛 معماری", url: link(`arch_${arg}`), style: "primary" },
+        { text: "🧠 تحلیل", url: link(`c_${arg}`), style: "success" },
       ],
       [
-        { text: "🌍 ترجمه", url: link(`t_${arg}`) },
-        { text: "📦 کارت", url: link(`repo_${arg}`) },
+        { text: "🌍 ترجمه", url: link(`t_${arg}`), style: "primary" },
+        { text: "📦 کارت", url: link(`repo_${arg}`), style: "danger" },
       ],
     ],
   };

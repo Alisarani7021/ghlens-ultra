@@ -1,7 +1,6 @@
 import type { H } from "../core/handler";
 import { setMode } from "../core/mode";
 import { parseRepoRef } from "../core/repo-ref";
-import { GithubRest } from "../github/rest";
 import { RepoRag } from "../ai/vector";
 import { aiDownNotice } from "../ai/brain";
 import { hash } from "../ai/brain";
@@ -172,7 +171,7 @@ export class Assistant {
     }
 
     await h.loading(fa ? "📚 در حال خواندن مستندات…" : "📚 reading docs…");
-    const gh = new GithubRest(h.env);
+    const gh = h.gh();
     const readmeRaw = await gh.readme(full, 3600).catch(() => null);
     if (!readmeRaw?.content) return h.reply(fa ? "❌ README این مخزن خوانده نشد." : "❌ README unreadable.", kb([{ text: "◀️", cb: `s:card:${full}` }]), true);
     const readme = decodeB64(readmeRaw.content);
@@ -228,7 +227,7 @@ export class Assistant {
   }
 
   private async docsCorpus(h: H, full: string): Promise<string> {
-    const gh = new GithubRest(h.env);
+    const gh = h.gh();
     const listing = await gh.contents(full, "docs", 3600).catch(() => null);
     let corpus = "";
     if (Array.isArray(listing)) {
@@ -276,7 +275,7 @@ export class Assistant {
        lines of cached facts instead of the brief — «تحلیل کامل نیست، فقط چند
        خط». analyzeRepo keeps its own 7-day answer cache, so a repeated press
        is a cache read, not a new model call. */
-    const gql = new GithubRest(h.env);
+    const gql = h.gh();
     const commits = await gql.commits(full, 10).catch(() => []);
     const ask = () => h.ai.analyzeRepo({
           full_name: meta.full_name,
@@ -383,7 +382,7 @@ export class Assistant {
     const full = parseRepoRef(input) ?? "";
     if (!full) return this.translatePick(h, input);
     await h.loading(fa ? "🌍 در حال ترجمه README…" : "🌍 translating README…");
-    const gh = new GithubRest(h.env);
+    const gh = h.gh();
     const raw = await gh.readme(full, 3600).catch(() => null);
     if (!raw?.content) return h.reply(
       (fa ? `❌ برای <code>${tgEscape(full)}</code> فایل README پیدا نشد.\n\n` +
@@ -460,7 +459,7 @@ export class Assistant {
    */
   async readmeMore(h: H, full: string, page: number) {
     const fa = h.loc === "fa";
-    const gh = new GithubRest(h.env);
+    const gh = h.gh();
     const raw = await gh.readme(full, 3600).catch(() => null);
     if (!raw?.content) return h.toast(fa ? "دوباره امتحان کن" : "try again", true);
     const total = readmePages(raw.size ?? 0, raw.content.length);

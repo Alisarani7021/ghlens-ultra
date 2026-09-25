@@ -406,7 +406,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1159,9 +1159,45 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("channel: translation opens the README", urls.some((u) => u.endsWith("t_oven-sh_bun")));
   ok("channel: the card deep link is the repo one", urls.some((u) => u.endsWith("repo_oven-sh_bun")));
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
+  // Bot API 9.4 colours: every key is painted, the scheme is left-accent
+  ok("channel: every glass key is coloured",
+     kb.inline_keyboard.flat().every((b) => ["primary", "success", "danger"].includes(b.style)));
+  eq("channel: the left column rides the accent colour",
+     kb.inline_keyboard.map((r) => r[0].style), ["primary", "primary"]);
+  eq("channel: the right column goes green then red",
+     kb.inline_keyboard.map((r) => r[1].style), ["success", "danger"]);
   // a repo name may carry underscores: the first underscore is the separator
   const kbU = C.channelRepoKb("a/b_c", "Gitguts_bot");
   ok("channel: underscored repo names survive the link", kbU.inline_keyboard.flat().some((b) => b.url.endsWith("arch_a_b_c")));
+}
+
+// ── the channel gate: a stray thumb must not fire a dossier ───────────────
+{
+  const D = await import(join(scratch, "feat_deeplink.mjs"));
+
+  eq("gate: architecture link described", D.describeDeepLink("arch_panel-zeus_Z-E-U-S")?.full, "panel-zeus/Z-E-U-S");
+  ok("gate: architecture title says معماری", (D.describeDeepLink("arch_a_b")?.title ?? "").includes("معماری"));
+  eq("gate: translate link described", D.describeDeepLink("t_lukapiskorec_craftbot")?.full, "lukapiskorec/craftbot");
+  ok("gate: translate title says ترجمه", (D.describeDeepLink("t_a_b")?.title ?? "").includes("ترجمه"));
+  eq("gate: card link described", D.describeDeepLink("repo_oven-sh_bun")?.full, "oven-sh/bun");
+  eq("gate: scout link described", D.describeDeepLink("s_x_y")?.full, "x/y");
+  eq("gate: download link described", D.describeDeepLink("d_x_y")?.full, "x/y");
+  eq("gate: analysis link described", D.describeDeepLink("c_x_y")?.full, "x/y");
+  // only repo deep links are gated — referrals and pages pass straight through
+  eq("gate: a referral is not a deep link", D.describeDeepLink("ref_ABC12"), null);
+  eq("gate: a bare page is not a deep link", D.describeDeepLink("hub"), null);
+  eq("gate: garbage is not a deep link", D.describeDeepLink(""), null);
+
+  const g = D.deepLinkGate("arch_panel-zeus_Z-E-U-S", true);
+  ok("gate: the screen names the repo", (g?.text ?? "").includes("panel-zeus/Z-E-U-S"));
+  ok("gate: the screen asks before opening", (g?.text ?? "").includes("بازش کنم"));
+  const flat = (g?.kb?.inline_keyboard ?? []).flat();
+  eq("gate: exactly a yes and a no", flat.map((b) => b.callback_data).sort(), ["dl:no", "dl:yes"]);
+  ok("gate: the buttons carry no payload beyond yes/no", flat.every((b) => !b.url));
+  const en = D.deepLinkGate("t_x_y", false);
+  ok("gate: english screen exists", (en?.text ?? "").includes("Open it for you now?"));
+  // underscored repo names: the first underscore is the separator
+  eq("gate: underscored repo survives", D.describeDeepLink("arch_a_b_c")?.full, "a/b_c");
 }
 
 // ── the premium-emoji layer ───────────────────────────────────────────────

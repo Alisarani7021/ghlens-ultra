@@ -1,6 +1,7 @@
 import { NetRadar } from "./features/netradar";
 import { ArchitectureExplainer } from "./features/architecture";
 import { armChannelPost } from "./features/channelarm";
+import { deepLinkGate } from "./features/deeplink";
 import { AppGen } from "./features/appgen";
 import { MultiHub } from "./features/multihub";
 import type { Ctx, Env, Job } from "./env";
@@ -1233,25 +1234,16 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
 
   switch (cmd) {
     case "/start": {
-      // deep links: s_/d_/t_/c_ + owner/repo open the right screen
+      // deep links: the channel glass keys (repo_/arch_/s_/d_/t_/c_) open real
+      // work — but a thumb resting on a phone fires them by accident, so the
+      // gate comes first: say what will open, wait for the tap that means it
+      const gate = deepLinkGate(arg, fa);
+      if (gate) {
+        await setMode(h.session, "dl:go", { arg });
+        return h.reply(gate.text, gate.kb, false);
+      }
       if (arg === "k_keys") return keysFeature.home(h);
       if (arg === "hub" || arg === "cloud") return hubOS.home(h);
-      if (arg.startsWith("repo_")) {
-        const target = arg.slice(5).replace("_", "/");
-        return repoCard(h, target);
-      }
-      const deep = arg.match(/^([sdtc])_(.+)$/);
-      if (deep) {
-        // the separator is the first underscore — owners never carry one,
-        // repo names can, so only the first splits
-        const full = normRepo(deep[2].replace("_", "/"));
-        if (deep[1] === "s") return scout.open(h, full, 0);
-        if (deep[1] === "d") return downloader(h).choose(h, full);
-        if (deep[1] === "t") return assistant.translateReadme(h, full);
-        if (deep[1] === "c") return assistant.dossier(h, full);
-      }
-      // the channel glass keys open the architecture screen directly
-      if (arg.startsWith("arch_")) return archExplainer.explain(h, normRepo(arg.slice(5).replace("_", "/")));
       // referral?
       if (arg.startsWith("ref_")) {
         await h.env.DB.prepare(`UPDATE users SET referral_by=(SELECT id FROM users WHERE referral_code=?) WHERE id=? AND referral_by IS NULL`)
@@ -1766,6 +1758,23 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         break;
 
       // ── profile / gamification ──
+      // ── the yes/no gate in front of every channel deep link ──
+      case "dl": {
+        const mode = await readMode(h.session);
+        if (action === "yes" && mode?.kind === "dl:go") {
+          const arg = String((mode as any).data?.arg ?? "");
+          await clearMode(h.session);
+          await runDeepLink(h, arg);
+          return;
+        }
+        await clearMode(h.session);
+        return h.reply(
+          fa ? "باشه! هر وقت خواستی، همان دکمه را دوباره بزن 🌟" : "Sure — tap the button again whenever you want.",
+          kb([{ text: "◀️ " + (fa ? "بازگشت" : "Back"), cb: "m:home" }]),
+          !!h.cbId,
+        );
+      }
+
       case "me":
         if (action === "home") return profile.home(h);
         if (action === "dash") return profile.dash(h);
@@ -2002,6 +2011,28 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
 }
 
 // callback sub-handlers that need extra logic
+/** Execute a channel glass-key deep link — called once the gate said yes. */
+async function runDeepLink(h: H, arg: string): Promise<any> {
+  if (arg.startsWith("repo_")) return repoCard(h, arg.slice(5).replace("_", "/"));
+  const deep = arg.match(/^([sdtc])_(.+)$/);
+  if (deep) {
+    // the separator is the first underscore — owners never carry one,
+    // repo names can, so only the first splits
+    const full = normRepo(deep[2].replace("_", "/"));
+    if (deep[1] === "s") return scout.open(h, full, 0);
+    if (deep[1] === "d") return downloader(h).choose(h, full);
+    if (deep[1] === "t") return assistant.translateReadme(h, full);
+    if (deep[1] === "c") return assistant.dossier(h, full);
+  }
+  if (arg.startsWith("arch_")) return archExplainer.explain(h, normRepo(arg.slice(5).replace("_", "/")));
+  const fa = h.loc === "fa";
+  return h.reply(
+    "🤷 " + (fa ? "این لینک دیگر معتبر نیست." : "This link is no longer valid."),
+    kb([{ text: "◀️", cb: "m:home" }]),
+    !!h.cbId,
+  );
+}
+
 async function repoCard(h: H, full: string) {
   const gh = new GithubRest(h.env);
   const m = await gh.repo(full, 600).catch(() => null);

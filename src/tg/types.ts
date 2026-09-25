@@ -103,6 +103,8 @@ export interface InlineKeyboardButton {
   pay?: boolean;
   /** Bot API 9.4 — the custom emoji drawn before the label (premium layer). */
   icon_custom_emoji_id?: string;
+  /** Bot API 9.4 — the button's colour: primary (accent), success, danger. */
+  style?: "primary" | "success" | "danger";
 }
 export type InlineKeyboardMarkup = { inline_keyboard: InlineKeyboardButton[][] };
 export type ReplyKeyboardMarkup = {
