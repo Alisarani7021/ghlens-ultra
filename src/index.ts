@@ -5,6 +5,7 @@ import { MultiHub } from "./features/multihub";
 import type { Ctx, Env, Job } from "./env";
 import { botUsername, isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
+import { noteIncomingCustomEmoji } from "./tg/premium";
 import type { CallbackQuery, InlineQuery, Message, Update, User } from "./tg/types";
 import { tgEscape } from "./tg/types";
 import { kb } from "./tg/keyboards";
@@ -489,6 +490,14 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
     if (update.inline_query) return await routeInline(update.inline_query, env, ctx, tg, store, ai);
     if (update.message) {
       guard.chatId = update.message.chat.id;
+      /* a message carrying custom emojis teaches the premium table its pairs:
+         entity says the id, the text under it says the emoji. One pasted
+         message = a whole pack learned, forever (KV). */
+      const ents = (update.message.entities ?? []).concat(update.message.caption_entities ?? []);
+      if (ents.some((e: any) => e.type === "custom_emoji" && e.custom_emoji_id)) {
+        const text = update.message.text ?? update.message.caption ?? "";
+        ctx.waitUntil(noteIncomingCustomEmoji(env, text, ents).catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e))));
+      }
       return await routeMessage(update.message, env, ctx, tg, store, ai, card, guard);
     }
   } finally {

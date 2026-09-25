@@ -358,7 +358,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1029,6 +1029,44 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("mission: a manual mission stays manual", MI.triggerForMission("این مخزن را تحلیل کن"), "");
   ok("mission: the planner cannot leave an event-shaped mission manual",
      /github\.release/.test(MI.triggerForMission("هر زمان نسخهٔ جدید oven-sh/bun منتشر شد، خودکار پست کن")));
+}
+
+// ── the premium-emoji layer ───────────────────────────────────────────────
+{
+  /* Premium emojis are one table and one choke point. These checks pin the
+     pure half: pairs learned from stickers and from incoming entities, the
+     wrapping (code stays literal, existing tags never nest), and the strip
+     that the fallback path relies on. */
+  const P = await import(join(scratch, "tg_premium.mjs"));
+
+  const stickers = [
+    { emoji: "🔭", custom_emoji_id: "7000001" },
+    { emoji: "🧠", custom_emoji_id: "7000002" },
+    { emoji: "🛡", custom_emoji_id: "7000003" },
+  ];
+  const m = P.buildMapFromStickers(stickers);
+  eq("premium: sticker ids become the table", m, { "🔭": "7000001", "🧠": "7000002", "🛡": "7000003" });
+
+  // an incoming premium message: entity names the id, the text names the emoji
+  const text = "سلام 👋 این 🔭 و اینم 🧠";
+  const entities = [
+    { type: "custom_emoji", offset: 5, length: 2, custom_emoji_id: "7100001" },
+    { type: "custom_emoji", offset: 12, length: 2, custom_emoji_id: "7100002" },
+  ];
+  eq("premium: incoming entities teach their pairs",
+     P.harvestEntities(text, entities), { "👋": "7100001", "🔭": "7100002" });
+
+  const html = "<h1>🔭 کاوش</h1>\n<p>با 🧠 تحلیل کن</p>\n<pre>emoji 🔭 stays literal</pre>\n<code>🛡 code too</code>";
+  const wrapped = P.premiumizeHtml(html, m);
+  ok("premium: heading emoji is wrapped",
+     wrapped.includes('<tg-emoji emoji-id="7000001">🔭</tg-emoji>'));
+  ok("premium: body emoji is wrapped",
+     wrapped.includes('<tg-emoji emoji-id="7000002">🧠</tg-emoji>'));
+  ok("premium: code fences keep their literal emoji",
+     wrapped.includes("<pre>emoji 🔭 stays literal</pre>") && wrapped.includes("<code>🛡 code too</code>"));
+  ok("premium: wrapping is idempotent", P.premiumizeHtml(wrapped, m) === wrapped);
+  eq("premium: strip returns the original text", P.stripPremium(wrapped), html);
+  eq("premium: strip leaves plain html alone", P.stripPremium("<p>بدون تگ 🔭</p>"), "<p>بدون تگ 🔭</p>");
 }
 
 // ── no screen may print «\n» as text ─────────────────────────────────────

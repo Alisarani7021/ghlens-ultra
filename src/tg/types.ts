@@ -25,6 +25,8 @@ export interface MessageEntity {
   url?: string;
   user?: User;
   language?: string;
+  /** present when type === "custom_emoji" — the premium pair teacher */
+  custom_emoji_id?: string;
 }
 
 export interface Message {

@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import type {
   CallbackQuery, InlineKeyboardMarkup, InlineQueryResult, SendMessageOpts, TgOk, Update,
 } from "./types";
+import { getPremiumMap, notePremiumRejection, premiumizeHtml } from "./premium";
 
 /**
  * Telegram Bot API client.
@@ -23,6 +24,32 @@ export class Telegram {
     opts: { formData?: FormData; retries?: number } = {},
   ): Promise<TgOk<T>> {
     const retries = opts.retries ?? 2;
+    /* The premium-emoji coat: when the emoji table is known, the outgoing
+       text — plain messages, captions, rich documents — leaves with custom
+       emoji tags. `plain` keeps exactly what the feature wrote, so a refusal
+       costs one retry, never the message. */
+    const plain = { ...(payload as any) };
+    let wrapped = false;
+    if (!opts.formData && (plain.text || plain.caption || plain.rich_message)) {
+      const map = await getPremiumMap(this.env).catch(() => null);
+      if (map && Object.keys(map).length) {
+        const next: any = { ...plain };
+        let changed = false;
+        if (plain.text && plain.parse_mode === "HTML") {
+          const t = premiumizeHtml(String(plain.text), map);
+          if (t !== plain.text) { next.text = t; changed = true; }
+        }
+        if (plain.caption && plain.parse_mode === "HTML") {
+          const c = premiumizeHtml(String(plain.caption), map);
+          if (c !== plain.caption) { next.caption = c; changed = true; }
+        }
+        if (plain.rich_message?.html) {
+          const h = premiumizeHtml(String(plain.rich_message.html), map);
+          if (h !== plain.rich_message.html) { next.rich_message = { ...plain.rich_message, html: h }; changed = true; }
+        }
+        if (changed) { payload = next; wrapped = true; }
+      }
+    }
     let lastErr: any = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -40,8 +67,20 @@ export class Telegram {
 
         // Silent-no-op cases: not an error for us.
         if (/message is not modified/i.test(json.description ?? "")) return json;
-        if (json.error_code === 429 || json.error_code >= 500) {
-          const wait = (json.parameters?.retry_after ?? 1) * 1000 + 250;
+        /* A wrapped message that Telegram rejects goes out once more as the
+           plain text it was born as; premium is a coat, never a dependency.
+           An emoji-flavoured refusal also stands the layer down for an hour. */
+        if (wrapped && (json as any).error_code === 400) {
+          wrapped = false;
+          payload = plain;
+          if (/custom.?emoji|emoji.?id/i.test(String((json as any).description ?? ""))) {
+            await notePremiumRejection(this.env).catch(() => null);
+          }
+          lastErr = json;
+          continue;
+        }
+        if ((json as any).error_code === 429 || (json as any).error_code >= 500) {
+          const wait = ((json as any).parameters?.retry_after ?? 1) * 1000 + 250;
           await new Promise((r) => setTimeout(r, Math.min(wait, 8000)));
           lastErr = json;
           continue;
@@ -136,6 +175,10 @@ export class Telegram {
   }
 
   async sendDocument(chat_id: number, filename: string, data: Blob | ArrayBuffer | Uint8Array | ReadableStream, caption?: string, opts: SendMessageOpts = {}) {
+    if (caption && opts.parse_mode === "HTML") {
+      const m = await getPremiumMap(this.env).catch(() => null);
+      if (m) caption = premiumizeHtml(caption, m);
+    }
     const fd = new FormData();
     fd.append("chat_id", String(chat_id));
     if (caption) fd.append("caption", caption.slice(0, 1024));
@@ -152,11 +195,15 @@ export class Telegram {
    * string, and the welcome banner costs no upload on every /start. Passing a
    * string therefore goes through the JSON method instead of a multipart form.
    */
-  sendPhoto(chat_id: number, photo: string | Blob | ArrayBuffer | Uint8Array, caption?: string, opts: SendMessageOpts = {}) {
+  async sendPhoto(chat_id: number, photo: string | Blob | ArrayBuffer | Uint8Array, caption?: string, opts: SendMessageOpts = {}) {
     if (typeof photo === "string") {
       return this.call<{ message_id: number }>("sendPhoto", {
         chat_id, photo, ...(caption ? { caption } : {}), ...opts,
       });
+    }
+    if (caption && opts.parse_mode === "HTML") {
+      const m = await getPremiumMap(this.env).catch(() => null);
+      if (m) caption = premiumizeHtml(caption, m);
     }
     const fd = new FormData();
     fd.append("chat_id", String(chat_id));
