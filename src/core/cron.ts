@@ -30,7 +30,15 @@ export async function runCron(event: ScheduledController, env: Env, ctx: Ctx) {
 
   try {
     switch (classifyCron(cron)) {
-      case "fast": await fastPoll(env, ctx); break;
+      case "fast": {
+        await fastPoll(env, ctx);
+        /* This account's cron triggers refuse to come alive as a fresh fourth
+           schedule — but modifying a live one applies within minutes. The old
+           */15 trigger therefore became this */5 tick, and the quarter work
+           rides along at :00/:15/:30/:45: one trigger, two cadences. */
+        if (new Date().getUTCMinutes() % 15 === 0) await quarterHourly(env, store, ctx);
+        break;
+      }
       case "quarter": await quarterHourly(env, store, ctx); break;
       case "hourly":  await hourly(env, store, ctx); break;
       case "weekly":  await weekly(env, store, ctx); break;
