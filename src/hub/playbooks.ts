@@ -120,6 +120,88 @@ const releaseDag: Dag = {
   ],
 };
 
+/* Watching someone else's repository for updates. A webhook needs admin
+   rights, so for third-party repos the 5-minute poll IS the delivery — and
+   what those repos actually ship is commits, not releases: plenty of popular
+   repositories have never cut a release in their life. */
+const pushDag: Dag = {
+  entry: "in",
+  nodes: [
+    { id: "in", kind: "trigger", next: ["edit"] },
+
+    {
+      id: "edit",
+      kind: "ai",
+      label: "خلاصهٔ تغییرات به فارسی",
+      cfg: {
+        out: "editorial",
+        task: "compose",
+        breadth: 1,
+        max_tokens: 500,
+        temperature: 0.35,
+        system: EDITOR_SYSTEM,
+        prompt:
+          `A repository just received a new commit. Write a short channel note about it.\n\n` +
+          `REPO: {{event.payload.repo}}\nCOMMIT: {{event.payload.sha}}\nMESSAGE: {{event.payload.message}}\nAUTHOR: {{event.payload.author}}\nURL: {{event.payload.url}}\n\n` +
+          `Output exactly this shape and nothing else:\n` +
+          `<b>چه چیزی عوض شد</b>\n(۱ تا ۳ بولت فقط از روی پیام کامیت — هیچ چیز از خودت نساز)\n\n` +
+          `<b>چرا مهم است</b>\n(یک جمله برای کسی که این پروژه را دنبال می‌کند؛ اگر تغییر جزئی یا نگهداری است، همان را صریح بگو)`,
+      },
+      next: ["card"],
+    },
+
+    {
+      id: "card",
+      kind: "compose.push",
+      label: "ساخت پست آپدیت + کلیدهای شیشه‌ای",
+      cfg: { editorial_from: "editorial" },
+      next: ["policy"],
+    },
+
+    {
+      id: "policy",
+      kind: "policy",
+      label: "دروازهٔ سیاست",
+      cfg: { destination: "channel", from: "post" },
+      next: ["store"],
+    },
+
+    {
+      id: "store",
+      kind: "content",
+      label: "ثبت در گراف محتوا",
+      cfg: { kind: "post", from: "post", lang: "fa" },
+      next: ["ask"],
+    },
+
+    {
+      id: "ask",
+      kind: "approval",
+      label: "تأیید انسانی",
+      cfg: { from: "post" },
+      next: ["send", "tell"],
+    },
+
+    {
+      id: "send",
+      kind: "connector",
+      label: "انتشار در کانال",
+      cfg: { kind: "telegram", action: "publish" },
+      next: ["done"],
+    },
+
+    {
+      id: "tell",
+      kind: "notify",
+      label: "گزارش به مالک",
+      cfg: { text: "✅ <b>منتشر شد</b>\n{{event.payload.repo}} @ <code>{{event.payload.sha}}</code>" },
+      next: ["done"],
+    },
+
+    { id: "done", kind: "stop" },
+  ],
+};
+
 const rssDigestDag: Dag = {
   entry: "in",
   nodes: [
@@ -187,6 +269,16 @@ export const PLAYBOOKS: Playbook[] = [
       "کارت انتشار با دکمه‌های دانلود بساز، به من نشان بده و بعد از تأیید در کانال منتشر کن.",
     on_event: "github.release.*",
     dag: releaseDag,
+    needs: "کانکتور گیت‌هاب (لیست مخزن‌ها) + کانکتور تلگرام (کانال)",
+  },
+  {
+    key: "push-to-channel",
+    name: "📡 آپدیت مخزن در کانال",
+    mission:
+      "هر وقت مخزن‌هایی که انتخاب می‌کنم کامیت جدید خوردند، خلاصهٔ تغییرات را فارسی کن " +
+      "و بعد از تأییدم در کانال منتشر کن.",
+    on_event: "github.push.*",
+    dag: pushDag,
     needs: "کانکتور گیت‌هاب (لیست مخزن‌ها) + کانکتور تلگرام (کانال)",
   },
   {

@@ -1584,10 +1584,10 @@ export const hubOS = new HubOS();
 
 /** Re-exported for the cron drain, which polls connectors on a schedule. */
 export async function pollDueConnectors(env: any, ai: any, tg: any, limit = 8) {
-  // Only connectors whose last poll is stale enough to bother: polling every
-  // 15-minute tick would spend the GitHub quota to rediscover the same release,
-  // and the dedupe index would (correctly) throw all of it away.
-  const cutoff = Date.now() - 10 * 60_000;
+  // Only connectors whose last poll is stale enough to bother. The five-minute
+  // fast tick owns delivery now, so staleness is four minutes; the dedupe index
+  // still throws away anything a previous poll already delivered.
+  const cutoff = Date.now() - 4 * 60_000;
   const { results } = await env.DB.prepare(
     `SELECT * FROM hub_connectors
       WHERE enabled=1 AND kind IN ('github','rss','http') AND (last_poll IS NULL OR last_poll < ?)

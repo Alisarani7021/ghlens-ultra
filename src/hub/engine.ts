@@ -9,6 +9,8 @@ import { evaluate, type PolicySubject } from "./policy";
 import * as CG from "./content";
 import { mesh, meshConfidence, type TaskKind } from "./mesh";
 import { composeReleasePost, type Asset } from "./editor";
+import { channelRepoKb } from "../features/channelarm";
+import { botUsername } from "../env";
 import { indexEntities, embedDocument } from "./knowledge";
 
 /**
@@ -32,7 +34,7 @@ import { indexEntities, embedDocument } from "./knowledge";
  */
 
 export type NodeKind =
-  | "trigger" | "ai" | "compose.release" | "http" | "transform" | "condition"
+  | "trigger" | "ai" | "compose.release" | "compose.push" | "http" | "transform" | "condition"
   | "policy" | "content" | "approval" | "notify" | "connector" | "delay" | "stop";
 
 export interface WfNode {
@@ -301,6 +303,27 @@ async function execNode(ctx: EngineCtx, node: WfNode, bag: Record<string, any>, 
       return {
         patch: { post: post.text, post_rich: post.rich, markup: post.markup, asset_count: post.assetCount },
         summary: `پست ساخته شد · ${post.assetCount} فایل`,
+      };
+    }
+
+    case "compose.push": {
+      const p = bag.event?.payload ?? {};
+      const editorial = cfg.editorial_from ? String(bag[String(cfg.editorial_from)] ?? "") : "";
+      const repo = String(p.repo ?? cfg.repo ?? "");
+      const sha = String(p.sha ?? "");
+      const short = sha.slice(0, 7);
+      const url = String(p.url ?? `https://github.com/${repo}/commit/${sha}`);
+      const msg = String(p.message ?? "").trim();
+      const author = String(p.author ?? "").trim();
+      const head =
+        `📡 <b>آپدیت جدید</b>\n` +
+        `┌ <a href="${tgEscape(url)}">${tgEscape(repo)}</a>\n` +
+        `├ <code>${tgEscape(short)}</code>${msg ? ` — ${tgEscape(msg)}` : ""}\n` +
+        (author ? `└ ${tgEscape(author)}\n` : "");
+      const text = editorial ? `${head}\n${editorial}` : head;
+      return {
+        patch: { post: text, markup: repo ? channelRepoKb(repo, botUsername(ctx.env)) : undefined },
+        summary: `پست آپدیت ساخته شد · ${short}`,
       };
     }
 

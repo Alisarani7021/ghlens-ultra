@@ -72,7 +72,7 @@
   // classifyCron() also understands `0 6 * * SUN` and `0 4 1 * *`, so a paid
   // plan can split those out later without touching any code.
   "triggers": {
-    "crons": ["*/15 * * * *", "0 * * * *", "0 6 * * *"]
+    "crons": ["*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 6 * * *"]
   },
 
   "vars": {

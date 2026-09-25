@@ -42,7 +42,7 @@ export interface MissionPlan {
 }
 
 const KINDS: NodeKind[] = [
-  "trigger", "ai", "compose.release", "http", "transform", "condition",
+  "trigger", "ai", "compose.release", "compose.push", "http", "transform", "condition",
   "policy", "content", "approval", "notify", "connector", "delay", "stop",
 ];
 
@@ -57,6 +57,7 @@ export const NODE_DOC = `Available node kinds (use ONLY these):
 - trigger: the entry point. cfg {}.
 - ai: one model call. cfg { prompt, task: translate|compose|analyze|code|extract|compare, breadth: 1..3, system, out, max_tokens }
 - compose.release: builds a formatted release post with download buttons. cfg { editorial_from }
+- compose.push: builds a commit-update post with the glass-keys keyboard. cfg { editorial_from }
 - http: fetch a URL. cfg { url, method, out }
 - transform: derive a value. cfg { op: length|upper|json|template, path, template, out }
 - condition: branch on a value. cfg { path, op: exists|eq|neq|gt|lt|includes|match, value, else: [nodeIds] }
@@ -143,9 +144,10 @@ export function bestPlaybook(mission: string): Playbook | null {
   const score = (p: Playbook): number => {
     let s = 0;
     if (/ریلیز|release|نسخه|version|changelog|چنج/.test(m) && p.key === "release-to-channel") s += 3;
+    if (/کامیت|commit|push|آپدیت|اپدیت|بروزرسانی|به‌روزرسانی|update/.test(m) && p.key === "push-to-channel") s += 3;
     if (/rss|فید|feed|خبر|news|مقاله|article/.test(m) && p.key === "rss-digest") s += 3;
     if (/مانیتور|monitor|تغییر|change|watch|پایش/.test(m) && p.key === "watchdog") s += 3;
-    if (/کانال|channel|تلگرام|telegram|پست|post/.test(m) && p.key === "release-to-channel") s += 1;
+    if (/کانال|channel|تلگرام|telegram|پست|post/.test(m) && (p.key === "release-to-channel" || p.key === "push-to-channel")) s += 1;
     return s;
   };
   const ranked = PLAYBOOKS.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s);
@@ -292,8 +294,11 @@ export function triggerForMission(mission: string): string {
   const recurring = /هر وقت|هر زمان|هروقت|whenever|each time|every time|بعد از (?:هر|هزینه)|تا (?:نسخه|ریلیز) جدید|وقتی .* (?:شد|داد|آمد)|به محض/.test(m);
   if (!recurring) return "";
   const hasRepo = /[\w.-]+\/[\w.-]+/.test(m);
-  if (/نسخه|ریلیز|release|version|تگ|tag|آپدیت|update/.test(m) && hasRepo) return "github.release.*";
-  if (/کامیت|commit|push|پوش|شاخه|branch/.test(m) && hasRepo) return "github.push.*";
+  /* «آپدیت» is the word a Persian speaker uses for a repository that moved —
+     and a repository moves by commits. It used to map to releases, so a
+     mission on a repository that has never cut a release sat silent forever. */
+  if (/کامیت|commit|push|پوش|شاخه|branch|آپدیت|اپدیت|بروزرسانی|به‌روزرسانی|update/.test(m) && hasRepo) return "github.push.*";
+  if (/نسخه|ریلیز|release|version|تگ|tag/.test(m) && hasRepo) return "github.release.*";
   if (/ایشو|issue|مشکل|باگ گزارش/.test(m) && hasRepo) return "github.issue.*";
   if (/فید|rss|feed/.test(m)) return "rss.item.new";
   if (/صفحه|وب\s?سایت|api|تغییر کرد|عوض شد|پایش|monitor|watch/.test(m)) return "http.value.changed";
@@ -372,6 +377,6 @@ export function describeDag(plan: { nodes: WfNode[]; entry: string }): string {
 }
 
 const ICON: Record<NodeKind, string> = {
-  trigger: "🎯", ai: "🧠", "compose.release": "🧩", http: "🌐", transform: "🔧", condition: "🔀",
+  trigger: "🎯", ai: "🧠", "compose.release": "🧩", "compose.push": "🧩", http: "🌐", transform: "🔧", condition: "🔀",
   policy: "🔐", content: "🕸", approval: "🕹", notify: "🔔", connector: "🔌", delay: "⏳", stop: "⏹",
 };

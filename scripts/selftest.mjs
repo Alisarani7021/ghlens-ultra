@@ -348,6 +348,32 @@ const MS = hubMods.mission, EN = hubMods.engine;
   ok("plan: the dag renders as a tree", /🎯/.test(dag) && /🕹/.test(dag));
 }
 
+// ── mission: «آپدیت» means the repository moved — commits, not releases ────
+{
+  /* The owner's mission watched a repository that has never cut a release.
+     The word «آپدیت» used to force github.release.*, so the workflow sat
+     silent forever. It now means what the speaker means: new commits. */
+  eq("mission: آپدیت + repo → push trigger",
+     MS.triggerForMission("هر وقت panel-zeus/Z-E-U-S آپدیت داد در کانال بگذار"), "github.push.*");
+  eq("mission: کامیت → push trigger",
+     MS.triggerForMission("whenever oven-sh/bun gets new commits, tell me"), "github.push.*");
+  eq("mission: نسخه/ریلیز still means release",
+     MS.triggerForMission("هر وقت oven-sh/bun نسخه جدید داد در کانال بگذار"), "github.release.*");
+  eq("mission: push playbook matches آپدیت sentence",
+     MS.bestPlaybook("هر وقت این مخزن آپدیت داد در کانال تلگرام منتشر کن")?.key, "push-to-channel");
+  eq("mission: release playbook still matches نسخه sentence",
+     MS.bestPlaybook("هر نسخه جدید ریلیز شد در کانال منتشر کن")?.key, "release-to-channel");
+  // the playbook's DAG must be the one the engine can run: known kinds only
+  const pb = MS.bestPlaybook("هر وقت panel-zeus/Z-E-U-S آپدیت داد در کانال بگذار");
+  eq("mission: push playbook ships a compose.push card node",
+     pb?.dag?.nodes?.some((n) => n.kind === "compose.push"), true);
+  eq("mission: push playbook trigger is github.push.*", pb?.on_event, "github.push.*");
+  // the repaired-plan path accepts the new node kind too
+  const fixed = MS.repairPlan({ name: "x", on_event: "github.push.*", entry: "in",
+    nodes: [{ id: "in", kind: "trigger", next: ["c"] }, { id: "c", kind: "compose.push", cfg: {}, next: [] }] });
+  eq("mission: repairPlan keeps compose.push", fixed?.nodes?.some((n) => n.kind === "compose.push"), true);
+}
+
 // ── the engine's small contract ─────────────────────────────────────────
 {
   eq("engine: template interpolates", EN.render("repo={{event.payload.repo}}", { event: { payload: { repo: "a/b" } } }), "repo=a/b");

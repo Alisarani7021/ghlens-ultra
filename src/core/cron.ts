@@ -30,6 +30,7 @@ export async function runCron(event: ScheduledController, env: Env, ctx: Ctx) {
 
   try {
     switch (classifyCron(cron)) {
+      case "fast": await fastPoll(env, ctx); break;
       case "quarter": await quarterHourly(env, store, ctx); break;
       case "hourly":  await hourly(env, store, ctx); break;
       case "weekly":  await weekly(env, store, ctx); break;
@@ -112,6 +113,16 @@ async function quarterHourly(env: Env, store: Store, ctx: Ctx) {
   await pollDueConnectors(env, new AiBrain(env), tg).catch((e: any) => console.error("hub-poll", String(e?.message ?? e)));
 }
 function ctx_wait(ctx: Ctx, p: Promise<unknown>) { ctx.waitUntil(Promise.resolve(p)); }
+
+/** Every five minutes: hub connectors only. A repository that belongs to
+ *  someone else can never have a webhook — for it, the poll IS the delivery,
+ *  and a 15-minute wait is not «بلافاصله» in anyone's dictionary. The heavy
+ *  quarter-hourly work (snapshots, boards, digests) stays on its own clock. */
+async function fastPoll(env: Env, ctx: Ctx) {
+  const { pollDueConnectors } = await import("../features/hubos");
+  await pollDueConnectors(env, new AiBrain(env), new Telegram(env))
+    .catch((e: any) => console.error("hub-fast-poll", String(e?.message ?? e)));
+}
 
 /** Hourly: keep the semantic index and security watchlist fresh. */
 async function hourly(env: Env, store: Store, ctx: Ctx) {
@@ -276,8 +287,9 @@ function safeJson(s: string | null | undefined): any[] {
  * rejected (use 1-7 or SUN-SAT). Classifying by *shape* instead of exact
  * string means the worker keeps working if the schedule is edited later.
  */
-export function classifyCron(cron: string): "quarter" | "hourly" | "daily" | "weekly" | "monthly" {
+export function classifyCron(cron: string): "fast" | "quarter" | "hourly" | "daily" | "weekly" | "monthly" {
   const c = (cron || "").trim().replace(/\s+/g, " ");
+  if (c === "*/5 * * * *") return "fast";                         // hub connectors only
   if (c.startsWith("*/")) return "quarter";                       // */15 * * * *
   const [min, hour, dom, mon, dow] = c.split(" ");
   if (dom !== "*" && dow === "*") return "monthly";                // 0 4 1 * *
