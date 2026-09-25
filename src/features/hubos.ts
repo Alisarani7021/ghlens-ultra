@@ -12,7 +12,7 @@ import {
   getWorkflow, listWorkflows, runWorkflow, saveWorkflow, loadConnectorConfig,
   type Workflow,
 } from "../hub/engine";
-import { CONNECTORS, connector, connectorKinds } from "../hub/connectors";
+import { CONNECTORS, configFor, connector, connectorKinds } from "../hub/connectors";
 import { recentEvents, markEvent } from "../hub/event";
 import * as CG from "../hub/content";
 import * as KB from "../hub/knowledge";
@@ -53,35 +53,6 @@ function safeJson(s: any): any {
  * For Telegram there is a second, better path: a message forwarded from the
  * channel already carries its id, so the owner never has to find `-100…`.
  */
-export function configFor(kind: string, input: string, msg?: any): Record<string, any> {
-  const value = (raw: string) => raw.trim()
-    .replace(/^[a-zA-Z_]+\s*:\s*/, "")          // `channel: x`, `url: x`
-    .replace(/^["'«`]+|["'»`]+$/g, "")            // the hint's quotes
-    .trim();
-
-  // commas and newlines separate fields; `|` separates alternatives — never data
-  const parts = input.split(/[,\n|]/).map(value).filter(Boolean);
-
-  // a forwarded post carries the channel's numeric id, so nothing needs typing
-  const fwd = msg?.forward_from_chat ?? msg?.forward_origin?.chat;
-  if (kind === "telegram" && fwd?.type === "channel" && fwd.id) return { channel: String(fwd.id) };
-
-  if (kind === "telegram") {
-    const looks = /^@[A-Za-z0-9_]{3,}$|^-?\d{6,}$|t\.me\//i;
-    const picked = parts.find((x) => looks.test(x)) ?? "";
-    // https://t.me/name and t.me/name both mean the same channel as @name
-    const channel = picked.replace(/^https?:\/\/t\.me\//i, "@").replace(/^t\.me\//i, "@");
-    return { channel };
-  }
-  if (kind === "github") {
-    return {
-      repos: parts.map((x) => x.replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, ""))
-        .filter((x) => /^[\w.-]+\/[\w.-]+$/.test(x)).slice(0, 25),
-    };
-  }
-  // rss + http: the first thing that is a URL wins, labels and quotes ignored
-  return { url: parts.find((x) => /^https?:\/\//i.test(x)) ?? parts[0] ?? "" };
-}
 
 export class HubOS {
   // ── home ────────────────────────────────────────────────────────────────

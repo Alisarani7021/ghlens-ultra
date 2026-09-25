@@ -388,6 +388,48 @@ export const CONNECTORS: Record<string, Connector> = {
   },
 };
 
+/**
+ * Read a connector's config from whatever the owner typed. Channels arrive in
+ * every shape a human writes them — @name, a bare name, t.me/name,
+ * https://t.me/name, //t.me/name (copied straight from a browser address bar),
+ * or a numeric id — and they all mean the same channel; the first shape the
+ * old parser did not know was exactly the one the owner pasted, and the
+ * connector answered «کانال پیدا نشد» for a channel that existed.
+ */
+export function configFor(kind: string, input: string, msg?: any): Record<string, any> {
+  const value = (raw: string) => raw.trim()
+    .replace(/^[a-zA-Z_]+\s*:\s*(?!\/\/)/, "")   // `channel: x` — but never a URL's https:
+    .replace(/^[\'"\u00AB\`]+|[\'"\u00BB\`]+$/g, "")            // the hint's quotes
+    .trim();
+
+  // commas and newlines separate fields; `|` separates alternatives — never data
+  const parts = input.split(/[,\n|]/).map(value).filter(Boolean);
+
+  // a forwarded post carries the channel's numeric id, so nothing needs typing
+  const fwd = msg?.forward_from_chat ?? msg?.forward_origin?.chat;
+  if (kind === "telegram" && fwd?.type === "channel" && fwd.id) return { channel: String(fwd.id) };
+
+  if (kind === "telegram") {
+    const chan = (x: string) => {
+      const s = x.trim().replace(/^(?:https?:)?\/*(?:t\.me|telegram\.me)\//i, "");
+      if (/^-?\d{6,}$/.test(s)) return s;                 // a numeric id stays itself
+      const name = s.replace(/^[@\/]+/, "").split(/[\/?#\s]/)[0].trim();
+      return /^[A-Za-z0-9_]{3,}$/.test(name) ? `@${name}` : "";
+    };
+    const looks = /t\.me|telegram\.me|^-?\d{5,}$|^@|^[A-Za-z0-9_]{3,}$/i;
+    const picked = parts.find((x) => looks.test(x)) ?? "";
+    return { channel: chan(picked) };
+  }
+  if (kind === "github") {
+    return {
+      repos: parts.map((x) => x.replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, ""))
+        .filter((x) => /^[\w.-]+\/[\w.-]+$/.test(x)).slice(0, 25),
+    };
+  }
+  // rss + http: the first thing that is a URL wins, labels and quotes ignored
+  return { url: parts.find((x) => /^https?:\/\//i.test(x)) ?? parts[0] ?? "" };
+}
+
 export const connector = (kind: string): Connector | null => CONNECTORS[kind] ?? null;
 export const connectorKinds = () => Object.keys(CONNECTORS);
 

@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { botUsername } from "../env";
+import { Store } from "../core/db";
 import type { Telegram } from "../tg/api";
 
 /**
@@ -49,14 +50,18 @@ export function channelRepoKb(full: string, botUser: string): { inline_keyboard:
   };
 }
 
-/** Arm one channel post, or leave it alone. */
+/** Arm one channel post, or leave it alone. Every outcome is written to the
+ *  events table (kind `channelarm`), so a post that did not grow keys can be
+ *  diagnosed from the data instead of a screenshot. */
 export async function armChannelPost(post: any, env: Env, tg: Telegram): Promise<void> {
   const text = String(post?.text ?? post?.caption ?? "");
   if (!text) return;
+  const log = (name: string, meta?: any) =>
+    new Store(env).event(Number(post?.chat?.id ?? 0) || null, "channelarm", name, meta).catch(() => null);
   // already carries a keyboard (the hub's own publishes, other bots) — not ours to touch
-  if (post?.reply_markup?.inline_keyboard?.length) return;
+  if (post?.reply_markup?.inline_keyboard?.length) { await log("skip:markup", { mid: post.message_id }); return; }
   const full = repoFromText(text);
-  if (!full) return;
+  if (!full) { await log("skip:nolink", { mid: post.message_id }); return; }
 
   const chatId = post.chat.id;
   const mid = post.message_id;
@@ -79,9 +84,15 @@ export async function armChannelPost(post: any, env: Env, tg: Telegram): Promise
         reply_markup: kb,
       });
 
-  if (res?.ok || /not modified/i.test(String(res?.description ?? ""))) return;
+  if (res?.ok) { await log("edit:ok", { mid, full }); return; }
+  if (/not modified/i.test(String(res?.description ?? ""))) { await log("edit:same", { mid, full }); return; }
 
   /* No edit rights (or a post type that cannot be edited) — the keys still
      deserve to exist: a small action bar under the post. */
-  await tg.sendMessage(chatId, `🔭 <b>${full}</b>`, { parse_mode: "HTML", reply_markup: kb } as any).catch(() => null);
+  const bar = await tg.sendMessage(chatId, `🔭 <b>${full}</b>`, { parse_mode: "HTML", reply_markup: kb } as any).catch((e: any) => ({ ok: false, description: String(e?.message ?? e) }));
+  await log((bar as any)?.ok ? "bar:ok" : "bar:fail", {
+    mid, full,
+    edit_error: String(res?.description ?? "").slice(0, 120),
+    bar_error: String((bar as any)?.description ?? "").slice(0, 120),
+  });
 }

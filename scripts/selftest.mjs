@@ -295,6 +295,28 @@ const MS = hubMods.mission, EN = hubMods.engine;
   eq("feed: atom id used", entries[0].guid, "a1");
 }
 
+// ── connector config: every way a human writes a channel ─────────────────
+{
+  /* The owner pasted `//t.me/gjjgjjkmnmk` (straight from a browser bar) and
+     the connector answered «کانال پیدا نشد» for a channel that existed — the
+     parser only knew https://t.me/ and bare t.me/. Every shape now resolves
+     to the same @name (or stays a numeric id). */
+  const T = (x) => CN.configFor("telegram", x).channel;
+  eq("conn: a browser-bar double slash resolves", T("//t.me/gjjgjjkmnmk"), "@gjjgjjkmnmk");
+  eq("conn: https link with trailing slash", T("https://t.me/iguts9/"), "@iguts9");
+  eq("conn: bare t.me link", T("t.me/iguts9"), "@iguts9");
+  eq("conn: at-name passes through", T("@iguts9"), "@iguts9");
+  eq("conn: a bare username is dressed", T("iguts9"), "@iguts9");
+  eq("conn: a numeric id stays itself", T("-1001234567890"), "-1001234567890");
+  eq("conn: the label prefix is dropped", T("channel: @iguts9"), "@iguts9");
+  eq("conn: a t.me path cuts at the slash", T("https://t.me/iguts9/42"), "@iguts9");
+  eq("conn: persian words are not channels", T("سلام این کانال منه"), "");
+  eq("conn: github repos keep parsing", CN.configFor("github", "https://github.com/oven-sh/bun, panel-zeus/Z-E-U-S").repos,
+     ["oven-sh/bun", "panel-zeus/Z-E-U-S"]);
+  const fwd = CN.configFor("telegram", "whatever", { forward_from_chat: { type: "channel", id: -100999 } });
+  eq("conn: a forwarded post carries the id", fwd.channel, "-100999");
+}
+
 // ── the planner ─────────────────────────────────────────────────────────
 {
   const plan = MS.repairPlan({
