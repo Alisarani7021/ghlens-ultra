@@ -148,6 +148,11 @@ export const CONNECTORS: Record<string, Connector> = {
       const watch: string[] = Array.isArray(ctx.config.watch) ? ctx.config.watch : ["release"];
       const out: HubEvent[] = [];
       let newest = ctx.cursor ?? "";
+      /* a poll that failed on every repo used to answer «0 event(s)» —
+         indistinguishable from a quiet repository, and a dead token could
+         hide behind it for months. Only a repo that produced events may
+         silence its own error. */
+      const errs: string[] = [];
       for (const full of repos.slice(0, 25)) {
         try {
           if (watch.includes("release")) {
@@ -204,8 +209,10 @@ export const CONNECTORS: Record<string, Connector> = {
           }
         } catch (e: any) {
           console.error("hub-github-poll", full, String(e?.message ?? e));
+          errs.push(String(e?.message ?? e));
         }
       }
+      if (!out.length && errs.length) throw new Error(errs[0]);
       return { events: out, cursor: newest || undefined };
     },
   },

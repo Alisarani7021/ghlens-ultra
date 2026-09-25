@@ -523,7 +523,7 @@ export class HubOS {
       checkHooks: runFix,
     });
     const body = renderWiring(report, fa) +
-      (runFix && report.hooks.some((x) => !x.ok)
+      (runFix && report.hooks.some((x) => !x.ok && !(x as any).thirdParty)
         ? `\n\n${fa ? "<i>روی هر مخزن که وب‌هوک نشد، لینک «افزودن دستی» را بزن — سه فیلد دارد و یک بار برای همیشه است.</i>" : ""}`
         : "");
     return h.reply(body, await this.wiringCard(h, wfId, repos, fa), !!h.cbId);

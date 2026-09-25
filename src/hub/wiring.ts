@@ -148,6 +148,8 @@ export interface HookResult {
   /** where a human can finish the job when the token cannot */
   manualUrl: string;
   existed?: boolean;
+  /** someone else's repository: no webhook is possible — or needed — on it */
+  thirdParty?: boolean;
 }
 
 const ghHeaders = (token?: string) => ({
@@ -176,6 +178,26 @@ export async function ensureGithubHook(
   if (!auth) {
     return { repo, ok: false, detail: "توکن گیت‌هاب موجود نیست", manualUrl };
   }
+  /* A webhook needs admin rights on the repository. On someone else's repo no
+     token in the world has them — GitHub answers 404, the readiness screen
+     screams «مخزن پیدا نشد», and the owner follows «افزودن دستی» into a GitHub
+     404. Those repos are covered by the poll (every 15 minutes); the honest
+     answer is an ℹ️, not a blocker. */
+  try {
+    const [meta, me] = await Promise.all([
+      fetch(`https://api.github.com/repos/${repo}`, { headers: ghHeaders(auth) })
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<any>,
+      fetch(`https://api.github.com/user`, { headers: ghHeaders(auth) })
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<any>,
+    ]);
+    if (meta?.owner?.login && me?.login &&
+        String(meta.owner.login).toLowerCase() !== String(me.login).toLowerCase()) {
+      return {
+        repo, ok: false, thirdParty: true, manualUrl,
+        detail: `مخزنِ دیگران است — وب‌هوک روی آن ممکن نیست و لازم هم نیست؛ خودم هر ۱۵ دقیقه چک می‌کنم`,
+      };
+    }
+  } catch { /* the probe is advisory; the hook calls below still speak */ }
   try {
     // does a hook for this URL already exist? update it instead of duplicating.
     const list = await fetch(`https://api.github.com/repos/${repo}/hooks?per_page=100`, { headers: ghHeaders(auth) });
@@ -308,7 +330,7 @@ export async function wiringReport(ctx: WiringCtx): Promise<WiringReport> {
   const blockers: string[] = [];
   if (!repos.length) blockers.push("مخزنی در مأموریت مشخص نشده — بدون آن معلوم نیست کدام رویداد Important است");
   if (!github.ok) blockers.push("کانکتور گیت‌هاب این مخزن‌ها را رصد نمی‌کند");
-  if (hooks.some((h) => !h.ok)) blockers.push("وبهوک گیت‌هاب ثبت نشده — رویدادها با تأخیر پول می‌شوند (poll)");
+  if (hooks.some((h) => !h.ok && !h.thirdParty)) blockers.push("وبهوک گیت‌هاب ثبت نشده — رویدادها با تأخیر پول می‌شوند (poll)");
   if (!telegram.ok) blockers.push("کانکتور تلگرام آماده نیست — پست منتشر نمی‌شود");
 
   return { repos, github, hooks, hookUrl, telegram, workflow, blockers };
@@ -329,7 +351,7 @@ export function renderWiring(r: WiringReport, fa: boolean): string {
 
   if (r.hooks.length) {
     for (const h of r.hooks) {
-      lines.push(`${tick(h.ok)} <b>وب‌هوک</b> <code>${h.repo}</code> — ${h.detail}${h.ok ? "" : `\n   👈 <a href="${h.manualUrl}">${fa ? "افزودن دستی (۱۰ ثانیه)" : "add manually"}</a>`}`);
+      lines.push(`${h.thirdParty ? "ℹ️" : tick(h.ok)} <b>وب‌هوک</b> <code>${h.repo}</code> — ${h.detail}${h.ok || h.thirdParty ? "" : `\n   👈 <a href="${h.manualUrl}">${fa ? "افزودن دستی (۱۰ ثانیه)" : "add manually"}</a>`}`);
     }
   } else {
     lines.push(`⏸ <b>${fa ? "وب‌هوک‌ها" : "hooks"}</b> — ${fa ? "با دکمهٔ «🔧 وصلش کن» بررسی و ثبت می‌شوند" : "checked on wiring"}`);
