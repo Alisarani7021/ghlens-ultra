@@ -358,7 +358,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1029,6 +1029,47 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("mission: a manual mission stays manual", MI.triggerForMission("این مخزن را تحلیل کن"), "");
   ok("mission: the planner cannot leave an event-shaped mission manual",
      /github\.release/.test(MI.triggerForMission("هر زمان نسخهٔ جدید oven-sh/bun منتشر شد، خودکار پست کن")));
+}
+
+// ── history navigation ────────────────────────────────────────────────────
+{
+  /* One back button everywhere, and it means «the screen before this one»:
+     the pure halves are the label test, the rewrite, and the stack rules. */
+  const N = await import(join(scratch, "tg_nav.mjs"));
+
+  ok("nav: fa back label", N.isBackButton("◀️ بازگشت"));
+  ok("nav: en back label", N.isBackButton("◀️ Back"));
+  ok("nav: ru back label", N.isBackButton("◀️ Назад"));
+  ok("nav: zh back label", N.isBackButton("◀️ 返回"));
+  ok("nav: a bare arrow is a back button", N.isBackButton("◀️"));
+  ok("nav: «قبلی» is a page turn, not back", !N.isBackButton("◀️ قبلی"));
+  ok("nav: the home button stays home", !N.isBackButton("🏠 منوی اصلی"));
+  ok("nav: a section link stays its own navigation", !N.isBackButton("◀️ کانکتورها"));
+
+  const kb = { inline_keyboard: [
+    [{ text: "◀️ بازگشت", callback_data: "m:home" }, { text: "◀️ قبلی", callback_data: "t:1" }],
+    [{ text: "🏠 منوی اصلی", callback_data: "m:home" }, { text: "🔁 دوباره", callback_data: "d:go:x" }],
+  ] };
+  const navd = N.navizeKeyboard(kb);
+  eq("nav: the back button becomes the history key", navd.inline_keyboard[0][0].callback_data, N.NAV_BACK);
+  eq("nav: page turns are untouched", navd.inline_keyboard[0][1].callback_data, "t:1");
+  eq("nav: home stays home", navd.inline_keyboard[1][0].callback_data, "m:home");
+  ok("nav: the original keyboard is never mutated", kb.inline_keyboard[0][0].callback_data === "m:home");
+
+  eq("nav: a walk is recorded step by step",
+     N.pushRoute(N.pushRoute(N.pushRoute([], "m:home"), "s:home"), "s:go:oven-sh/bun"),
+     ["m:home", "s:home", "s:go:oven-sh/bun"]);
+  eq("nav: a repeat is not a navigation", N.pushRoute(["m:home", "s:home"], "s:home"), ["m:home", "s:home"]);
+  eq("nav: the back key never lands in the stack", N.pushRoute(["m:home"], N.NAV_BACK), ["m:home"]);
+  eq("nav: depth is capped", N.pushRoute(Array.from({ length: 20 }, (_, i) => `x:${i}`), "y:1").length, N.NAV_MAX);
+
+  const step1 = N.backTarget(["m:home", "s:home", "s:go:oven-sh/bun"]);
+  eq("nav: back names the screen before", step1.target, "s:home");
+  eq("nav: back keeps that screen as the new current", step1.stack, ["m:home", "s:home"]);
+  const step2 = N.backTarget(step1.stack);
+  eq("nav: back again walks one more step", step2.target, "m:home");
+  const step3 = N.backTarget(step2.stack);
+  eq("nav: an empty history lands on home", step3.target, "m:home");
 }
 
 // ── the premium-emoji layer ───────────────────────────────────────────────

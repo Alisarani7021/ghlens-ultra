@@ -6,6 +6,7 @@ import type { Ctx, Env, Job } from "./env";
 import { botUsername, isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
 import { noteIncomingCustomEmoji } from "./tg/premium";
+import { backTarget, navizeKeyboard, NAV_STACK_KEY } from "./tg/nav";
 import type { CallbackQuery, InlineQuery, Message, Update, User } from "./tg/types";
 import { tgEscape } from "./tg/types";
 import { kb } from "./tg/keyboards";
@@ -724,6 +725,18 @@ export async function buildH(
     async replyRich(html, keyboard, edit = false) {
       if (guard) guard.settled = true;
       const { editRich, sendRich } = await import("./tg/rich");
+      /* History navigation: a screen rendered from a callback records its
+         route, and its back buttons become one key — nav:back — that pops the
+         history and shows the screen before. Screens born from commands or
+         from a back press itself carry no route and record nothing. */
+      const navRoute = (h as any).curRoute as string | undefined;
+      if (navRoute && !(h as any).noPush) {
+        const { NAV_STACK_KEY, pushRoute } = await import("./tg/nav");
+        const stack = ((await h.session.get(NAV_STACK_KEY)) ?? []) as string[];
+        const next = pushRoute(stack, navRoute);
+        if (next !== stack) await h.session.set(NAV_STACK_KEY, next).catch(() => null);
+      }
+      keyboard = navizeKeyboard(keyboard);
       const extras = { reply_markup: keyboard, disable_web_page_preview: true } as any;
       const rtl = loc === "fa" || loc === "ar";
       if (!edit && h.editTarget) {
@@ -1453,6 +1466,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
     cbId: q.id, text: arg, args, msg: q.message ?? undefined, guard,
   });
   const fa = h.loc === "fa";
+  (h as any).curRoute = data;                 // history navigation reads this
+  (h as any).noPush = !!(q as any).__noPush;  // the past is not history
   await store.event(q.from.id, "callback", `${ns}:${action}`);
 
   /* Pressing a button means the user chose something else, so the section they
@@ -1474,6 +1489,20 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
   try {
     switch (ns) {
       case "noop": return h.toast("");
+
+      // ── history back: the one button every screen shares ──
+      case "nav":
+        if (action === "back") {
+          const { stack, target } = backTarget(((await h.session.get(NAV_STACK_KEY)) ?? []) as string[]);
+          await h.session.set(NAV_STACK_KEY, stack).catch(() => null);
+          /* Re-enter the router as if the previous screen's own button was
+             pressed: same chat, same message, so the screen edits in place —
+             and the re-render must not re-record itself into the history. */
+          const back = { ...q, data: target } as CallbackQuery;
+          (back as any).__noPush = true;
+          return routeCallback(back, env, ctx, tg, store, ai, card, guard);
+        }
+        break;
 
       // ── global navigation ──
       case "m":
