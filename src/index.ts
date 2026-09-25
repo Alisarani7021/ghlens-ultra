@@ -1,5 +1,6 @@
 import { NetRadar } from "./features/netradar";
 import { ArchitectureExplainer } from "./features/architecture";
+import { armChannelPost } from "./features/channelarm";
 import { AppGen } from "./features/appgen";
 import { MultiHub } from "./features/multihub";
 import type { Ctx, Env, Job } from "./env";
@@ -489,6 +490,9 @@ async function handleUpdate(update: Update, env: Env, ctx: Ctx) {
       return await routeCallback(update.callback_query, env, ctx, tg, store, ai, card, guard);
     }
     if (update.inline_query) return await routeInline(update.inline_query, env, ctx, tg, store, ai);
+    /* A channel post with a GitHub link grows glass keys — architecture,
+       analysis, translation, the card — as deep links any reader can press. */
+    if (update.channel_post) return await armChannelPost(update.channel_post, env, tg);
     if (update.message) {
       guard.chatId = update.message.chat.id;
       /* a message carrying custom emojis teaches the premium table its pairs:
@@ -1238,12 +1242,16 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       }
       const deep = arg.match(/^([sdtc])_(.+)$/);
       if (deep) {
-        const full = normRepo(deep[2]);
+        // the separator is the first underscore — owners never carry one,
+        // repo names can, so only the first splits
+        const full = normRepo(deep[2].replace("_", "/"));
         if (deep[1] === "s") return scout.open(h, full, 0);
         if (deep[1] === "d") return downloader(h).choose(h, full);
         if (deep[1] === "t") return assistant.translateReadme(h, full);
         if (deep[1] === "c") return assistant.dossier(h, full);
       }
+      // the channel glass keys open the architecture screen directly
+      if (arg.startsWith("arch_")) return archExplainer.explain(h, normRepo(arg.slice(5).replace("_", "/")));
       // referral?
       if (arg.startsWith("ref_")) {
         await h.env.DB.prepare(`UPDATE users SET referral_by=(SELECT id FROM users WHERE referral_code=?) WHERE id=? AND referral_by IS NULL`)

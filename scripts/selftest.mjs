@@ -358,7 +358,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1086,6 +1086,34 @@ const enc = (s) => new TextEncoder().encode(s);
   const withBack = N.navizeKeyboard({ inline_keyboard: [[{ text: "◀️ بازگشت", callback_data: "sec:home" }]] });
   ok("nav: an existing back button prevents injection",
      N.ensureBackButton(withBack, false, "fa") === withBack);
+}
+
+// ── glass keys under channel posts ────────────────────────────────────────
+{
+  /* A GitHub link posted in a channel grows glass keys. The pure halves: the
+     link reader (paths, .git, captions, no-link) and the keyboard itself. */
+  const C = await import(join(scratch, "feat_channelarm.mjs"));
+
+  eq("channel: a plain link is read", C.repoFromText("این پروژه رو ببین: github.com/oven-sh/bun عالیه"), "oven-sh/bun");
+  eq("channel: a deep path still names the repo", C.repoFromText("https://github.com/cloudflare/workers-sdk/releases/tag/v1"), "cloudflare/workers-sdk");
+  eq("channel: .git is stripped", C.repoFromText("git clone github.com/panel-zeus/Z-E-U-S.git"), "panel-zeus/Z-E-U-S");
+  eq("channel: a caption is read too", C.repoFromText("github.com/facebook/react"), "facebook/react");
+  eq("channel: owner alone is not a repo", C.repoFromText("github.com/oven-sh"), null);
+  eq("channel: no link, no keys", C.repoFromText("سلام چنل!"), null);
+
+  const kb = C.channelRepoKb("oven-sh/bun", "Gitguts_bot");
+  eq("channel: two rows of two keys", kb.inline_keyboard.map((r) => r.length), [2, 2]);
+  const urls = kb.inline_keyboard.flat().map((b) => b.url);
+  ok("channel: every key is a deep link into the bot",
+     urls.length === 4 && urls.every((u) => u.startsWith("https://t.me/Gitguts_bot?start=")));
+  ok("channel: architecture opens the arch screen", urls.some((u) => u.endsWith("arch_oven-sh_bun")));
+  ok("channel: analysis opens the dossier", urls.some((u) => u.endsWith("c_oven-sh_bun")));
+  ok("channel: translation opens the README", urls.some((u) => u.endsWith("t_oven-sh_bun")));
+  ok("channel: the card deep link is the repo one", urls.some((u) => u.endsWith("repo_oven-sh_bun")));
+  ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
+  // a repo name may carry underscores: the first underscore is the separator
+  const kbU = C.channelRepoKb("a/b_c", "Gitguts_bot");
+  ok("channel: underscored repo names survive the link", kbU.inline_keyboard.flat().some((b) => b.url.endsWith("arch_a_b_c")));
 }
 
 // ── the premium-emoji layer ───────────────────────────────────────────────
