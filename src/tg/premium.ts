@@ -48,6 +48,25 @@ function matcherFor(m: PremiumMap): RegExp | null {
   return new RegExp(keys.map(escapeRe).join("|"), "gu");
 }
 
+/**
+ * The same emoji is written two ways across every codebase: with and without
+ * the emoji variation selector (⚡ / ⚡️). A pair learned for one spelling must
+ * dress the other too, or half the screens stay plain. Both spellings are
+ * registered for every pair; multi-emoji sequences keep their shape.
+ */
+export function expandVariants(m: PremiumMap): PremiumMap {
+  const out: PremiumMap = { ...m };
+  for (const k of Object.keys(m)) {
+    const bare = k.replace(/\uFE0F/g, "");
+    if (bare && !(bare in out)) out[bare] = m[k];
+    if (!k.includes("\uFE0F")) {
+      const dressed = k.replace(/(\p{Extended_Pictographic})/gu, "$1\uFE0F");
+      if (dressed !== k && !(dressed in out)) out[dressed] = m[k];
+    }
+  }
+  return out;
+}
+
 /** Pairs from a getStickerSet-style stickers array. */
 export function buildMapFromStickers(stickers: any[]): PremiumMap {
   const out: PremiumMap = {};
@@ -113,10 +132,10 @@ async function readMapFromKv(env: any): Promise<PremiumMap | null> {
   }
 }
 
-async function saveMapToKv(env: any, m: PremiumMap): Promise<void> {
+async function saveMapToKv(env: any, m: PremiumMap): Promise<PremiumMap> {
   const merged = { ...(await readMapFromKv(env).catch(() => null) ?? {}), ...m };
   await env?.CACHE?.put(KV_MAP_KEY, JSON.stringify(merged), { expirationTtl: MAP_TTL }).catch(() => null);
-  cached = merged; // the isolate learns immediately too
+  return merged;
 }
 
 async function fetchBuiltInSet(env: any): Promise<PremiumMap | null> {
@@ -148,8 +167,8 @@ export async function getPremiumMap(env: any): Promise<PremiumMap | null> {
       let m = await readMapFromKv(env).catch(() => null);
       if (!m || !Object.keys(m).length) m = await fetchBuiltInSet(env).catch(() => null);
       if (m && Object.keys(m).length) {
-        cached = m;
-        await saveMapToKv(env, m).catch(() => null);
+        cached = expandVariants(m);
+        await saveMapToKv(env, m).catch(() => null);   // KV keeps the raw pairs
         return cached;
       }
       emptyUntil = Date.now() + 600_000;
@@ -175,5 +194,6 @@ export async function noteIncomingCustomEmoji(env: any, text: string, entities: 
   offUntil = 0;
   emptyUntil = 0;
   await env?.CACHE?.delete(KV_OFF_KEY).catch(() => null);
-  await saveMapToKv(env, learned).catch(() => null);
+  const merged = await saveMapToKv(env, learned).catch(() => null as PremiumMap | null);
+  if (merged) cached = expandVariants(merged);
 }

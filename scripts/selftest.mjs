@@ -1067,6 +1067,11 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("premium: wrapping is idempotent", P.premiumizeHtml(wrapped, m) === wrapped);
   eq("premium: strip returns the original text", P.stripPremium(wrapped), html);
   eq("premium: strip leaves plain html alone", P.stripPremium("<p>بدون تگ 🔭</p>"), "<p>بدون تگ 🔭</p>");
+  // the same emoji is spelled two ways in the wild (⚡ / ⚡️): a pair learned
+  // for one spelling must dress the other, or half the screens stay plain
+  const dressed = P.expandVariants({ "⚡️": "7000009", "🔭": "7000001" });
+  ok("premium: the bare spelling is dressed too", dressed["⚡"] === "7000009");
+  ok("premium: the dressed spelling is added for bare keys", dressed["🔭\uFE0F"] === "7000001");
 }
 
 // ── no screen may print «\n» as text ─────────────────────────────────────
