@@ -1,4 +1,6 @@
 import type { H } from "../core/handler";
+import { Store } from "../core/db";
+import { decryptSecret } from "../core/crypto";
 import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
 import { setMode, clearMode } from "../core/mode";
@@ -259,7 +261,7 @@ export class HubOS {
 
     // Test immediately — a connector that silently does nothing is worse than
     // one that says why it cannot work yet.
-    const test = await c.test?.({ env: h.env, owner_id: h.u.id, config, cursor: null });
+    const test = await c.test?.({ env: h.env, owner_id: h.u.id, config, cursor: null, token: h.userToken });
     // the label becomes the channel's real name, so the list reads
     // «🟢 ما می‌توانیم» instead of a username nobody recognises
     await h.env.DB.prepare(`UPDATE hub_connectors SET status=?, detail=?, label=COALESCE(?, label), last_poll=? WHERE id=?`)
@@ -319,7 +321,7 @@ export class HubOS {
 
     let res;
     try {
-      res = await c.poll({ env: h.env, owner_id: h.u.id, config, cursor: row.cursor ?? null });
+      res = await c.poll({ env: h.env, owner_id: h.u.id, config, cursor: row.cursor ?? null, token: h.userToken });
     } catch (e: any) {
       await h.env.DB.prepare(`UPDATE hub_connectors SET status='error', detail=?, last_poll=? WHERE id=?`)
         .bind(String(e?.message ?? e).slice(0, 200), Date.now(), id)
@@ -1592,13 +1594,24 @@ export async function pollDueConnectors(env: any, ai: any, tg: any, limit = 8) {
       ORDER BY last_poll ASC LIMIT ?`,
   ).bind(cutoff, limit).all().catch(() => ({ results: [] as any[] }));
   let events = 0, runs = 0;
+  const tokenCache = new Map<number, string | undefined>();
   for (const row of results ?? []) {
     const c = connector(row.kind);
     if (!c?.poll) continue;
+    /* a linked owner sees their private repos even on the poll fallback —
+       the webhook is instant, but the poll must not be blind */
+    if (!tokenCache.has(row.owner_id)) {
+      let t: string | undefined;
+      try {
+        const u: any = await new Store(env).user(row.owner_id);
+        t = u?.github_token_enc ? (await decryptSecret(env, u.github_token_enc, "github-token")) ?? undefined : undefined;
+      } catch { /* no token */ }
+      tokenCache.set(row.owner_id, t);
+    }
     let config: Record<string, any> = {};
     try { config = JSON.parse(row.config ?? "{}"); } catch { /* {} */ }
     try {
-      const res = await c.poll({ env, owner_id: row.owner_id, config, cursor: row.cursor ?? null });
+      const res = await c.poll({ env, owner_id: row.owner_id, config, cursor: row.cursor ?? null, token: tokenCache.get(row.owner_id) });
       // the same setting the webhook path reads: an event that arrives on its
       // own is published only if the owner asked for that
       const autonomy = await readAutonomy(env, row.owner_id);

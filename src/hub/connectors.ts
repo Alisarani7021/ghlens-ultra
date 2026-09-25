@@ -20,6 +20,9 @@ import { type HubEvent, type ConnectorKind, hubId, newTrace } from "./event";
 export interface ConnectorCtx {
   env: Env;
   owner_id: number;
+  /** the owner's linked GitHub token (decrypted), when they linked one —
+   *  private repos answer to it, not to the deployment's token */
+  token?: string;
   /** free-form, non-secret settings for this connector instance */
   config: Record<string, any>;
   /** opaque bookmark from the previous poll (last id / timestamp) */
@@ -52,13 +55,16 @@ function ev(source: string, type: string, payload: Record<string, any>, owner_id
   return { id: hubId("evt"), type, source, payload, ts: Date.now(), trace: newTrace(), owner_id };
 }
 
-/** GitHub REST without the heavy client — connectors stay dependency-light. */
-async function gh(env: Env, path: string): Promise<any> {
+/** GitHub REST without the heavy client — connectors stay dependency-light.
+ *  A linked owner token wins over the deployment token: their private repos
+ *  are invisible to ours, and the 5,000/h limit is theirs either way. */
+async function gh(env: Env, path: string, token?: string): Promise<any> {
+  const auth = token ?? env.GITHUB_TOKEN;
   const res = await fetch(`https://api.github.com${path}`, {
     headers: {
       accept: "application/vnd.github+json",
       "user-agent": "ghlens-hub",
-      ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
+      ...(auth ? { authorization: `Bearer ${auth}` } : {}),
     },
   });
   if (!res.ok) throw new Error(`github ${res.status} ${path}`);
@@ -128,11 +134,11 @@ export const CONNECTORS: Record<string, Connector> = {
     actions: ["list_releases", "get_repo", "get_readme"],
     configHint: 'repos: ["owner/name", …]  ·  watch: ["release","commit","issue"]',
     async test(ctx) {
-      if (!ctx.env.GITHUB_TOKEN) return { ok: false, detail: "توکن گیت‌هاب تنظیم نشده (GITHUB_TOKEN)" };
+      if (!ctx.env.GITHUB_TOKEN && !ctx.token) return { ok: false, detail: "توکن گیت‌هاب تنظیم نشده (GITHUB_TOKEN)" };
       try {
-        const r = await gh(ctx.env, "/rate_limit");
+        const r = await gh(ctx.env, "/rate_limit", ctx.token);
         const core = r?.resources?.core;
-        return { ok: true, detail: `سهمیه: ${core?.remaining ?? "?"}/${core?.limit ?? "?"} تا ${new Date((core?.reset ?? 0) * 1000).toISOString().slice(11, 16)} UTC` };
+        return { ok: true, detail: `${ctx.token ? "حساب شما — " : ""}سهمیه: ${core?.remaining ?? "?"}/${core?.limit ?? "?"} تا ${new Date((core?.reset ?? 0) * 1000).toISOString().slice(11, 16)} UTC` };
       } catch (e: any) {
         return { ok: false, detail: String(e?.message ?? e) };
       }
@@ -145,14 +151,14 @@ export const CONNECTORS: Record<string, Connector> = {
       for (const full of repos.slice(0, 25)) {
         try {
           if (watch.includes("release")) {
-            const releases: any[] = await gh(ctx.env, `/repos/${full}/releases?per_page=5`);
+            const releases: any[] = await gh(ctx.env, `/repos/${full}/releases?per_page=5`, ctx.token);
             let meta: any = null;
             for (const r of releases) {
               if (ctx.cursor && Date.parse(r.published_at ?? 0) <= Date.parse(ctx.cursor)) continue;
               /* The repository's live numbers, fetched once per poll and only
                  when there is a new release to report: the post shows ⭐/🍴/🐞
                  instead of the grey line it used to show. */
-              if (!meta) meta = await gh(ctx.env, `/repos/${full}`).catch(() => null);
+              if (!meta) meta = await gh(ctx.env, `/repos/${full}`, ctx.token).catch(() => null);
               out.push(ev("github", r.prerelease ? "github.release.prerelease" : "github.release.published", {
                 identity: `${full}@${r.tag_name}`,
                 repo: full,
@@ -183,7 +189,7 @@ export const CONNECTORS: Record<string, Connector> = {
             }
           }
           if (watch.includes("commit")) {
-            const commits: any[] = await gh(ctx.env, `/repos/${full}/commits?per_page=5`);
+            const commits: any[] = await gh(ctx.env, `/repos/${full}/commits?per_page=5`, ctx.token);
             for (const c of commits) {
               if (ctx.cursor && Date.parse(c.commit?.author?.date ?? 0) <= Date.parse(ctx.cursor)) continue;
               out.push(ev("github", "github.push.commits", {
