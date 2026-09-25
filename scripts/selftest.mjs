@@ -1072,6 +1072,23 @@ const enc = (s) => new TextEncoder().encode(s);
   const dressed = P.expandVariants({ "⚡️": "7000009", "🔭": "7000001" });
   ok("premium: the bare spelling is dressed too", dressed["⚡"] === "7000009");
   ok("premium: the dressed spelling is added for bare keys", dressed["🔭\uFE0F"] === "7000001");
+  // buttons: the leading emoji becomes the icon (Bot API 9.4), the label
+  // loses it — an emoji-only label keeps it, because text may not be empty
+  const rows = [
+    [
+      { text: "🔭 کاوش عمیق", cb: "s:home" },
+      { text: "ساده", cb: "m:home" },
+      { text: "🧠", cb: "a:home" },
+      { text: "🛡 امنیت ✅", cb: "sec:home" },
+    ],
+  ];
+  const kbm = P.premiumizeKeyboard(rows, m);
+  eq("premium: a led button becomes icon + clean label",
+     { text: kbm[0][0].text, icon: kbm[0][0].icon_custom_emoji_id }, { text: "کاوش عمیق", icon: "7000001" });
+  eq("premium: an emoji-only label is kept whole",
+     { text: kbm[0][2].text, icon: kbm[0][2].icon_custom_emoji_id }, { text: "🧠", icon: undefined });
+  ok("premium: a led label keeps its trailing emoji as text", kbm[0][3].text === "امنیت ✅" && kbm[0][3].icon_custom_emoji_id === "7000003");
+  ok("premium: the original keyboard is never mutated", rows[0][0].text === "🔭 کاوش عمیق" && !rows[0][0].icon_custom_emoji_id);
 }
 
 // ── no screen may print «\n» as text ─────────────────────────────────────

@@ -119,6 +119,38 @@ export function stripPremium(html: string): string {
   return String(html ?? "").replace(/<tg-emoji[^>]*>([\s\S]*?)<\/tg-emoji>/g, "$1");
 }
 
+function leadMatcherFor(m: PremiumMap): RegExp | null {
+  const keys = Object.keys(m).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!keys.length) return null;
+  return new RegExp(`^(${keys.map(escapeRe).join("|")})\\s?`, "u");
+}
+
+/**
+ * Buttons dress their leading emoji as an icon (Bot API 9.4): the id moves to
+ * `icon_custom_emoji_id`, the emoji leaves the label, and Telegram draws the
+ * premium emoji before the text — the same shape the label always had. A
+ * label that is nothing but an emoji keeps it (text may not be empty), and a
+ * button that already carries an icon is left alone. Returns the original
+ * rows untouched when nothing changed, so callers can skip the copy.
+ */
+export function premiumizeKeyboard(rows: any[][], m: PremiumMap): any[][] {
+  const lead = leadMatcherFor(m);
+  if (!lead) return rows;
+  let any = false;
+  const out = rows.map((row) =>
+    (row ?? []).map((b: any) => {
+      if (!b || typeof b.text !== "string" || !b.text || b.icon_custom_emoji_id) return b;
+      const hit = lead.exec(b.text);
+      if (!hit) return b;
+      const rest = b.text.slice(hit[0].length);
+      if (!rest.trim()) return b;
+      any = true;
+      return { ...b, text: rest, icon_custom_emoji_id: m[hit[1]] };
+    }),
+  );
+  return any ? out : rows;
+}
+
 /* ── the loading side ───────────────────────────────────────────────────── */
 
 async function readMapFromKv(env: any): Promise<PremiumMap | null> {

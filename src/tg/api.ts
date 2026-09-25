@@ -2,7 +2,7 @@ import type { Env } from "../env";
 import type {
   CallbackQuery, InlineKeyboardMarkup, InlineQueryResult, SendMessageOpts, TgOk, Update,
 } from "./types";
-import { getPremiumMap, notePremiumRejection, premiumizeHtml } from "./premium";
+import { getPremiumMap, notePremiumRejection, premiumizeHtml, premiumizeKeyboard } from "./premium";
 
 /**
  * Telegram Bot API client.
@@ -30,7 +30,8 @@ export class Telegram {
        costs one retry, never the message. */
     const plain = { ...(payload as any) };
     let wrapped = false;
-    if (!opts.formData && (plain.text || plain.caption || plain.rich_message)) {
+    const kbRows = (plain.reply_markup as any)?.inline_keyboard;
+    if (!opts.formData && (plain.text || plain.caption || plain.rich_message || kbRows?.length)) {
       const map = await getPremiumMap(this.env).catch(() => null);
       if (map && Object.keys(map).length) {
         const next: any = { ...plain };
@@ -46,6 +47,13 @@ export class Telegram {
         if (plain.rich_message?.html) {
           const h = premiumizeHtml(String(plain.rich_message.html), map);
           if (h !== plain.rich_message.html) { next.rich_message = { ...plain.rich_message, html: h }; changed = true; }
+        }
+        if (kbRows?.length) {
+          const rows = premiumizeKeyboard(kbRows, map);
+          if (rows !== kbRows) {
+            next.reply_markup = { ...(plain.reply_markup as any), inline_keyboard: rows };
+            changed = true;
+          }
         }
         if (changed) { payload = next; wrapped = true; }
       }

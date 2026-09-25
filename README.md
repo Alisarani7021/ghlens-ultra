@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml/badge.svg)](https://github.com/Alisarani7021/ghlens-ultra/actions/workflows/deploy.yml)
-[![tests](https://img.shields.io/badge/tests-373%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
+[![tests](https://img.shields.io/badge/tests-377%20passing-3fb950?style=flat-square)](#دروازهٔ-کیفیت)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![D1](https://img.shields.io/badge/D1-33%20tables-0b7285?style=flat-square)](schema/d1.sql)
@@ -41,7 +41,7 @@ vuejs/core                  →  پرونده: ۱۲ تب · امنیت · جام
 | **دانلود و امنیت** | دانلود مستقیم با کش و تقسیم جریانی · اسکن وابستگی با OSV · شکار کلید لو‌رفته · CVE · تبدیل پکیج (deb ⇄ rpm ⇄ pacman ⇄ apk) |
 | **ابزار** | IP/DNS/ASN/TLS، CIDR، JWT، هش، UUID، کرون، رجکس، SemVer · رادار شبکه |
 | **حساب** | پروفایل، XP، نشان، رتبهٔ هفتگی، ارجاع، داشبورد ۳۰ روزه · `/keys` استخر کلیدهای اهدایی (تست قبل از پذیرش، حذف خودکار کلید مرده) · `/connect` اتصال گیت‌هاب با توکن کم‌دسترسی |
-| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · **سند Rich در تمام ربات**: همهٔ صفحه‌ها (هر پیامی که با `reply` می‌رود) به‌طور خودکار به سند تبدیل می‌شوند — تیتر، فهرست، نقل‌قول، کد — با fallback خودکار به متن ساده (تقسیم پیام‌های بلند و نجات ویرایش‌های ناموفق) · منوی دوصفحه‌ای · لایهٔ اموجی پریمیوم (custom emoji با fallback خودکار) |
+| **رابط** | ۵ زبان کامل — fa · en · ar · ru · zh · حالت inline · **سند Rich در تمام ربات**: همهٔ صفحه‌ها (هر پیامی که با `reply` می‌رود) به‌طور خودکار به سند تبدیل می‌شوند — تیتر، فهرست، نقل‌قول، کد — با fallback خودکار به متن ساده (تقسیم پیام‌های بلند و نجات ویرایش‌های ناموفق) · منوی دوصفحه‌ای · لایهٔ اموجی پریمیوم (custom emoji در متن‌ها و آیکون دکمه‌ها با fallback خودکار) |
 
 ## هاب رویدادمحور
 
