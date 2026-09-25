@@ -47,6 +47,7 @@ export class Settings {
    * real state (linked or not).
    */
   async home(h: H, loc?: Loc, opts?: { force?: boolean }) {
+    (h as any).isHome = true;   // the root: the back layer must not add a button here
     const lang = loc ?? h.loc;
     const fa = lang === "fa";
     // `force` means "this is a command, not a page turn": /start lands as a new
@@ -172,6 +173,7 @@ export class Settings {
    * most-used keys of page 1 so a typo in one callback cannot strand anyone.
    */
   async home2(h: H) {
+    (h as any).isHome = true;   // page 2 of the root menu
     const lang = h.loc;
     const fa = lang === "fa";
     const u = await h.store.user(h.u.id);

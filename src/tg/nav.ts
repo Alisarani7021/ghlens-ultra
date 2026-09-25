@@ -71,3 +71,24 @@ export function backTarget(stack: string[]): { stack: string[]; target: string }
   out.pop();
   return { stack: out, target: out[out.length - 1] ?? "m:home" };
 }
+
+/** The back label in every locale the bot speaks. */
+export function backLabel(loc: string): string {
+  return ({ fa: "◀️ بازگشت", en: "◀️ Back", ru: "◀️ Назад", zh: "◀️ 返回", ar: "◀️ عودة" } as Record<string, string>)[loc] ?? "◀️ Back";
+}
+
+/**
+ * No screen may strand the reader. After the rewrite, a keyboard that still
+ * has no nav:back button gains one as its own last row — the screenshot
+ * complaint was a screen with buttons but no way back. Two exceptions, both
+ * deliberate: the root menu (nothing sits above home — a back button there
+ * re-renders the same screen), and replies without any keyboard (they expect
+ * typed input, not taps).
+ */
+export function ensureBackButton(kb: any, isHome: boolean, loc: string): any {
+  if (!kb?.inline_keyboard?.length || isHome) return kb;
+  const has = kb.inline_keyboard.some((row: any[]) =>
+    (row ?? []).some((b: any) => b?.callback_data === NAV_BACK));
+  if (has) return kb;
+  return { ...kb, inline_keyboard: [...kb.inline_keyboard, [{ text: backLabel(loc), callback_data: NAV_BACK }]] };
+}

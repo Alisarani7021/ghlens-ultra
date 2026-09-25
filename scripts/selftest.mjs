@@ -1070,6 +1070,22 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("nav: back again walks one more step", step2.target, "m:home");
   const step3 = N.backTarget(step2.stack);
   eq("nav: an empty history lands on home", step3.target, "m:home");
+  // no screen may strand the reader: a keyboard with no back gains one,
+  // the root menu never does, and a keyboard-less reply stays bare
+  eq("nav: the injected label follows the locale", N.backLabel("ru"), "◀️ Назад");
+  eq("nav: the default label is english", N.backLabel("xx"), "◀️ Back");
+  const bare = { inline_keyboard: [[{ text: "◀️ قبلی", callback_data: "t:1" }, { text: "بعدی ▶️", callback_data: "t:3" }]] };
+  const fixed = N.ensureBackButton(bare, false, "fa");
+  eq("nav: a keyboard with no back gains a back row",
+     fixed.inline_keyboard.at(-1), [{ text: "◀️ بازگشت", callback_data: N.NAV_BACK }]);
+  eq("nav: the original keyboard is never mutated", bare.inline_keyboard.length, 1);
+  const again = N.ensureBackButton(fixed, false, "fa");
+  ok("nav: a second pass adds nothing", again === fixed);
+  ok("nav: the root menu never gains a back button", N.ensureBackButton(bare, true, "fa") === bare);
+  ok("nav: a keyboard-less reply stays bare", N.ensureBackButton(undefined, false, "fa") === undefined);
+  const withBack = N.navizeKeyboard({ inline_keyboard: [[{ text: "◀️ بازگشت", callback_data: "sec:home" }]] });
+  ok("nav: an existing back button prevents injection",
+     N.ensureBackButton(withBack, false, "fa") === withBack);
 }
 
 // ── the premium-emoji layer ───────────────────────────────────────────────

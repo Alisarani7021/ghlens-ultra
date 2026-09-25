@@ -6,7 +6,7 @@ import type { Ctx, Env, Job } from "./env";
 import { botUsername, isAdmin } from "./env";
 import { Telegram, splitSmart } from "./tg/api";
 import { noteIncomingCustomEmoji } from "./tg/premium";
-import { backTarget, navizeKeyboard, NAV_STACK_KEY } from "./tg/nav";
+import { backTarget, ensureBackButton, navizeKeyboard, NAV_STACK_KEY } from "./tg/nav";
 import type { CallbackQuery, InlineQuery, Message, Update, User } from "./tg/types";
 import { tgEscape } from "./tg/types";
 import { kb } from "./tg/keyboards";
@@ -737,6 +737,9 @@ export async function buildH(
         if (next !== stack) await h.session.set(NAV_STACK_KEY, next).catch(() => null);
       }
       keyboard = navizeKeyboard(keyboard);
+      /* …and a screen that still has no back button gains one — no reader may
+         be stranded. The root menu is the exception: nothing sits above home. */
+      keyboard = ensureBackButton(keyboard, !!(h as any).isHome, loc);
       const extras = { reply_markup: keyboard, disable_web_page_preview: true } as any;
       const rtl = loc === "fa" || loc === "ar";
       if (!edit && h.editTarget) {
