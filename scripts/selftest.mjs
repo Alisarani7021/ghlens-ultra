@@ -1222,6 +1222,14 @@ const enc = (s) => new TextEncoder().encode(s);
      "پست تمام\n\n🔗 https://github.com/a/b");
   eq("studio: a topic query keeps no footer", m.withRepoFooter("پست دربارهٔ هوش مصنوعی", null),
      "پست دربارهٔ هوش مصنوعی");
+  // Telegram HTML is a whitelist — one stray <ul> fails the whole send
+  eq("studio: ul/li become plain bullets", m.tgSafeHtml("<ul>\n<li><strong>Bun</strong> سریع</li>\n<li>MIT</li>\n</ul>"),
+     "• <b>Bun</b> سریع\n\n• MIT");
+  eq("studio: headings become bold", m.tgSafeHtml("<h3>نصب</h3>قدم بعد"), "<b>نصب</b>قدم بعد");
+  eq("studio: unknown tags are stripped, text stays", m.tgSafeHtml("<table><tr><td>x</td></tr></table>"), "x");
+  eq("studio: whitelisted tags pass untouched", m.tgSafeHtml('<a href="https://github.com/a/b">ریپو</a> و <code class="language-bash">npm i</code>'),
+     '<a href="https://github.com/a/b">ریپو</a> و <code class="language-bash">npm i</code>');
+  eq("studio: br becomes newline, blank runs collapse", m.tgSafeHtml("a<br>b\n\n\n\nc"), "a\nb\n\nc");
   eq("studio: a one-letter name is not a handle", N("@a/b"), null);
 }
 

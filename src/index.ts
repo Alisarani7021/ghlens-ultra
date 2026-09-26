@@ -1920,6 +1920,14 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           }
           return multiHub.buildChannelPost(h, q, String(chan.display), String(chan.send));
         }
+        // the studio's channel step: "I'll forward it myself" — no destination,
+        // the post ships to the chat alone, clean and forwardable, no publish button
+        if (action === "postself") {
+          const q = String((await readMode(h.session) as any)?.data?.query ?? "");
+          await clearMode(h.session);
+          await h.session.set("hub:lastch", { display: "", send: "" }).catch(() => null);
+          return multiHub.buildChannelPost(h, q);
+        }
         // the studio's channel step: one of the owner's connected channels
         if (action === "postch") {
           const row: any = await h.env.DB.prepare(
@@ -1940,7 +1948,7 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         // publish the generated post straight into the channel, glass keys and all
         if (action === "postpub") {
           const saved: any = await h.session.get("hub:lastpost").catch(() => null);
-          const text = String(saved?.text ?? "");
+          const text = multiHub.tgSafeHtml(String(saved?.text ?? ""));
           const sendTo = String(saved?.send ?? "");
           if (!text || !sendTo) return h.toast(fa ? "پستی برای انتشار نیست — اول یکی بساز" : "nothing to publish");
           const full = repoFromText(text.replace(/<[^>]+>/g, " "));
