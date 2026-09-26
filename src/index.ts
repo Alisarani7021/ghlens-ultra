@@ -1,6 +1,6 @@
 import { NetRadar } from "./features/netradar";
 import { ArchitectureExplainer } from "./features/architecture";
-import { armChannelPost } from "./features/channelarm";
+import { armChannelPost, channelRepoKb, repoFromText } from "./features/channelarm";
 import { deepLinkGate } from "./features/deeplink";
 import { AppGen } from "./features/appgen";
 import { MultiHub } from "./features/multihub";
@@ -1162,7 +1162,24 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       };
       case "appgen": return async (t: string) => { await clearMode(h.session); return appGen.build(h, t); };
       case "hub_gitlab": return async (t: string) => { await clearMode(h.session); return multiHub.gitlabScout(h, t); };
-      case "hub_post": return async (t: string) => { await clearMode(h.session); return multiHub.buildChannelPost(h, t); };
+      /* the studio is two steps now: the project, then the channel it is for —
+         the footer carries the owner's real handle and the message ships clean */
+      case "hub_post": return async (t: string) => {
+        await setMode(h.session, "hub_postch", { query: t });
+        return multiHub.channelPrompt(h);
+      };
+      case "hub_postch": return async (t: string) => {
+        const handle = multiHub.normChannelHandle(t);
+        if (!handle) return h.reply(
+          h.loc === "fa" ? "❌ این آیدی کانال به نظر نمی‌رسد — مثلاً <code>@mychannel</code> بفرست." : "❌ That doesn't look like a channel handle — try <code>@mychannel</code>.",
+          kb([{ text: "❌ " + (h.loc === "fa" ? "لغو" : "Cancel"), cb: "hub:home" }]),
+          false,
+        );
+        const q = String(mode.data?.query ?? "");
+        await clearMode(h.session);
+        await h.session.set("hub:lastch", { display: handle, send: handle }).catch(() => null);
+        return multiHub.buildChannelPost(h, q, handle, handle);
+      };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
       /* Mission planning, code synthesis, review and workflow building each
          exceed one reply window, and they are reached by *typing* — the same trap
@@ -1895,7 +1912,48 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         }
         if (action === "repost") {
           const q = decodeURIComponent(args[0] ?? "");
-          return multiHub.buildChannelPost(h, q);
+          const chan: any = await h.session.get("hub:lastch").catch(() => null);
+          if (!chan?.send) {
+            await setMode(h.session, "hub_postch", { query: q });
+            return multiHub.channelPrompt(h);
+          }
+          return multiHub.buildChannelPost(h, q, String(chan.display), String(chan.send));
+        }
+        // the studio's channel step: one of the owner's connected channels
+        if (action === "postch") {
+          const row: any = await h.env.DB.prepare(
+            `SELECT label, config FROM hub_connectors WHERE id=? AND owner_id=?`,
+          ).bind(args[0] ?? "", h.u.id).first().catch(() => null);
+          let cfg: any = {}; try { cfg = JSON.parse(row?.config ?? "{}"); } catch { /* {} */ }
+          const sendTo = String(cfg.channel ?? "");
+          if (!sendTo) return h.toast(fa ? "کانال پیدا نشد" : "channel not found");
+          const display = sendTo.startsWith("@") ? sendTo : String(row?.label ?? sendTo);
+          const q = String((await readMode(h.session) as any)?.data?.query ?? "");
+          await clearMode(h.session);
+          await h.session.set("hub:lastch", { display, send: sendTo }).catch(() => null);
+          return multiHub.buildChannelPost(h, q, display, sendTo);
+        }
+        if (action === "postchx") {
+          return h.toast(fa ? "آیدی چنل را همین‌جا بنویس و بفرست" : "type the handle now");
+        }
+        // publish the generated post straight into the channel, glass keys and all
+        if (action === "postpub") {
+          const saved: any = await h.session.get("hub:lastpost").catch(() => null);
+          const text = String(saved?.text ?? "");
+          const sendTo = String(saved?.send ?? "");
+          if (!text || !sendTo) return h.toast(fa ? "پستی برای انتشار نیست — اول یکی بساز" : "nothing to publish");
+          const full = repoFromText(text.replace(/<[^>]+>/g, " "));
+          const markup = full ? channelRepoKb(full, botUsername(h.env)) : undefined;
+          const r: any = await h.tg.sendMessage(sendTo, text, {
+            parse_mode: "HTML",
+            ...(markup ? { reply_markup: markup } : {}),
+          }).catch((e: any) => ({ __err: String(e?.message ?? e) }));
+          if (r?.message_id) {
+            await h.store.event(h.u.id, "postmaker", `publish ${full ?? ""}`);
+            return h.toast(fa ? "✅ در کانال منتشر شد" : "✅ published");
+          }
+          const desc = String(r?.description ?? r?.__err ?? "unknown");
+          return h.toast(fa ? `❌ ارسال نشد: ${desc.slice(0, 90)}` : `❌ ${desc.slice(0, 90)}`);
         }
         if (action === "pyrun") {
           await setMode(h.session, "hub_py");

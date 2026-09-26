@@ -406,7 +406,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1198,6 +1198,24 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("gate: english screen exists", (en?.text ?? "").includes("Open it for you now?"));
   // underscored repo names: the first underscore is the separator
   eq("gate: underscored repo survives", D.describeDeepLink("arch_a_b_c")?.full, "a/b_c");
+}
+
+// ── the studio's channel step: every way a handle can arrive ──────────────
+{
+  const M = await import(join(scratch, "feat_multihub.mjs"));
+  // a class method — call it off a bare instance (the constructor is empty)
+  const m = new M.MultiHub();
+  const N = (x) => m.normChannelHandle(x);
+  eq("studio: a plain handle passes", N("@iguts9"), "@iguts9");
+  eq("studio: a bare name is dressed", N("iguts9"), "@iguts9");
+  eq("studio: a t.me link resolves", N("t.me/iguts9"), "@iguts9");
+  eq("studio: a full link with slashes resolves", N("https://t.me/iguts9/"), "@iguts9");
+  eq("studio: a browser-bar copy resolves", N("//t.me/iguts9"), "@iguts9");
+  eq("studio: a numeric id stays itself", N("-1001234567890"), "-1001234567890");
+  eq("studio: persian words are not handles", N("سلام این کانال منه"), null);
+  eq("studio: empty is nothing", N(""), null);
+  eq("studio: a path after the handle cuts off", N("@abc/something"), "@abc");
+  eq("studio: a one-letter name is not a handle", N("@a/b"), null);
 }
 
 // ── the premium-emoji layer ───────────────────────────────────────────────

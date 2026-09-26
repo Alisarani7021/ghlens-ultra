@@ -58,6 +58,8 @@ export function modeKeeps(kind: string, cb: string): boolean {
   if (kind === "keys") return cb.startsWith("keys:");
   // the deep-link gate lives until answered or walked away from
   if (kind === "dl:go") return cb === "dl:yes" || cb === "dl:no";
+  // the studio's channel choice survives its own buttons
+  if (kind === "hub_postch") return cb.startsWith("hub:postch");
   if (kind === "wf") return cb.startsWith("wf:") || cb.startsWith("a:wf");
   const ns = cb.split(":")[0];
   if (kind.startsWith("dvu:")) return ns === "dvu";
@@ -73,6 +75,7 @@ export const MODE_LABELS: Record<string, string> = {
   code: "توضیح کد",
   review: "بازبینی PR",
   appgen: "ساخت نرم‌افزار کامل",
+  hub_postch: "آیدی کانال برای پست",
   arch: "تحلیل معماری پروژه",
   "sec:scan": "اسکن امنیتی",
   "sec:secrets": "جست‌وجوی کلید لو‌رفته",

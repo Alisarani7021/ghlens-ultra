@@ -245,14 +245,46 @@ export class MultiHub {
           `• <code>2dust/v2rayNG</code>\n` +
           `• <code>ollama/ollama</code>\n` +
           `• <code>fastapi/fastapi</code>\n` +
-          `• یا هر ابزار دیگر)`
+          `• یا هر ابزار دیگر)\n\n` +
+          `سپس آیدی چنلت را می‌پرسم تا همان را پای پست بیاورم — متنِ تمیز و آمادهٔ فوروارد مستقیم می‌گیری.`
         : `📢 <b>Channel Editorial Studio</b>\n\nSend a repo name or topic to generate an enterprise-grade Telegram post.`,
       kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]),
       !!h.cbId,
     );
   }
 
-  async buildChannelPost(h: H, query: string) {
+  /** Any way a human writes a channel handle — one shape out (pure, tested). */
+  normChannelHandle(text: string): string | null {
+    const s = String(text ?? "").trim().replace(/^(?:https?:)?\/*(?:t\.me|telegram\.me)\//i, "");
+    if (/^-?\d{6,}$/.test(s)) return s;
+    const name = s.replace(/^[@\/]+/, "").split(/[\/?#\s]/)[0].trim();
+    return /^[A-Za-z0-9_]{3,}$/.test(name) ? `@${name}` : null;
+  }
+
+  /** Step two of the studio: the post is FOR a channel — ask which one, with
+   *  the owner's connected channels one tap away. */
+  async channelPrompt(h: H) {
+    const fa = h.loc === "fa";
+    const rows: any[][] = [];
+    const { results } = await h.env.DB.prepare(
+      `SELECT id, label, config FROM hub_connectors WHERE owner_id=? AND kind='telegram' AND enabled=1 ORDER BY created_at DESC LIMIT 4`,
+    ).bind(h.u.id).all().catch(() => ({ results: [] as any[] }));
+    for (const c of results ?? []) {
+      let cfg: any = {}; try { cfg = JSON.parse(c.config ?? "{}"); } catch { /* {} */ }
+      if (cfg.channel) rows.push([{ text: `📢 ${String(c.label ?? cfg.channel).slice(0, 32)}`, cb: `hub:postch:${c.id}` }]);
+    }
+    if (rows.length) rows.push([{ text: "✍️ " + (fa ? "آیدی دیگه‌ای می‌نویسم" : "Type another handle"), cb: "hub:postchx" }]);
+    return h.reply(
+      fa
+        ? `📢 <b>این پست برای کدام کانال؟</b>\n\n` +
+          `آیدی چنل را بفرست (مثل <code>@mychannel</code>) یا انتخابش کن — همان آیدی را پای پست می‌آورم و متن را <b>تمیز و آمادهٔ فوروارد</b> تحویل می‌دهم.`
+        : `📢 <b>Which channel is this post for?</b>\n\nSend the handle (e.g. <code>@mychannel</code>) and the post ships with it in the footer, ready to forward.`,
+      kb(...rows, [{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "hub:home" }]),
+      !!h.cbId,
+    );
+  }
+
+  async buildChannelPost(h: H, query: string, display?: string, send?: string) {
     const fa = h.loc === "fa";
     await h.loading(fa ? "📢 در حال نگارش پست فوق‌حرفه‌ای با متدهای سردبیری مدرن تلگرام…" : "Crafting editorial post…");
 
@@ -268,11 +300,12 @@ export class MultiHub {
       `   • ⚡ License / Status\n` +
       `   • 🎯 Best Use Case\n` +
       `5. Terminal / Run Command: A copyable monospace <code>command</code> to install or run.\n` +
-      `6. Footer: Clean channel handle placeholder: <b>@YourChannel</b>\n\n` +
+      `6. Footer: the channel handle this post belongs to, exactly as given: <b>${tgEscape(display ?? "@YourChannel")}</b>\n\n` +
       `STRICT COMPLIANCE:\n` +
       `- Use ONLY valid Telegram HTML: <b>, <i>, <code>, <blockquote>, <a href="...">.\n` +
       `- DO NOT use markdown tables or pipes (|).\n` +
-      `- DO NOT output conversational preambles like "Here is your post:". Output ONLY the raw post.`;
+      `- DO NOT output conversational preambles like "Here is your post:". Output ONLY the raw post.\n` +
+      `- The post must not mention any bot or any channel other than the footer handle.`;
 
     const generated = await h.ai.chat(prompt, {
       deadlineMs: h.budget(), tier: "smart",
@@ -287,19 +320,19 @@ export class MultiHub {
       .replace(/^>\s*(.+)$/gm, "<blockquote>$1</blockquote>")
       .replace(/<\/blockquote>\n<blockquote>/g, "\n");
 
-    const previewMsg =
-      `✨ <b>پست مهندسی‌شده و آمادهٔ انتشار در کانال:</b>\n\n` +
-      `────────────\n` +
-      cleanPost +
-      `\n────────────\n\n` +
-      `💡 <i>کافیست پیام بالا را کپی کرده یا مستقیماً در کانال یا گروه خود فوروارد کنید.</i>`;
-
+    /* The message IS the post now — no frame, no «این متن را کپی کن». A reader
+       forwards it straight into their channel; the buttons below travel with
+       this chat only (Telegram does not forward inline keyboards), so they are
+       the owner's private conveniences, not the reader's noise. */
+    await h.session.set("hub:lastpost", { text: cleanPost, send: send ?? "" }).catch(() => null);
     return h.reply(
-      previewMsg,
+      cleanPost,
       kb(
-        [{ text: "🔁 " + (fa ? "تولید با زاویهٔ دید فنی دیگر" : "Generate Another Angle"), cb: `hub:repost:${encodeURIComponent(query.slice(0, 30))}` }],
-        [{ text: "◀️ " + (fa ? "پروژهٔ دیگر" : "New Post"), cb: "hub:postmaker" }],
-        [{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }],
+        ...(send
+          ? [[{ text: `📤 ${fa ? `خودت در «${display}» منتشر کن` : `Publish in ${display}`}`, cb: "hub:postpub" }]]
+          : []),
+        [{ text: "🔁 " + (fa ? "زاویهٔ دید دیگر" : "Another angle"), cb: `hub:repost:${encodeURIComponent(query.slice(0, 30))}` }],
+        [{ text: "📢 " + (fa ? "پروژهٔ دیگر" : "New post"), cb: "hub:postmaker" }],
       ),
       !!h.cbId,
     );
