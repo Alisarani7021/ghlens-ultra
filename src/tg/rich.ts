@@ -229,7 +229,7 @@ export interface RichSendOpts {
  */
 export async function sendRich(
   tg: Telegram,
-  chatId: number,
+  chatId: number | string,
   html: string,
   opts: RichSendOpts = {},
 ): Promise<RichOutcome> {

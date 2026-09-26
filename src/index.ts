@@ -1951,7 +1951,9 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
         if (action === "postchx") {
           return h.toast(fa ? "آیدی چنل را همین‌جا بنویس و بفرست" : "type the handle now");
         }
-        // publish the generated post straight into the channel, glass keys and all
+        // publish the generated post straight into the channel, glass keys and
+        // all — through the SAME rich pipeline the studio renders with, so the
+        // channel gets the document, not a flat HTML send with a link preview
         if (action === "postpub") {
           const saved: any = await h.session.get("hub:lastpost").catch(() => null);
           const text = multiHub.tgSafeHtml(String(saved?.text ?? ""));
@@ -1959,16 +1961,18 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           if (!text || !sendTo) return h.toast(fa ? "پستی برای انتشار نیست — اول یکی بساز" : "nothing to publish");
           const full = repoFromText(text.replace(/<[^>]+>/g, " "));
           const markup = full ? channelRepoKb(full, botUsername(h.env)) : undefined;
-          const r: any = await h.tg.sendMessage(sendTo, text, {
-            parse_mode: "HTML",
-            ...(markup ? { reply_markup: markup } : {}),
-          }).catch((e: any) => ({ __err: String(e?.message ?? e) }));
-          if (r?.message_id) {
+          const { telegramHtmlToRich, sendRich } = await import("./tg/rich");
+          try {
+            await sendRich(h.tg, sendTo, telegramHtmlToRich(text), {
+              extra: { disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}) },
+              rtl: h.loc === "fa",
+            });
             await h.store.event(h.u.id, "postmaker", `publish ${full ?? ""}`);
             return h.toast(fa ? "✅ در کانال منتشر شد" : "✅ published");
+          } catch (e: any) {
+            const desc = String(e?.message ?? e);
+            return h.toast(fa ? `❌ ارسال نشد: ${desc.slice(0, 90)}` : `❌ ${desc.slice(0, 90)}`);
           }
-          const desc = String(r?.description ?? r?.__err ?? "unknown");
-          return h.toast(fa ? `❌ ارسال نشد: ${desc.slice(0, 90)}` : `❌ ${desc.slice(0, 90)}`);
         }
         if (action === "pyrun") {
           await setMode(h.session, "hub_py");

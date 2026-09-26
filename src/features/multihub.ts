@@ -2,6 +2,7 @@ import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
 import { parseRepoRef } from "../core/repo-ref";
 import { setMode } from "../core/mode";
+import { botUsername } from "../env";
 import { tgEscape } from "../tg/types";
 
 /**
@@ -279,9 +280,24 @@ tgSafeHtml(s: string): string {
     return /^hub:(?:postch:|repost:|postself$)/.test(cb) ? "hub:postview" : cb;
   }
 
-  /** The post's one and only footer: the project's own link (pure, tested). */
-  withRepoFooter(post: string, ref: string | null): string {
-    return ref ? `${post.replace(/\s+$/, "")}\n\n🔗 https://github.com/${ref}` : post;
+  /** The post's footer: the project's own link, then the four keys as TEXT
+   *  links. An inline keyboard dies with copy and forward — Telegram never
+   *  carries it — but a link inside the text travels wherever the text goes,
+   *  so the coloured keys survive both (pure, tested). */
+  withRepoFooter(post: string, ref: string | null, botUser = ""): string {
+    if (!ref) return post;
+    const url = `https://github.com/${ref}`;
+    const base = `${post.replace(/\s+$/, "")}\n\n🔗 ${url}`;
+    if (!botUser) return base;
+    const arg = ref.replace("/", "_");
+    const link = (q: string) => `https://t.me/${botUser}?start=${q}`;
+    const keys = [
+      `🟦 <a href="${link(`arch_${arg}`)}">معماری</a>`,
+      `🟩 <a href="${link(`c_${arg}`)}">تحلیل</a>`,
+      `🟦 <a href="${link(`t_${arg}`)}">ترجمه</a>`,
+      `🟥 <a href="${link(`repo_${arg}`)}">کارت</a>`,
+    ].join("  ·  ");
+    return `${base}\n${keys}`;
   }
 
   /** Any way a human writes a channel handle — one shape out (pure, tested). */
@@ -361,7 +377,7 @@ tgSafeHtml(s: string): string {
        puts it in the channel. */
     const ref = parseRepoRef(query);
     cleanPost = this.tgSafeHtml(cleanPost);
-    if (ref) cleanPost = this.withRepoFooter(cleanPost, ref);
+    if (ref) cleanPost = this.withRepoFooter(cleanPost, ref, botUsername(h.env));
     await h.session.set("hub:lastpost", { text: cleanPost, send: send ?? "", display: display ?? "", query }).catch(() => null);
     return this.postScreen(h, cleanPost, query, display ?? "", send ?? "");
   }

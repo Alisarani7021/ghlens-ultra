@@ -1222,6 +1222,17 @@ const enc = (s) => new TextEncoder().encode(s);
      "پست تمام\n\n🔗 https://github.com/a/b");
   eq("studio: a topic query keeps no footer", m.withRepoFooter("پست دربارهٔ هوش مصنوعی", null),
      "پست دربارهٔ هوش مصنوعی");
+  // the keys as text links — the only kind of key that survives copy and forward
+  eq("studio: the coloured keys ride inside the text",
+     m.withRepoFooter("پست", "a/b", "Gitguts_bot"),
+     'پست\n\n🔗 https://github.com/a/b\n' +
+     '🟦 <a href="https://t.me/Gitguts_bot?start=arch_a_b">معماری</a>  ·  ' +
+     '🟩 <a href="https://t.me/Gitguts_bot?start=c_a_b">تحلیل</a>  ·  ' +
+     '🟦 <a href="https://t.me/Gitguts_bot?start=t_a_b">ترجمه</a>  ·  ' +
+     '🟥 <a href="https://t.me/Gitguts_bot?start=repo_a_b">کارت</a>');
+  eq("studio: no bot user, no keys line — just the link",
+     m.withRepoFooter("پست", "a/b"),
+     "پست\n\n🔗 https://github.com/a/b");
   // Telegram HTML is a whitelist — one stray <ul> fails the whole send
   eq("studio: ul/li become plain bullets", m.tgSafeHtml("<ul>\n<li><strong>Bun</strong> سریع</li>\n<li>MIT</li>\n</ul>"),
      "• <b>Bun</b> سریع\n\n• MIT");
