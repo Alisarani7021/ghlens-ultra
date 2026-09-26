@@ -74,8 +74,18 @@ export async function armChannelPost(post: any, env: Env, tg: Telegram): Promise
   const mid = post.message_id;
   const kb = channelRepoKb(full, botUsername(env)) as any;
 
-  /* Edit in place: the post keeps its text (and entities, hashtags, previews
-     untouched), only the glass keys are added under it. */
+  /* Markup-only first: the post stays EXACTLY as its author made it — a rich
+     document stays rich (a text edit would flatten it), media keeps its
+     caption — only the glass keys appear under it. */
+  const mk: any = await tg.call("editMessageReplyMarkup", {
+    chat_id: chatId, message_id: mid, reply_markup: kb,
+  });
+  if (mk?.ok) { await log("edit:ok", { mid, full, way: "markup" }); return; }
+  if (/not modified/i.test(String(mk?.description ?? ""))) { await log("edit:same", { mid, full }); return; }
+
+  /* Fallback for post types the markup edit refuses: rewrite text/caption
+     verbatim with the keys. Rich documents that land here lose their document
+     shape — which is why the markup path above comes first. */
   const media = !!(post.photo || post.video || post.document || post.animation || post.audio);
   const res: any = media
     ? await tg.call("editMessageCaption", {
@@ -91,7 +101,7 @@ export async function armChannelPost(post: any, env: Env, tg: Telegram): Promise
         reply_markup: kb,
       });
 
-  if (res?.ok) { await log("edit:ok", { mid, full }); return; }
+  if (res?.ok) { await log("edit:ok", { mid, full, way: media ? "caption" : "text" }); return; }
   if (/not modified/i.test(String(res?.description ?? ""))) { await log("edit:same", { mid, full }); return; }
 
   /* No edit rights (or a post type that cannot be edited) — the keys still
