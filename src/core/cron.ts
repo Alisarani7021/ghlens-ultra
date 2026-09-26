@@ -31,7 +31,16 @@ async function healWebhook(env: Env, store: Store): Promise<void> {
   const tg = new Telegram(env);
   const info: any = await tg.call("getWebhookInfo").catch(() => null);
   const hook = info?.result ?? {};
-  if (!hook?.url || Telegram.deliversChannelPosts(hook)) return;
+  /* the state is written to the flags table every tick, so "the keys never
+     grew" is diagnosable from the data: ok / missing / noinfo, with the
+     pending backlog and the offending allow-list next to it. */
+  const note = (state: string) =>
+    env.DB.prepare(`INSERT OR REPLACE INTO flags (key, value, updated_at) VALUES (?,?,?)`)
+      .bind("webhook:heal", state, Date.now()).run().catch(() => null);
+  if (!hook?.url) { await note("noinfo"); return; }
+  const pending = Number(hook.pending_update_count ?? -1);
+  if (Telegram.deliversChannelPosts(hook)) { await note(`ok pending=${pending}`); return; }
+  await note(`missing pending=${pending} allowed=${Array.isArray(hook.allowed_updates) ? hook.allowed_updates.join("+") : "?"}`);
   const r: any = await tg.call("setWebhook", {
     url: hook.url,
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
@@ -40,6 +49,7 @@ async function healWebhook(env: Env, store: Store): Promise<void> {
     allowed_updates: ["message", "callback_query", "inline_query", "channel_post", "my_chat_member", "chosen_inline_result", "pre_checkout_query"],
   }).catch((e: any) => ({ ok: false, description: String(e?.message ?? e) }));
   console.log("webhook-heal", r?.ok === true ? "rebound" : JSON.stringify(r).slice(0, 200));
+  if (r?.ok === true) await note(`ok rebound pending=${pending}`);
   await store.event(null, "webhook", r?.ok === true ? "rebind:ok" : "rebind:fail", {
     url: String(hook.url).slice(0, 60),
     error: r?.ok === true ? undefined : String(r?.description ?? "").slice(0, 120),
