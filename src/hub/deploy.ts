@@ -358,7 +358,7 @@ export async function setTelegramWebhook(botToken: string, url: string, secret: 
     body: JSON.stringify({
       url: `${url}/tg/${secret}`,
       secret_token: secret,
-      allowed_updates: ["message", "callback_query", "inline_query"],
+      allowed_updates: ["message", "callback_query", "inline_query", "channel_post", "my_chat_member"],
       drop_pending_updates: true,
     }),
   }).then((x) => x.json()).catch(() => null);

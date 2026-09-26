@@ -22,6 +22,30 @@ import { tgEscape } from "../tg/types";
  * classifyCron() recognises all five historical shapes, so a future paid-plan
  * deployment can add `0 * * * *`, `0 6 * * SUN`, `0 4 1 * *` without code edits.
  */
+/* The webhook decides which updates Telegram even delivers. One registered
+   without channel_post silences armChannelPost forever: the worker never
+   hears about a channel post, so the four glass keys can never grow under
+   it. Read the live webhook; if channel posts are missing, re-register the
+   SAME url with the full update list — self-healing, no secret by hand. */
+async function healWebhook(env: Env, store: Store): Promise<void> {
+  const tg = new Telegram(env);
+  const info: any = await tg.call("getWebhookInfo").catch(() => null);
+  const hook = info?.result ?? {};
+  if (!hook?.url || Telegram.deliversChannelPosts(hook)) return;
+  const r: any = await tg.call("setWebhook", {
+    url: hook.url,
+    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+    drop_pending_updates: false,
+    max_connections: 40,
+    allowed_updates: ["message", "callback_query", "inline_query", "channel_post", "my_chat_member", "chosen_inline_result", "pre_checkout_query"],
+  }).catch((e: any) => ({ ok: false, description: String(e?.message ?? e) }));
+  console.log("webhook-heal", r?.ok === true ? "rebound" : JSON.stringify(r).slice(0, 200));
+  await store.event(null, "webhook", r?.ok === true ? "rebind:ok" : "rebind:fail", {
+    url: String(hook.url).slice(0, 60),
+    error: r?.ok === true ? undefined : String(r?.description ?? "").slice(0, 120),
+  }).catch(() => null);
+}
+
 export async function runCron(event: ScheduledController, env: Env, ctx: Ctx) {
   const cron = event.cron;
   const store = new Store(env);
@@ -31,6 +55,7 @@ export async function runCron(event: ScheduledController, env: Env, ctx: Ctx) {
   try {
     switch (classifyCron(cron)) {
       case "fast": {
+        await healWebhook(env, store).catch((e) => console.error("webhook-heal", e));
         await fastPoll(env, ctx);
         /* This account's cron triggers refuse to come alive as a fresh fourth
            schedule — but modifying a live one applies within minutes. The old

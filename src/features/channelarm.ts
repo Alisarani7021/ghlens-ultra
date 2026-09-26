@@ -62,6 +62,11 @@ export async function armChannelPost(post: any, env: Env, tg: Telegram): Promise
     new Store(env).event(Number(post?.chat?.id ?? 0) || null, "channelarm", name, meta).catch(() => null);
   // already carries a keyboard (the hub's own publishes, other bots) — not ours to touch
   if (post?.reply_markup?.inline_keyboard?.length) { await log("skip:markup", { mid: post.message_id }); return; }
+  // the hub's own publish, keyboard not visible in the update — still not ours to touch
+  if (String(post?.from?.username ?? "").toLowerCase() === botUsername(env).toLowerCase()) {
+    await log("skip:self", { mid: post.message_id });
+    return;
+  }
   const full = repoFromText(text);
   if (!full) { await log("skip:nolink", { mid: post.message_id }); return; }
 

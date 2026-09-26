@@ -175,6 +175,16 @@ export class Telegram {
     return this.call("setMyCommands", { commands, scope, language_code });
   }
 
+  /** getWebhookInfo's verdict, as a yes/no: does this webhook deliver channel
+   *  posts? An absent list means Telegram's default set (which includes them);
+   *  an explicit list without channel_post silences every channel_post
+   *  handler — armChannelPost chief among them (pure, tested). */
+  static deliversChannelPosts(info: any): boolean {
+    const allowed = info?.allowed_updates;
+    if (!Array.isArray(allowed) || !allowed.length) return true;
+    return allowed.includes("channel_post");
+  }
+
   setWebhook(url: string, secret_token: string, drop_pending = true) {
     return this.call("setWebhook", {
       url, secret_token, drop_pending_updates: drop_pending, max_connections: 40,

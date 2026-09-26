@@ -406,7 +406,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"], ["tg_api", "src/tg/api.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1222,17 +1222,13 @@ const enc = (s) => new TextEncoder().encode(s);
      "پست تمام\n\n🔗 https://github.com/a/b");
   eq("studio: a topic query keeps no footer", m.withRepoFooter("پست دربارهٔ هوش مصنوعی", null),
      "پست دربارهٔ هوش مصنوعی");
-  // the keys as text links — the only kind of key that survives copy and forward
-  eq("studio: the coloured keys ride inside the text",
-     m.withRepoFooter("پست", "a/b", "Gitguts_bot"),
-     'پست\n\n🔗 https://github.com/a/b\n' +
-     '🟦 <a href="https://t.me/Gitguts_bot?start=arch_a_b">معماری</a>  ·  ' +
-     '🟩 <a href="https://t.me/Gitguts_bot?start=c_a_b">تحلیل</a>  ·  ' +
-     '🟦 <a href="https://t.me/Gitguts_bot?start=t_a_b">ترجمه</a>  ·  ' +
-     '🟥 <a href="https://t.me/Gitguts_bot?start=repo_a_b">کارت</a>');
-  eq("studio: no bot user, no keys line — just the link",
-     m.withRepoFooter("پست", "a/b"),
-     "پست\n\n🔗 https://github.com/a/b");
+  // a webhook without channel_post is the silent killer of the four keys
+  const TGAPI = await import(join(scratch, "tg_api.mjs"));
+  eq("webhook: telegram's default set delivers channel posts", TGAPI.Telegram.deliversChannelPosts({}), true);
+  eq("webhook: an explicit list with channel_post is fine",
+     TGAPI.Telegram.deliversChannelPosts({ allowed_updates: ["message", "channel_post"] }), true);
+  eq("webhook: a list without channel_post silences the arming",
+     TGAPI.Telegram.deliversChannelPosts({ allowed_updates: ["message", "callback_query", "inline_query"] }), false);
   // Telegram HTML is a whitelist — one stray <ul> fails the whole send
   eq("studio: ul/li become plain bullets", m.tgSafeHtml("<ul>\n<li><strong>Bun</strong> سریع</li>\n<li>MIT</li>\n</ul>"),
      "• <b>Bun</b> سریع\n\n• MIT");
