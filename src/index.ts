@@ -1487,7 +1487,11 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
     cbId: q.id, text: arg, args, msg: q.message ?? undefined, guard,
   });
   const fa = h.loc === "fa";
-  (h as any).curRoute = data;                 // history navigation reads this
+  /* History navigation reads this — and the studio's generators (connector
+     pick, another angle, self-forward) all render the same screen: the last
+     post. Their route is the cheap re-render, so the back button shows a page
+     instead of re-running the AI command. */
+  (h as any).curRoute = multiHub.postRouteFor(data);
   (h as any).noPush = !!(q as any).__noPush;  // the past is not history
   await store.event(q.from.id, "callback", `${ns}:${action}`);
 
@@ -1920,6 +1924,8 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           }
           return multiHub.buildChannelPost(h, q, String(chan.display), String(chan.send));
         }
+        // history back onto the post screen: the remembered post, not a fresh AI run
+        if (action === "postview") return multiHub.postView(h);
         // the studio's channel step: "I'll forward it myself" — no destination,
         // the post ships to the chat alone, clean and forwardable, no publish button
         if (action === "postself") {

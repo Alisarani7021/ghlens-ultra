@@ -1,6 +1,7 @@
 import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
 import { parseRepoRef } from "../core/repo-ref";
+import { setMode } from "../core/mode";
 import { tgEscape } from "../tg/types";
 
 /**
@@ -270,6 +271,14 @@ tgSafeHtml(s: string): string {
     return out.replace(/\r/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   }
 
+  /** The studio's generators — a connector pick, another angle, a self-forward —
+   *  all render the same screen: the last post. That screen's history route is
+   *  the cheap re-render (hub:postview), so the back button lands on a page,
+   *  never on a fresh AI run (pure, tested). */
+  postRouteFor(cb: string): string {
+    return /^hub:(?:postch:|repost:|postself$)/.test(cb) ? "hub:postview" : cb;
+  }
+
   /** The post's one and only footer: the project's own link (pure, tested). */
   withRepoFooter(post: string, ref: string | null): string {
     return ref ? `${post.replace(/\s+$/, "")}\n\n🔗 https://github.com/${ref}` : post;
@@ -353,14 +362,30 @@ tgSafeHtml(s: string): string {
     const ref = parseRepoRef(query);
     cleanPost = this.tgSafeHtml(cleanPost);
     if (ref) cleanPost = this.withRepoFooter(cleanPost, ref);
-    await h.session.set("hub:lastpost", { text: cleanPost, send: send ?? "" }).catch(() => null);
+    await h.session.set("hub:lastpost", { text: cleanPost, send: send ?? "", display: display ?? "", query }).catch(() => null);
+    return this.postScreen(h, cleanPost, query, display ?? "", send ?? "");
+  }
 
+  /** The studio's post screen — the clean post plus its buttons. The fresh
+   *  generator and history-back share it, so the two renders are identical. */
+  postScreen(h: H, post: string, query: string, display: string, send: string) {
+    const fa = h.loc === "fa";
     const rows: any[][] = [
       [{ text: "🔁 " + (fa ? "زاویهٔ دید دیگر" : "Another angle"), cb: `hub:repost:${encodeURIComponent(query.slice(0, 30))}` }],
       [{ text: "📢 " + (fa ? "پروژهٔ دیگر" : "New post"), cb: "hub:postmaker" }],
     ];
-    if (send) rows.unshift([{ text: `📤 ${fa ? `خودت در «${tgEscape(display ?? "")}» منتشرش کن` : `Publish in ${display}`}`, cb: "hub:postpub" }]);
-    return h.reply(cleanPost, kb(...rows), !!h.cbId);
+    if (send) rows.unshift([{ text: `📤 ${fa ? `خودت در «${tgEscape(display)}» منتشرش کن` : `Publish in ${display}`}`, cb: "hub:postpub" }]);
+    return h.reply(post, kb(...rows), !!h.cbId);
+  }
+
+  /** The post screen re-rendered from memory — no AI, no loading, no side
+   *  effects. This is what the back button lands on: the same page, not the
+   *  same command. */
+  async postView(h: H) {
+    const saved: any = await h.session.get("hub:lastpost").catch(() => null);
+    const text = this.tgSafeHtml(String(saved?.text ?? ""));
+    if (!text) { await setMode(h.session, "hub_post"); return this.postMakerPrompt(h); }
+    return this.postScreen(h, text, String(saved?.query ?? ""), String(saved?.display ?? ""), String(saved?.send ?? ""));
   }
 
   /** 5. Python Sandbox & Execution Profiler */

@@ -1230,6 +1230,13 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("studio: whitelisted tags pass untouched", m.tgSafeHtml('<a href="https://github.com/a/b">ریپو</a> و <code class="language-bash">npm i</code>'),
      '<a href="https://github.com/a/b">ریپو</a> و <code class="language-bash">npm i</code>');
   eq("studio: br becomes newline, blank runs collapse", m.tgSafeHtml("a<br>b\n\n\n\nc"), "a\nb\n\nc");
+  // the back button must land on a page, never re-run the AI command
+  eq("studio: a connector pick records the cheap route", m.postRouteFor("hub:postch:abc123"), "hub:postview");
+  eq("studio: another angle records the cheap route", m.postRouteFor("hub:repost:riba2534%2Fdemo"), "hub:postview");
+  eq("studio: self-forward records the cheap route", m.postRouteFor("hub:postself"), "hub:postview");
+  eq("studio: the handle-typing toast keeps its own route", m.postRouteFor("hub:postchx"), "hub:postchx");
+  eq("studio: publish keeps its own route", m.postRouteFor("hub:postpub"), "hub:postpub");
+  eq("studio: other screens untouched", m.postRouteFor("hub:home"), "hub:home");
   eq("studio: a one-letter name is not a handle", N("@a/b"), null);
 }
 
