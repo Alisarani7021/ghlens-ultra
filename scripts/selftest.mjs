@@ -1215,6 +1215,13 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("studio: persian words are not handles", N("سلام این کانال منه"), null);
   eq("studio: empty is nothing", N(""), null);
   eq("studio: a path after the handle cuts off", N("@abc/something"), "@abc");
+  // the one and only footer: the project's own link
+  eq("studio: a repo query earns the project link", m.withRepoFooter("پست تمام", "oven-sh/bun"),
+     "پست تمام\n\n🔗 https://github.com/oven-sh/bun");
+  eq("studio: trailing space is trimmed before the link", m.withRepoFooter("پست تمام\n ", "a/b"),
+     "پست تمام\n\n🔗 https://github.com/a/b");
+  eq("studio: a topic query keeps no footer", m.withRepoFooter("پست دربارهٔ هوش مصنوعی", null),
+     "پست دربارهٔ هوش مصنوعی");
   eq("studio: a one-letter name is not a handle", N("@a/b"), null);
 }
 

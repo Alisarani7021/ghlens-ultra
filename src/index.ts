@@ -1178,7 +1178,8 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         const q = String(mode.data?.query ?? "");
         await clearMode(h.session);
         await h.session.set("hub:lastch", { display: handle, send: handle }).catch(() => null);
-        return multiHub.buildChannelPost(h, q, handle, handle);
+        await multiHub.buildChannelPost(h, q, handle, handle);
+        return;
       };
       case "hub_py": return async (t: string) => { await clearMode(h.session); return multiHub.runPyCode(h, t); };
       /* Mission planning, code synthesis, review and workflow building each

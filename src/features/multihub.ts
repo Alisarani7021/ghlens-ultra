@@ -1,5 +1,8 @@
 import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
+import { parseRepoRef } from "../core/repo-ref";
+import { channelRepoKb } from "./channelarm";
+import { botUsername } from "../env";
 import { tgEscape } from "../tg/types";
 
 /**
@@ -246,11 +249,16 @@ export class MultiHub {
           `• <code>ollama/ollama</code>\n` +
           `• <code>fastapi/fastapi</code>\n` +
           `• یا هر ابزار دیگر)\n\n` +
-          `سپس آیدی چنلت را می‌پرسم تا همان را پای پست بیاورم — متنِ تمیز و آمادهٔ فوروارد مستقیم می‌گیری.`
+          `سپس می‌پرسم در کدام کانال منتشر کنم — پست تمیز و بدون امضا می‌سازم، پایینش لینک پروژه را می‌گذارم و <b>خودم همان‌جا منتشرش می‌کنم</b>.`
         : `📢 <b>Channel Editorial Studio</b>\n\nSend a repo name or topic to generate an enterprise-grade Telegram post.`,
       kb([[{ text: "◀️ " + (fa ? "بازگشت به ابر‌مرکز" : "Back to Hub"), cb: "hub:home" }]]),
       !!h.cbId,
     );
+  }
+
+  /** The post's one and only footer: the project's own link (pure, tested). */
+  withRepoFooter(post: string, ref: string | null): string {
+    return ref ? `${post.replace(/\s+$/, "")}\n\n🔗 https://github.com/${ref}` : post;
   }
 
   /** Any way a human writes a channel handle — one shape out (pure, tested). */
@@ -276,8 +284,9 @@ export class MultiHub {
     if (rows.length) rows.push([{ text: "✍️ " + (fa ? "آیدی دیگه‌ای می‌نویسم" : "Type another handle"), cb: "hub:postchx" }]);
     return h.reply(
       fa
-        ? `📢 <b>این پست برای کدام کانال؟</b>\n\n` +
-          `آیدی چنل را بفرست (مثل <code>@mychannel</code>) یا انتخابش کن — همان آیدی را پای پست می‌آورم و متن را <b>تمیز و آمادهٔ فوروارد</b> تحویل می‌دهم.`
+        ? `📢 <b>پست را در کدام کانال منتشر کنم؟</b>\n\n` +
+          `آیدی چنل را بفرست (مثل <code>@mychannel</code>) یا انتخابش کن — پست را <b>مستقیم همان‌جا منتشر می‌کنم</b>.\n` +
+          `<i>داخل پست هیچ آیدی و امضایی نمی‌آید؛ فقط پایینش لینک خود پروژه را می‌گذارم.</i>`
         : `📢 <b>Which channel is this post for?</b>\n\nSend the handle (e.g. <code>@mychannel</code>) and the post ships with it in the footer, ready to forward.`,
       kb(...rows, [{ text: "❌ " + (fa ? "لغو" : "Cancel"), cb: "hub:home" }]),
       !!h.cbId,
@@ -300,12 +309,12 @@ export class MultiHub {
       `   • ⚡ License / Status\n` +
       `   • 🎯 Best Use Case\n` +
       `5. Terminal / Run Command: A copyable monospace <code>command</code> to install or run.\n` +
-      `6. Footer: the channel handle this post belongs to, exactly as given: <b>${tgEscape(display ?? "@YourChannel")}</b>\n\n` +
+      `6. End the post right after the last content section. NO channel handle, no @mention, no signature, no footer of any kind — one is added automatically.\n\n` +
       `STRICT COMPLIANCE:\n` +
       `- Use ONLY valid Telegram HTML: <b>, <i>, <code>, <blockquote>, <a href="...">.\n` +
       `- DO NOT use markdown tables or pipes (|).\n` +
       `- DO NOT output conversational preambles like "Here is your post:". Output ONLY the raw post.\n` +
-      `- The post must not mention any bot or any channel other than the footer handle.`;
+      `- The post must not mention any bot or any channel at all.`;
 
     const generated = await h.ai.chat(prompt, {
       deadlineMs: h.budget(), tier: "smart",
@@ -320,22 +329,37 @@ export class MultiHub {
       .replace(/^>\s*(.+)$/gm, "<blockquote>$1</blockquote>")
       .replace(/<\/blockquote>\n<blockquote>/g, "\n");
 
-    /* The message IS the post now — no frame, no «این متن را کپی کن». A reader
-       forwards it straight into their channel; the buttons below travel with
-       this chat only (Telegram does not forward inline keyboards), so they are
-       the owner's private conveniences, not the reader's noise. */
+    /* The one and only footer is the project's own link. The channel handle
+       never appears in the post: asking which channel was never branding, it
+       was the destination — so the bot publishes straight into it, glass keys
+       and all, and the chat keeps a clean, forwardable copy. */
+    const ref = parseRepoRef(query);
+    if (ref) cleanPost = this.withRepoFooter(cleanPost, ref);
+
+    let pubOk = false, pubErr = "";
+    if (send) {
+      const markup = ref ? channelRepoKb(ref, botUsername(h.env)) : undefined;
+      const r: any = await h.tg.sendMessage(send, cleanPost, {
+        parse_mode: "HTML",
+        ...(markup ? { reply_markup: markup } : {}),
+      }).catch((e: any) => ({ __err: String(e?.message ?? e) }));
+      pubOk = !!r?.message_id;
+      if (!pubOk) pubErr = String(r?.description ?? r?.__err ?? "unknown");
+    }
     await h.session.set("hub:lastpost", { text: cleanPost, send: send ?? "" }).catch(() => null);
-    return h.reply(
-      cleanPost,
-      kb(
-        ...(send
-          ? [[{ text: `📤 ${fa ? `خودت در «${display}» منتشر کن` : `Publish in ${display}`}`, cb: "hub:postpub" }]]
-          : []),
-        [{ text: "🔁 " + (fa ? "زاویهٔ دید دیگر" : "Another angle"), cb: `hub:repost:${encodeURIComponent(query.slice(0, 30))}` }],
-        [{ text: "📢 " + (fa ? "پروژهٔ دیگر" : "New post"), cb: "hub:postmaker" }],
-      ),
-      !!h.cbId,
-    );
+
+    const rows: any[][] = [
+      [{ text: "🔁 " + (fa ? "زاویهٔ دید دیگر" : "Another angle"), cb: `hub:repost:${encodeURIComponent(query.slice(0, 30))}` }],
+      [{ text: "📢 " + (fa ? "پروژهٔ دیگر" : "New post"), cb: "hub:postmaker" }],
+    ];
+    if (send && !pubOk) rows.unshift([{ text: "📤 " + (fa ? "دوباره بفرست" : "Retry publish"), cb: "hub:postpub" }]);
+    await h.reply(cleanPost, kb(...rows), !!h.cbId);
+
+    if (!send) return;
+    return h.tg.sendMessage(h.chatId, pubOk
+      ? `✅ ${fa ? `در «${tgEscape(display ?? "")}» منتشر شد` : `Published in ${display}`}`
+      : `❌ ${fa ? `نتوانستم در «${tgEscape(display ?? "")}» منتشر کنم — ${tgEscape(pubErr.slice(0, 90))}` : `Publish failed: ${pubErr.slice(0, 90)}`}`,
+      { parse_mode: "HTML" }).catch(() => null);
   }
 
   /** 5. Python Sandbox & Execution Profiler */
