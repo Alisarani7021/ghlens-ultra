@@ -102,26 +102,54 @@ call() { # method, language_code, field, value
     | python3 -c "import sys,json; d=json.load(sys.stdin); print('  $method [$lang] →', 'ok' if d.get('ok') else d.get('description'))"
 }
 
-# The no-language copy is what Telegram shows when the client's language is not
-# one we set, and it is what the API returns without a language_code — so it must
-# be written too, otherwise the old text lives on for every other locale.
-echo "▸ default (any other language)"
-call setMyShortDescription "" short_description "$short_fa"
-call setMyDescription "" description "$desc_fa"
+# ── the owner-takeover guard ────────────────────────────────────────────────
+# The bio and the splash card belong to the owner once they customise them.
+# BotFather edits only the DEFAULT copy — if this script kept writing its own
+# text (per locale, worse) the owner's words would look "cleared" for every
+# fa/en/… client. So: compare what is live against what we last wrote, touch
+# only a field that still says ours, and when the owner has taken a field
+# over, REMOVE its per-locale copies so their line shows for every language.
+current_short=$(curl -s "$API/getMyShortDescription" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"].get("short_description",""))' 2>/dev/null || true)
+current_desc=$(curl -s "$API/getMyDescription" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"].get("description",""))' 2>/dev/null || true)
 
-echo "▸ short description (the profile line)"
-call setMyShortDescription fa short_description "$short_fa"
-call setMyShortDescription en short_description "$short_en"
-call setMyShortDescription ar short_description "$short_ar"
-call setMyShortDescription ru short_description "$short_ru"
-call setMyShortDescription zh short_description "$short_zh"
+if [ -n "$DRY" ]; then
+  echo "  (dry) current bio is ${#current_short} chars; still ours: $([ "$current_short" = "$short_fa" ] && echo yes || echo NO — owner took over)"
+  echo "  (dry) current description is ${#current_desc} chars; still ours: $([ "$current_desc" = "$desc_fa" ] && echo yes || echo NO — owner took over)"
+fi
 
-echo "▸ description (the splash card)"
-call setMyDescription fa description "$desc_fa"
-call setMyDescription en description "$desc_en"
-call setMyDescription ar description "$desc_ar"
-call setMyDescription ru description "$desc_ru"
-call setMyDescription zh description "$desc_zh"
+if [ "$current_short" = "$short_fa" ]; then
+  echo "▸ short description (the profile line) — still ours, keeping it localised"
+  call setMyShortDescription "" short_description "$short_fa"
+  call setMyShortDescription fa short_description "$short_fa"
+  call setMyShortDescription en short_description "$short_en"
+  call setMyShortDescription ar short_description "$short_ar"
+  call setMyShortDescription ru short_description "$short_ru"
+  call setMyShortDescription zh short_description "$short_zh"
+else
+  echo "▸ short description — the owner took it over; releasing every locale to their line"
+  call setMyShortDescription fa short_description ""
+  call setMyShortDescription en short_description ""
+  call setMyShortDescription ar short_description ""
+  call setMyShortDescription ru short_description ""
+  call setMyShortDescription zh short_description ""
+fi
+
+if [ "$current_desc" = "$desc_fa" ]; then
+  echo "▸ description (the splash card) — still ours, keeping it localised"
+  call setMyDescription "" description "$desc_fa"
+  call setMyDescription fa description "$desc_fa"
+  call setMyDescription en description "$desc_en"
+  call setMyDescription ar description "$desc_ar"
+  call setMyDescription ru description "$desc_ru"
+  call setMyDescription zh description "$desc_zh"
+else
+  echo "▸ description — the owner took it over; releasing every locale to their text"
+  call setMyDescription fa description ""
+  call setMyDescription en description ""
+  call setMyDescription ar description ""
+  call setMyDescription ru description ""
+  call setMyDescription zh description ""
+fi
 
 # ── the menu button next to the message box ────────────────────
 # This step used to point the button at the mini app. The mini app is gone, so

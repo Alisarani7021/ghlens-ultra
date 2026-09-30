@@ -104,6 +104,32 @@ export default {
         return new Response("ok");
       }
 
+      // ── admin: the bot's own bio, released to its owner ──────────────────
+      // The profile script once wrote a bio per locale, and a BotFather edit
+      // only replaces the default copy — so for every fa/en/… client the
+      // owner's words stayed invisible, as if the bio "kept getting cleared".
+      // This route sets ONE bio for all locales (an empty per-locale copy
+      // falls back to the default), and the script now refuses to touch a
+      // bio its owner has customised.
+      if (url.pathname === "/admin/bio" && request.method === "POST") {
+        if (!env.ADMIN_KEY || request.headers.get("authorization") !== `Bearer ${env.ADMIN_KEY}`) {
+          return new Response("forbidden", { status: 403 });
+        }
+        const body: any = await request.json().catch(() => ({}));
+        const text = String(body?.text ?? "").slice(0, 120).trim();
+        const tg = new Telegram(env);
+        if (text) {
+          const r: any = await tg.call("setMyShortDescription", { short_description: text })
+            .catch((e: any) => ({ ok: false, description: String(e?.message ?? e) }));
+          if (!r?.ok) return Response.json({ ok: false, error: String(r?.description ?? "set failed") }, { status: 502 });
+        }
+        for (const l of ["fa", "en", "ar", "ru", "zh"]) {
+          await tg.call("setMyShortDescription", { language_code: l, short_description: "" }).catch(() => null);
+        }
+        const now: any = await tg.call("getMyShortDescription").catch(() => null);
+        return Response.json({ ok: true, default: now?.result?.short_description ?? "" });
+      }
+
       // ── self-test: runs the real update pipeline inline and reports what the
       //    bot would send. Never touches Telegram: outgoing API calls are
       //    captured, so this doubles as an end-to-end assertion harness. ──────

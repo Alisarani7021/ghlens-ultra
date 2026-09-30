@@ -7,6 +7,8 @@ export interface Env {
   BOT_USERNAME: string;
   /** Secret token compared against the X-Telegram-Bot-Api-Secret-Token header. */
   TELEGRAM_WEBHOOK_SECRET: string;
+  /** Bearer key for the /admin routes (profile and other owner operations). */
+  ADMIN_KEY?: string;
   GITHUB_TOKEN: string;
   GITHUB_WEBHOOK_SECRET: string;
   CF_API_TOKEN?: string;
