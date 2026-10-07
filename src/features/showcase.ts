@@ -288,19 +288,17 @@ export class Showcase {
       : "";
     return intro +
       table([
-        [fa ? "بخش" : "Part", fa ? "امتیاز" : "Score"],
         [fa ? "فعالیت" : "Activity", `${parts.score.parts.activity}/30`],
         [fa ? "محبوبیت" : "Popularity", `${parts.score.parts.popularity}/30`],
         [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
         [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
         [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
-      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
+      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score", compact: true, header: false }) +
       (parts.owner ? table([
-        [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
         ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
         [fa ? "فالوورها" : "Followers", parts.owner.followers],
         [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
-      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker" }) : "") +
+      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker", compact: true, header: false }) : "") +
       hr() +
       footer(`🔗 ${parts.url}`);
   }
@@ -312,6 +310,31 @@ export class Showcase {
     const hook = parts.hook && !parts.userText ? `\n<i>${parts.hook}</i>` : "";
     const body = parts.userText ? tgEscape(parts.userText).slice(0, 900) : parts.summary;
     return `${head}${hook}\n\n${body}\n\n🔗 ${parts.url}`;
+  }
+
+  /** GitHub's image bytes, fetched by us — an upload never depends on
+   *  Telegram's downloader, which refused the card URL. */
+  async photoBytes(url: string): Promise<Uint8Array | null> {
+    const r = await fetch(url, { headers: { accept: "image/png,image/*", "user-agent": "GitHubLensUltra/1.0" } }).catch(() => null);
+    if (!r || !r.ok) return null;
+    const buf = new Uint8Array(await r.arrayBuffer().catch(() => new ArrayBuffer(0)));
+    return buf.length > 1000 ? buf : null;   // a real image, not an error page
+  }
+
+  /** Send the post photo the sure way: our own upload first, the URL form
+   *  second, the avatar as the next candidate. Returns the message id. */
+  async sendPostPhoto(h: H, chat: string | number, img: string, avatar: string, caption: string, opts: Record<string, unknown> = {}): Promise<number | null> {
+    for (const candidate of [img, avatar].filter(Boolean)) {
+      const bytes = await this.photoBytes(candidate);
+      if (bytes) {
+        const r: any = await h.tg.sendPhoto(chat as any, bytes as any, caption, opts as any).catch(() => null);
+        const mid = r?.result?.message_id ?? null;
+        if (mid) return mid;
+      }
+      const r2: any = await h.tg.sendPhoto(chat as any, candidate, caption, opts as any).catch(() => null);
+      if (r2?.result?.message_id) return r2.result.message_id;
+    }
+    return null;
   }
 
   previewKb(fa: boolean, manual: boolean) {
@@ -342,25 +365,22 @@ export class Showcase {
     if (parts.userText) {
       /* the maker's post is one message: his photo — or the banner — with
        * his words on it, keys under it */
-      const img = parts.photos[0] || (parts.userText.length <= 900 ? (parts.banner || parts.avatar) : "");
-      if (img) {
-        const r: any = await h.tg.sendPhoto(h.chatId, img, cap, { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
-        if (r?.result?.message_id) {
-          return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
-        }
+      let mid: number | null = null;
+      if (parts.photos[0]) {
+        const r: any = await h.tg.sendPhoto(h.chatId, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
+        mid = r?.result?.message_id ?? null;
+      } else if (parts.userText.length <= 900) {
+        mid = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: rows });
+      }
+      if (mid) {
+        return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
       }
       return h.reply(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
     }
     /* the AI post: the white GitHub banner with the pitch on it, the tables
      * right under it carrying the keys */
-    const img = parts.banner || parts.avatar;
-    if (img) {
-      const r: any = await h.tg.sendPhoto(h.chatId, img, cap, { parse_mode: "HTML" } as any).catch(() => null);
-      if (r?.result?.message_id) {
-        return h.reply(this.renderTablesDoc(parts, serial, fa, false), rows, !!h.cbId);
-      }
-    }
-    return h.reply(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
+    const mid1 = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML" });
+    return h.reply(this.renderTablesDoc(parts, serial, fa, !mid1), rows, !!h.cbId);
   }
 
   async previewAuto(h: H, ref: string) {
@@ -440,10 +460,11 @@ export class Showcase {
        * his words on it, keys under it; words too long for a caption ride
        * as a text post instead */
       const cap = this.renderCaption(parts, serial, fa);
-      const img = parts.photos[0] || (parts.userText.length <= 900 ? (parts.banner || parts.avatar) : "");
-      if (img) {
-        const r: any = await h.tg.sendPhoto(target.send as any, img, cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
+      if (parts.photos[0]) {
+        const r: any = await h.tg.sendPhoto(target.send as any, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
         mid = r?.result?.message_id ?? null;
+      } else if (parts.userText.length <= 900) {
+        mid = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: markup });
       }
       if (!mid) {
         const rich = this.renderTablesDoc(parts, serial, fa, true);
@@ -460,16 +481,7 @@ export class Showcase {
        * caption, then the data half — score and maker tables — carrying the
        * star key and the glass keys right under it */
       const cap = this.renderCaption(parts, serial, fa);
-      let mid1: number | null = null;
-      const img = parts.banner || parts.avatar;
-      if (img) {
-        const r: any = await h.tg.sendPhoto(target.send as any, img, cap, { parse_mode: "HTML" } as any).catch(() => null);
-        mid1 = r?.result?.message_id ?? null;
-        if (!mid1 && parts.avatar && parts.avatar !== img) {
-          const r2: any = await h.tg.sendPhoto(target.send as any, parts.avatar, cap, { parse_mode: "HTML" } as any).catch(() => null);
-          mid1 = r2?.result?.message_id ?? null;
-        }
-      }
+      const mid1 = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML" });
       const rich = this.renderTablesDoc(parts, serial, fa, !mid1);
       try {
         const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
