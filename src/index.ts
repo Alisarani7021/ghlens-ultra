@@ -1887,10 +1887,13 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           if (!ref) return h.toast("?");
           const u: any = await h.store.user(h.u.id).catch(() => null);
           if (!u?.github_token_enc) {
-            /* GitHub has no anonymous stars — park the wish, teach the way */
+            /* GitHub has no anonymous stars — park the wish, teach the way.
+             * The ⭐ key lives on a channel post, so h.chatId here IS the
+             * channel — the guide used to land under the post itself, for
+             * every reader to see. It goes to the presser's own chat. */
             await h.session.set("sc:pending", ref).catch(() => null);
             const sent = await h.tg.sendMessage(
-              h.chatId,
+              h.u.id,
               fa
                 ? "⭐ <b>ستارهٔ واقعی یک بار وصل‌کردن می‌خواهد</b>\n\nگیت‌هابت را وصل کن (۲۰ ثانیه) — ستارهٔ همین پست خودکار ثبت می‌شود و از این به بعد هر ستاره فقط یک لمس است.\n\n<i>گیت‌هاب اجازهٔ ستارهٔ ناشناس نمی‌دهد؛ همین یک بار.</i>"
                 : "⭐ A real star needs a one-time GitHub link (20 seconds) — then this star lands by itself, and every star after is a single tap.",
