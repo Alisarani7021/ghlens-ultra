@@ -69,7 +69,9 @@ export class Showcase {
   }
 
   starLabel(count: number, fa: boolean): string {
-    return `⭐ ${fa ? "ستاره بده" : "Star it"}${count > 0 ? ` · ${count}` : ""}`;
+    /* trailing emoji only: a leading one would be lifted into the premium
+     * icon field and the channel star key would render blank */
+    return `${fa ? "ستاره بده" : "Star it"} ⭐${count > 0 ? ` · ${count}` : ""}`;
   }
 
   // ── the flow ────────────────────────────────────────────────────────────
@@ -360,10 +362,13 @@ export class Showcase {
   }
 
   previewKb(fa: boolean, manual: boolean) {
+    /* no leading emoji on these: the premium layer lifts a leading emoji
+     * into icon_custom_emoji_id — a premium permission — and the key ends
+     * up rendered blank under the photo. Trailing emoji are never touched. */
     return kb(
-      [{ text: "✅ " + (fa ? "منتشر کن — همین شکل عالیه" : "Publish — it looks great"), cb: "sc:go" }],
-      [{ text: manual ? "✍️ " + (fa ? "ویرایش متن" : "Rewrite my text") : "🔁 " + (fa ? "از نو بساز" : "Build it again"), cb: "sc:redo" }],
-      [{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }],
+      [{ text: (fa ? "منتشر کن — همین شکل عالیه" : "Publish — it looks great") + " ✅", cb: "sc:go" }],
+      [{ text: (manual ? (fa ? "ویرایش متن" : "Rewrite my text") + " ✍️" : (fa ? "از نو بساز" : "Build it again") + " 🔁"), cb: "sc:redo" }],
+      [{ text: (fa ? "بی‌خیال" : "Never mind") + " ❌", cb: "sc:cancel" }],
     );
   }
 

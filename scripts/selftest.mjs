@@ -1178,7 +1178,7 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("showcase: a repo with underscores survives the round-trip", show.refFromStarCb(show.starCb("a/b__c").split("sc:star:")[1]), "a/b__c");
   eq("showcase: a star key parses back to the ref", show.refFromStarCb("oven-sh_bun"), "oven-sh/bun");
   eq("showcase: garbage is not a star key", show.refFromStarCb("not-a-ref!"), null);
-  ok("showcase: the label carries the live count", show.starLabel(7, true).includes("7") && show.starLabel(0, true).endsWith("ستاره بده"));
+  ok("showcase: the label carries the live count and no leading emoji", show.starLabel(7, true).includes("7") && show.starLabel(0, true).startsWith("ستاره بده") && show.starLabel(0, true).includes("⭐"));
 
   // the preview/publish renderers must agree with the approved shape
   const parts = {
