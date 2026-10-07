@@ -528,17 +528,24 @@ export class Showcase {
     }
     const r = await fetch(`https://api.github.com/user/starred/${ref}`, {
       method: "PUT",
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-length": "0" },
+      /* GitHub answers a star PUT without a User-Agent with a bare 403 —
+       * "Request forbidden by administrative rules" — and every star ever
+       * pressed died there, whatever token it carried. The GETs carried a
+       * UA and lived, which is why the link looked healthy and the star
+       * never worked. */
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-length": "0", "user-agent": "GitHubLensUltra/1.0" },
     }).catch(() => null);
     if (r?.status === 401 || r?.status === 403) {
       /* 401 the link rotted; 403 the token has no starring scope. The old
        * toast said "login again" — but a relink with the same kind of token
        * fails the same way, and the maker was sent around in that circle.
-       * GitHub's own message tells the two apart, so surface it, park the
+       * GitHub's own message tells the cases apart, so surface it, park the
        * star, and hand him the exact token to build (the pending star lands
        * by itself the moment a capable token is linked). */
-      const gh: any = await r!.json().catch(() => null);
-      const ghMsg = String(gh?.message ?? "").slice(0, 160);
+      const raw = await r!.text().catch(() => "");
+      let ghMsg = "";
+      try { ghMsg = String((JSON.parse(raw) as any)?.message ?? ""); } catch { ghMsg = raw; }
+      ghMsg = ghMsg.slice(0, 160).trim();
       const rot = /bad credentials/i.test(ghMsg) || r?.status === 401;
       await h.session.set("sc:pending", ref).catch(() => null);
       await h.tg.sendMessage(
