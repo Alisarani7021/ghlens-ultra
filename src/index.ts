@@ -137,7 +137,9 @@ export default {
       //    captured, so this doubles as an end-to-end assertion harness. ──────
       if (url.pathname === "/selfcheck") {
         const secret = url.searchParams.get("deep");
-        if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        /* the owner holds the ADMIN_KEY anyway — letting it open the same
+           probe keeps the smoke test usable without the webhook secret */
+        if (secret !== env.TELEGRAM_WEBHOOK_SECRET && secret !== env.ADMIN_KEY) return new Response("forbidden", { status: 403 });
         /* Two modes, and the difference matters.
            With `uid` the audit impersonates that account, which is how a screen
            gets inspected exactly as its owner sees it.
