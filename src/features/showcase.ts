@@ -250,7 +250,7 @@ export class Showcase {
         { reply_markup: markup } as any,
       ).catch(() => null);
       mid = (card as any)?.result?.message_id ?? null;
-      const cap = (fa ? `${header} — <b>${tgEscape(String(repo.full_name))}</b>\n\n` : `${header} — <b>${tgEscape(String(repo.full_name))}</b>\n\n`) +
+      const cap = `${header} — <b>${tgEscape(String(repo.full_name))}</b>\n\n` +
         tgEscape(String(userText ?? "")).slice(0, 900) + `\n\n🔗 ${url}`;
       await h.tg.call("sendMediaGroup", {
         chat_id: target.send,
@@ -261,6 +261,22 @@ export class Showcase {
         tgEscape(String(userText ?? "")).slice(0, 900) + `\n\n🔗 ${url}`;
       const r: any = await h.tg.sendPhoto(target.send as any, photos[0], cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
       mid = r?.result?.message_id ?? null;
+    } else if (userText) {
+      /* the maker's own words, nothing else — no tables, no score: the AI
+       * path owns those; this post is his. */
+      const rich =
+        h1(header) +
+        aside(`<b>${tgEscape(String(repo.full_name))}</b>`) +
+        p(tgEscape(userText)) +
+        hr() +
+        footer(`🔗 ${url}`);
+      try {
+        const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
+        mid = r?.result?.message_id ?? null;
+      } catch {
+        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
+        mid = r2?.result?.message_id ?? null;
+      }
     } else {
       const rich =
         h1(header) +
