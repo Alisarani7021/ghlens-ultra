@@ -1202,6 +1202,45 @@ const enc = (s) => new TextEncoder().encode(s);
   const longCap = show.renderCaption({ ...partsManual, userText: "x".repeat(2000) }, 15, true);
   ok("showcase: a very long maker text still fits the caption", longCap.length <= 1024 && longCap.includes("#15"));
 
+  // ── the star press comes FROM a channel post, so h.chatId IS the channel.
+  //    A guide or an error written there lands under the post, in front of
+  //    every reader — the day's bug, twice. Every message must ride to the
+  //    presser's own chat; only edits may touch the channel. ──────────────
+  {
+    const sent = [], called = [];
+    const h = {
+      loc: "fa",
+      u: { id: 4242 },
+      chatId: "@iguts9",
+      msg: { message_id: 77 },
+      session: { set: async () => {}, get: async () => null, clear: async () => {} },
+      env: { DB: { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({}) }) }) } },
+      store: { event: async () => ({}) },
+      toast: async () => {},
+      tg: {
+        sendMessage: async (to, text) => { sent.push({ to, text }); return { ok: true, result: { message_id: 1 } }; },
+        call: async (method, payload) => { called.push({ method, payload }); return { ok: true }; },
+      },
+    };
+    const realFetch = globalThis.fetch;
+    // a fine-grained-shaped refusal, then a clean 204
+    globalThis.fetch = async () => new Response(JSON.stringify({ message: "Resource not accessible by personal access token" }), { status: 403, headers: { "content-type": "application/json" } });
+    const r1 = await show.starPressed(h, "oven-sh/bun", "tok");
+    globalThis.fetch = async () => new Response(null, { status: 204 });
+    const r2 = await show.starPressed(h, "oven-sh/bun", "tok");
+    globalThis.fetch = realFetch;
+
+    ok("showcase: a refused star guides the presser in his own chat",
+       sent.length === 1 && sent[0].to === 4242 && /Fine-grained/.test(sent[0].text));
+    ok("showcase: a landed star tells the presser and edits nobody's channel",
+       r2.ok === true && sent.length === 1 && called.every((c) => c.method === "editMessageReplyMarkup"));
+    // and the tokenless guide in the router obeys the same rule
+    const idxSrc = readFileSync("src/index.ts", "utf8");
+    const blk = idxSrc.slice(idxSrc.indexOf('action === "star"'), idxSrc.indexOf('action === "star"') + 2200);
+    ok("showcase: the tokenless star guide addresses the presser, never the channel",
+       /h\.tg\.sendMessage\(\s*h\.u\.id/.test(blk) && !/h\.tg\.sendMessage\(\s*h\.chatId/.test(blk));
+  }
+
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
   // Bot API 9.4 colours: every key is painted, the scheme is left-accent
   ok("channel: every glass key is coloured",
