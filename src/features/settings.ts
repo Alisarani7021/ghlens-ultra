@@ -448,6 +448,9 @@ function mainMenuKb(loc: Loc, isAdmin: boolean) {
   const fa = loc === "fa";
   return kb(
     [
+      { text: "🚀 " + (fa ? "پروژه‌ات را معرفی کن" : "Feature your project"), cb: "sc:home" },
+    ],
+    [
       { text: "🤝 " + (fa ? "اهدای کلید هوش مصنوعی" : "Donate an AI key"), cb: "keys:home" },
       { text: "🐙 " + (fa ? "حساب گیت‌هاب" : "GitHub account"), cb: "gh:home" },
     ],

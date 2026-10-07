@@ -406,7 +406,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"], ["tg_api", "src/tg/api.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"], ["tg_api", "src/tg/api.ts"], ["feat_showcase", "src/features/showcase.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1158,6 +1158,27 @@ const enc = (s) => new TextEncoder().encode(s);
   ok("channel: analysis opens the dossier", urls.some((u) => u.endsWith("c_oven-sh_bun")));
   ok("channel: translation opens the README", urls.some((u) => u.endsWith("t_oven-sh_bun")));
   ok("channel: the card deep link is the repo one", urls.some((u) => u.endsWith("repo_oven-sh_bun")));
+
+  // ── the showcase: score, badge, and the star key round-trip ──────────────
+  const SC = await import(join(scratch, "feat_showcase.mjs"));
+  const show = new SC.Showcase();
+  const NOW = Date.parse("2026-10-07T00:00:00Z");
+  const hot = show.repoScore({ stars: 42000, forks: 2100, pushedAt: NOW - 2 * 86400000, createdAt: NOW - 3 * 365 * 86400000, license: "MIT", now: NOW });
+  ok("showcase: a hot grown repo grades A", hot.grade.startsWith("🥇") && hot.total >= 85);
+  const fresh = show.repoScore({ stars: 3, forks: 1, pushedAt: NOW - 86400000, createdAt: NOW - 30 * 86400000, license: null, now: NOW });
+  ok("showcase: a week-old toy repo scores low", fresh.total <= 45 && fresh.total < hot.total - 40);
+  const stale = show.repoScore({ stars: 200, forks: 20, pushedAt: NOW - 3 * 365 * 86400000, createdAt: NOW - 6 * 365 * 86400000, license: null, archived: true, now: NOW });
+  ok("showcase: an abandoned repo is punished on activity", stale.parts.activity <= 2 && stale.total < hot.total - 20);
+  ok("showcase: the score never leaves 0..100",
+     [hot, fresh, stale].every((x) => x.total >= 0 && x.total <= 100 && x.parts.activity <= 30 && x.parts.popularity <= 30 && x.parts.community <= 20 && x.parts.maturity <= 20));
+  ok("showcase: 10k stars max out popularity",
+     show.repoScore({ stars: 50000, forks: 1, pushedAt: NOW, createdAt: NOW, license: null, now: NOW }).parts.popularity === 30);
+
+  eq("showcase: the star key is owner_repo", show.starCb("oven-sh/bun"), "sc:star:oven-sh_bun");
+  eq("showcase: a repo with underscores survives the round-trip", show.refFromStarCb(show.starCb("a/b__c").split("sc:star:")[1]), "a/b__c");
+  eq("showcase: a star key parses back to the ref", show.refFromStarCb("oven-sh_bun"), "oven-sh/bun");
+  eq("showcase: garbage is not a star key", show.refFromStarCb("not-a-ref!"), null);
+  ok("showcase: the label carries the live count", show.starLabel(7, true).includes("7") && show.starLabel(0, true).endsWith("ستاره بده"));
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
   // Bot API 9.4 colours: every key is painted, the scheme is left-accent
   ok("channel: every glass key is coloured",

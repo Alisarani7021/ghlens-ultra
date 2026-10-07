@@ -64,6 +64,8 @@ export function modeKeeps(kind: string, cb: string): boolean {
   const ns = cb.split(":")[0];
   if (kind.startsWith("dvu:")) return ns === "dvu";
   if (kind === "u:ip" || kind === "u:asn") return ns === "u";
+  // the showcase wizard keeps its mode while its own buttons are pressed
+  if (kind.startsWith("sc_")) return cb.startsWith("sc:");
   // repo chat, PR review, code explainer, security: any button is a new journey
   return false;
 }
@@ -88,4 +90,8 @@ export const MODE_LABELS: Record<string, string> = {
   "hos:file": "کالبدشکافی فایل",
   "hos:edit": "ویرایش متن پیش‌نویس",
   "hos:deploy": "ساخت نمونهٔ شخصی",
+  sc_repo: "معرفی پروژه — لینک",
+  sc_choose: "معرفی پروژه — سبک",
+  sc_text: "معرفی پروژه — متن",
+  sc_photo: "معرفی پروژه — عکس",
 };

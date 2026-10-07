@@ -10,6 +10,8 @@ export interface Env {
   /** Bearer key for the /admin routes (profile and other owner operations). */
   ADMIN_KEY?: string;
   GITHUB_TOKEN: string;
+  /** Where the project showcases are published ("@channel" or chat id). */
+  SHOWCASE_CHANNEL?: string;
   GITHUB_WEBHOOK_SECRET: string;
   CF_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string;

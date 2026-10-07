@@ -33,6 +33,7 @@ import { Assistant } from "./features/assistant";
 import { Discover } from "./features/discover";
 import { Contribute } from "./features/contribute";
 import { Settings, githubSetupCard, githubSetupKb, aiEngineState } from "./features/settings";
+import { Showcase } from "./features/showcase";
 import { Admin } from "./features/admin";
 import { handleWebhook } from "./core/webhook";
 import { runCron } from "./core/cron";
@@ -55,6 +56,7 @@ export { UserSession } from "./core/session";
 const search = new SearchFeature();
 const browse = new BrowseFeature();
 const scout = new DeepScout();
+const showcase = new Showcase();
 const tools = new ToolsFeature();
 const devutils = new DevUtils();
 const profile = new ProfileFeature();
@@ -863,7 +865,16 @@ async function routeMessage(msg: Message, env: Env, ctx: Ctx, tg: Telegram, stor
     return tools.pkg(hDoc);
   }
 
-  if (!text) return;
+  if (!text) {
+    /* a bare photo (no caption) is still an answer when a mode collects
+       photos — the showcase step would otherwise swallow it silently */
+    if (msg.photo?.length) {
+      const hp = await buildH(msg, env, ctx, tg, store, ai, card, opts({ text: "" }));
+      const mp = await readMode(hp.session);
+      if (mp?.kind === "sc_photo") return showcase.receiveMedia(hp, "");
+    }
+    return;
+  }
 
   // slash commands
   if (text.startsWith("/")) {
@@ -1181,6 +1192,10 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
         return (t) => assistant.repoChat(h, full, t);
       }
       case "ask": return (t) => assistant.ask(h, t);
+      /* the showcase wizard: link → style → (words → photos) → publish */
+      case "sc_repo": return (t) => showcase.receiveRepo(h, t);
+      case "sc_text": return (t) => showcase.receiveText(h, t);
+      case "sc_photo": return (t) => showcase.receiveMedia(h, t);
       case "tr": return (t) => assistant.translateReadme(h, t.trim());
       case "wf": return async (t: string) => {
         if (await deferFeature(h, "workflow", t, "🧩 ورک‌فلو در صف ساخته می‌شود…")) return;
@@ -1288,6 +1303,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       }
       if (arg === "k_keys") return keysFeature.home(h);
       if (arg === "hub" || arg === "cloud") return hubOS.home(h);
+      if (arg === "project") return showcase.intro(h);
       // referral?
       if (arg.startsWith("ref_")) {
         await h.env.DB.prepare(`UPDATE users SET referral_by=(SELECT id FROM users WHERE referral_code=?) WHERE id=? AND referral_by IS NULL`)
@@ -1325,6 +1341,7 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
     case "/trending": case "/t": return trendingMenuOrBoard(h, arg);
     case "/browse": case "/b": return arg ? browse.list(h, enc(arg)) : browse.menu(h);
     case "/gems": return discover.gems(h);
+    case "/project": case "/showcase": return showcase.intro(h);
     case "/random": return discover.random(h);
     case "/map": return discover.map(h);
     case "/feed": return profile.feed(h);
@@ -1807,6 +1824,64 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
 
       // ── profile / gamification ──
       // ── the yes/no gate in front of every channel deep link ──
+      // ── the showcase: publish a project, star it for real ──
+      case "sc": {
+        if (action === "home" || action === "next") return showcase.intro(h);
+        if (action === "self") {
+          const mode = await readMode(h.session);
+          const ref = String((mode as any)?.data?.ref ?? "");
+          if (!ref) return showcase.intro(h);
+          await setMode(h.session, "sc_text", { ref });
+          return h.reply(
+            fa ? "✍️ عالیه — متن معرفی‌ات را بنویس؛ همان‌طور که می‌خواهی خواننده‌های چنل ببینند. (بعدش می‌توانی عکس هم بفرستی.)" : "✍️ Write your pitch — exactly what the channel should read. Photos can follow.",
+            kb([{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }]),
+            !!h.cbId,
+          );
+        }
+        if (action === "auto") {
+          const mode = await readMode(h.session);
+          const ref = String((mode as any)?.data?.ref ?? "");
+          if (!ref) return showcase.intro(h);
+          return showcase.buildAndPublish(h, ref);
+        }
+        if (action === "done") {
+          const mode = await readMode(h.session);
+          const ref = String((mode as any)?.data?.ref ?? "");
+          const text = String((mode as any)?.data?.text ?? "");
+          const photos: string[] = Array.isArray((mode as any)?.data?.photos) ? (mode as any).data.photos : [];
+          return showcase.buildAndPublish(h, ref, text, photos);
+        }
+        if (action === "cancel") {
+          await clearMode(h.session);
+          return h.reply(
+            fa ? "🧹 باشه، جایی منتشر نشد." : "🧹 Dropped — nothing was published.",
+            kb([{ text: "🏠 " + (fa ? "منوی اصلی" : "Menu"), cb: "m:home" }]),
+            !!h.cbId,
+          );
+        }
+        if (action === "star") {
+          const ref = showcase.refFromStarCb(rest);
+          if (!ref) return h.toast("?");
+          const u: any = await h.store.user(h.u.id).catch(() => null);
+          if (!u?.github_token_enc) {
+            /* GitHub has no anonymous stars — park the wish, teach the way */
+            await h.session.set("sc:pending", ref).catch(() => null);
+            const sent = await h.tg.sendMessage(
+              h.chatId,
+              fa
+                ? "⭐ <b>ستارهٔ واقعی یک بار وصل‌کردن می‌خواهد</b>\n\nگیت‌هابت را وصل کن (۲۰ ثانیه) — ستارهٔ همین پست خودکار ثبت می‌شود و از این به بعد هر ستاره فقط یک لمس است.\n\n<i>گیت‌هاب اجازهٔ ستارهٔ ناشناس نمی‌دهد؛ همین یک بار.</i>"
+                : "⭐ A real star needs a one-time GitHub link (20 seconds) — then this star lands by itself, and every star after is a single tap.",
+              { parse_mode: "HTML", reply_markup: kb([{ text: "🐙 " + (fa ? "وصل کردن گیت‌هاب" : "Connect GitHub"), cb: "gh:home" }]) as any },
+            ).catch(() => null);
+            return h.toast(fa ? (sent ? "⭐ راهنما در پیوی فرستاده شد" : "⭐ اول ربات را /start کن، بعد ستاره بده") : "⭐ one-time GitHub link needed — guide sent");
+          }
+          const token = await decryptToken(h.env, u.github_token_enc);
+          if (!token) return h.toast(fa ? "اتصال گیت‌هابت مشکل دارد — /login" : "GitHub link broken — /login");
+          return showcase.starPressed(h, ref, token);
+        }
+        return h.toast("");
+      }
+
       case "dl": {
         const mode = await readMode(h.session);
         if (action === "yes" && mode?.kind === "dl:go") {
@@ -2743,6 +2818,14 @@ export async function completeLink(h: H, token: string): Promise<void> {
   const strip = await h.tg.sendMessage(h.chatId, "🧹", { reply_markup: { remove_keyboard: true } as any }).catch(() => null);
   const stripId = (strip as any)?.result?.message_id ?? (strip as any)?.message_id;
   if (stripId) await h.tg.deleteMessage(h.chatId, stripId).catch(() => null);
+  /* a channel star that was waiting for this very link lands by itself */
+  try {
+    const pend = await h.session.get("sc:pending").catch(() => null);
+    if (pend) {
+      const tok = await decryptToken(h.env, enc);
+      if (tok) await showcase.tryPendingStar(h, tok);
+    }
+  } catch { /* lens-swallowed */ }
 }
 
 /** Kept as named aliases so existing call sites keep working. */
