@@ -6,7 +6,7 @@ import { parseRepoRef } from "../core/repo-ref";
 import { setMode, clearMode, readMode, touchMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
 import { channelRepoKb } from "./channelarm";
-import { botUsername } from "../env";
+import { botUsername, isAdmin } from "../env";
 
 /**
  * PROJECT SHOWCASE — «پروژه‌ات را معرفی کن»
@@ -652,6 +652,10 @@ export class Showcase {
 
   /** One project per user per 12 hours — the channel must not drown. */
   async rateLimitLeftMs(h: H): Promise<number> {
+    /* The boss does not queue behind his own door. The owner publishes
+     * twice in a minute, tests what he just shipped, breaks things on
+     * purpose — that is the job; the 12-hour gate is for everyone else. */
+    if (isAdmin(h.env, h.u.id)) return 0;
     const r = await h.env.DB.prepare(
       `SELECT MAX(ts) AS last FROM events WHERE kind='showcase' AND user_id=? AND ts>?`,
     ).bind(h.u.id, Date.now() - 12 * 3_600_000).first().catch(() => null);
