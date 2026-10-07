@@ -200,7 +200,8 @@ export class Showcase {
       archived: !!repo.archived,
     });
 
-    /* the AI writes only the words: a few lines and one hook */
+    /* the AI writes only the words: a few lines and one hook. JSON mode keeps
+     * the shape stable no matter how the model feels about headings. */
     let summary = "", hook = "";
     if (!userText) {
       const daysIdle = Math.max(0, Math.round((Date.now() - Date.parse(String(repo.pushed_at ?? ""))) / 86_400_000));
@@ -214,14 +215,18 @@ export class Showcase {
         `- موضوعات: ${Array.isArray(repo.topics) && repo.topics.length ? repo.topics.join("، ") : "—"}`;
       const out = await h.ai.chat(
         `تو سردبیر یک کانال تکنولوژی فارسی هستی. دربارهٔ این ریپوی گیت‌هاب، فقط بر اساس مشخصات واقعی زیر، بنویس:\n\n${facts}\n\n` +
-        `دقیقاً این قالب را برگردان، هیچ چیز دیگری ننویس، از markdown استفاده نکن جز **بولد**:\n` +
-        `SUMMARY:\n(حداکثر ۵ خط فارسی روان: این پروژه چیست، چه مشکلی را حل می‌کند، برای چه کسی)\n` +
-        `HOOK:\n(یک جملهٔ کوتاه کوبنده با قیاس، مثل: «مثل Hugging Face — ولی ده برابر سبک‌تر»)\n`,
-        { deadlineMs: h.budget(), tier: "smart", max_tokens: 700, temperature: 0.3, feature: "showcase" },
+        `جواب را فقط به صورت یک JSON معتبر و minified بده، بدون هیچ متن یا markdown اضافه‌ای، با دقیقاً این دو کلید:\n` +
+        `{"summary":"حداکثر ۵ خط فارسی روان: این پروژه چیست، چه مشکلی را حل می‌کند، برای چه کسی است","hook":"یک جملهٔ کوتاه کوبندهٔ فارسی با قیاس، مثل: مثل Hugging Face — ولی ده برابر سبک‌تر"}`,
+        { deadlineMs: h.budget(), tier: "smart", json: true, max_tokens: 700, temperature: 0.3, feature: "showcase" },
       ).catch(() => "");
-      const m = /SUMMARY:\s*([\s\S]*?)\nHOOK:\s*([\s\S]*)/.exec(String(out ?? ""));
+      try {
+        const m = /\{[\s\S]*\}/.exec(String(out ?? ""));
+        const j: any = m ? JSON.parse(m[0]) : null;
+        if (j) { summary = String(j.summary ?? "").trim(); hook = String(j.hook ?? "").trim(); }
+      } catch { /* the fallback below is already a decent post */ }
       const clean = (x: string) => tgEscape(x.trim().replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")).replace(/&lt;(\/?b)&gt;/g, "<$1>");
-      if (m) { summary = clean(m[1]); hook = clean(m[2]); }
+      if (summary) summary = clean(summary);
+      if (hook) hook = clean(hook);
       if (!summary) summary = tgEscape(String(repo.description ?? repo.full_name));
       if (!hook) hook = tgEscape(String(repo.full_name));
     }
@@ -277,7 +282,7 @@ export class Showcase {
           [fa ? "کل" : "Total", `<b>${score.total}/100 — ${score.grade}</b>`],
         ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
         (owner ? table([
-          [fa ? "سازنده" : "Maker", ""],
+          [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
           ["👤", `<a href="https://github.com/${tgEscape(String(owner.login))}">${tgEscape(String(owner.login))}</a>`],
           [fa ? "فالوورها" : "Followers", `${Number(owner.followers ?? 0).toLocaleString("fa-IR")}`],
           [fa ? "ریپوهای عمومی" : "Public repos", `${Number(owner.public_repos ?? 0)}`],
