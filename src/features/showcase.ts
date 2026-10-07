@@ -574,6 +574,8 @@ export class Showcase {
       return { ok: false, err: String(r?.status ?? "network") };
     }
     await h.store.event(h.u.id, "showcase_star", ref, { via: "channel" }).catch(() => null);
+    /* the star landed by hand — a parked one (if any) is spent news */
+    await h.session.clear(["sc:pending"]).catch(() => null);
     const count = await this.starCount(h, ref);
 
     /* the counter on the button ticks up, reaction-style */
