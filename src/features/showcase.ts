@@ -313,12 +313,21 @@ export class Showcase {
   }
 
   /** GitHub's image bytes, fetched by us — an upload never depends on
-   *  Telegram's downloader, which refused the card URL. */
+   *  Telegram's downloader, which refused the card URL. The CDN throttles
+   *  this endpoint now and then (429), so a throttled try gets a short
+   *  backoff and another go before giving up. */
   async photoBytes(url: string): Promise<Uint8Array | null> {
-    const r = await fetch(url, { headers: { accept: "image/png,image/*", "user-agent": "GitHubLensUltra/1.0" } }).catch(() => null);
-    if (!r || !r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer().catch(() => new ArrayBuffer(0)));
-    return buf.length > 1000 ? buf : null;   // a real image, not an error page
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((ok) => setTimeout(ok, 400 * attempt));
+      const r = await fetch(url, { headers: { accept: "image/png,image/*", "user-agent": "GitHubLensUltra/1.0" } }).catch(() => null);
+      if (r && r.ok) {
+        const buf = new Uint8Array(await r.arrayBuffer().catch(() => new ArrayBuffer(0)));
+        if (buf.length > 1000) return buf;   // a real image, not an error page
+      }
+      /* only a throttle or a server hiccup is worth another try */
+      if (!r || (r.status !== 429 && r.status !== 403 && r.status < 500)) return null;
+    }
+    return null;
   }
 
   /** Send the post photo the sure way: our own upload first, the URL form
