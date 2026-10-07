@@ -1,7 +1,7 @@
 import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
-import { h1, aside, p, table, footer, hr, sendRich, richToLegacy } from "../tg/rich";
+import { h1, aside, p, footer, sendRich, richToLegacy } from "../tg/rich";
 import { parseRepoRef } from "../core/repo-ref";
 import { setMode, clearMode, readMode, touchMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
@@ -24,7 +24,7 @@ import { botUsername } from "../env";
  *  verbatim at publish so the channel copy is the one the maker approved. */
 export interface PostParts {
   ref: string; url: string; full: string;
-  userText?: string; photos: string[];
+  userText?: string; photos: string[]; avatar: string;
   summary: string; hook: string;
   stack: string; stars: string; forks: string; license: string;
   score: { total: number; grade: string; parts: { activity: number; popularity: number; community: number; maturity: number } };
@@ -229,7 +229,7 @@ export class Showcase {
       const out = await h.ai.chat(
         `تو سردبیر یک کانال تکنولوژی فارسی هستی. دربارهٔ این ریپوی گیت‌هاب، فقط بر اساس مشخصات واقعی زیر، بنویس:\n\n${facts}\n\n` +
         `جواب را فقط به صورت یک JSON معتبر و minified بده، بدون هیچ متن یا markdown اضافه‌ای، با دقیقاً این دو کلید:\n` +
-        `{"summary":"حداکثر ۵ خط فارسی روان: این پروژه چیست، چه مشکلی را حل می‌کند، برای چه کسی است","hook":"یک جملهٔ کوتاه کوبندهٔ فارسی با قیاس، مثل: مثل Hugging Face — ولی ده برابر سبک‌تر"}`,
+        `{"summary":"حداکثر ۳ خط فارسی روان و مفهومی: این پروژه چیست و به چه دردی می‌خورد"},"hook":"یک جملهٔ کوتاه کوبندهٔ فارسی با قیاس، مثل: مثل Hugging Face — ولی ده برابر سبک‌تر"}`,
         { deadlineMs: h.budget(), tier: "smart", json: true, max_tokens: 700, temperature: 0.3, feature: "showcase" },
       ).catch(() => "");
       try {
@@ -244,12 +244,21 @@ export class Showcase {
       if (!hook) hook = tgEscape(String(repo.full_name));
     }
 
+    /* the post image: the maker's own photos when he has them, otherwise
+     * his GitHub avatar — the one image that is always his. A rich message
+     * renders no link preview, so the avatar travels as the photo itself. */
+    const avatarRaw = String(repo.owner?.avatar_url ?? owner?.avatar_url ?? "");
+    const avatar = avatarRaw ? (avatarRaw.includes("?") ? `${avatarRaw}&s=512` : `${avatarRaw}?s=512`) : "";
+    let postPhotos = photos;
+    if (!postPhotos.length && avatar && (!userText || userText.length <= 900)) postPhotos = [avatar];
+
     return {
       ref,
       url: `https://github.com/${ref}`,
       full: tgEscape(String(repo.full_name)),
       userText: userText || undefined,
-      photos,
+      photos: postPhotos,
+      avatar,
       summary, hook,
       stack: tgEscape(String(repo.language ?? "—")),
       stars: Number(repo.stargazers_count ?? 0).toLocaleString("fa-IR"),
@@ -265,46 +274,28 @@ export class Showcase {
     };
   }
 
-  /** Pure: the words-and-tables post, exactly as the channel will see it. */
+  /** Pure: the words post — a few lines, one score line, the link. The
+   *  tables are gone on purpose: the owner wants a channel that breathes.
+   *  Only reached as a fallback (avatar missing, or a very long own text). */
   renderRichPost(parts: PostParts, serial: number, fa: boolean): string {
     const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
-    if (parts.userText) {
-      /* the maker's own words, nothing else — no tables, no score: the AI
-       * path owns those; this post is his. */
-      return h1(header) + aside(`<b>${parts.full}</b>`) + p(tgEscape(parts.userText)) + hr() + footer(`🔗 ${parts.url}`);
-    }
+    const hook = parts.hook && !parts.userText ? ` — ${parts.hook}` : "";
+    const score = parts.userText ? "" : p(`🏅 ${parts.score.total}/100 ${parts.score.grade}`);
     return h1(header) +
-      aside(`<b>${parts.full}</b>${parts.hook ? ` — ${parts.hook}` : ""}`) +
-      p(parts.summary) +
-      table([
-        [fa ? "ویژگی" : "Field", fa ? "مقدار" : "Value"],
-        [fa ? "زبان / استک" : "Stack", parts.stack],
-        [fa ? "ستاره‌های گیت‌هاب" : "GitHub stars", parts.stars],
-        [fa ? "فورک" : "Forks", parts.forks],
-        [fa ? "مجوز" : "License", parts.license],
-      ], { caption: fa ? "🧪 کارت پروژه" : "🧪 Project card" }) +
-      table([
-        [fa ? "بخش" : "Part", fa ? "امتیاز" : "Score"],
-        [fa ? "فعالیت" : "Activity", `${parts.score.parts.activity}/30`],
-        [fa ? "محبوبیت" : "Popularity", `${parts.score.parts.popularity}/30`],
-        [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
-        [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
-        [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
-      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
-      (parts.owner ? table([
-        [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
-        ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
-        [fa ? "فالوورها" : "Followers", parts.owner.followers],
-        [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
-      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker" }) : "") +
-      hr() +
+      aside(`<b>${parts.full}</b>${hook}`) +
+      p(parts.userText ? tgEscape(parts.userText) : parts.summary) +
+      score +
       footer(`🔗 ${parts.url}`);
   }
 
-  /** Pure: the caption a photo post carries. */
+  /** Pure: the caption every photo post carries — header, hook, a few
+   *  lines, one score line, the link. Nothing else. */
   renderCaption(parts: PostParts, serial: number, fa: boolean): string {
-    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
-    return `${header} — <b>${parts.full}</b>\n\n` + tgEscape(String(parts.userText ?? "")).slice(0, 900) + `\n\n🔗 ${parts.url}`;
+    const head = fa ? `🚀 معرفی پروژهٔ #${serial} — <b>${parts.full}</b>` : `🚀 Showcase #${serial} — <b>${parts.full}</b>`;
+    const hook = parts.hook && !parts.userText ? `\n<i>${parts.hook}</i>` : "";
+    const body = parts.userText ? tgEscape(parts.userText).slice(0, 900) : parts.summary;
+    const score = parts.userText ? "" : `\n\n🏅 ${parts.score.total}/100 ${parts.score.grade}`;
+    return `${head}${hook}\n\n${body}${score}\n\n🔗 ${parts.url}`;
   }
 
   previewKb(fa: boolean, manual: boolean) {

@@ -1183,20 +1183,25 @@ const enc = (s) => new TextEncoder().encode(s);
   // the preview/publish renderers must agree with the approved shape
   const parts = {
     ref: "oven-sh/bun", url: "https://github.com/oven-sh/bun", full: "oven-sh/bun",
-    userText: undefined, photos: [],
+    userText: undefined, photos: [], avatar: "https://avatars.githubusercontent.com/u/24765872?v=4&s=512",
     summary: "runtime فوق سریع", hook: "مثل Node.js — ولی سریع‌تر",
     stack: "Zig", stars: "۹۶٬۱۴۱", forks: "۵٬۰۹۵", license: "MIT",
     score: hot, owner: { login: "oven-sh", url: "https://github.com/oven-sh", followers: "۳٬۸۱۸", repos: "36" },
   };
   const richAi = show.renderRichPost(parts, 12, true);
   ok("showcase: the AI post shows its serial", richAi.includes("#12"));
-  ok("showcase: the AI post carries the three tables", richAi.includes("کارت پروژه") && richAi.includes("نمرهٔ پروژه") && richAi.includes("سازندهٔ پروژه"));
+  ok("showcase: the AI post is compact — no tables, score in one line",
+     !richAi.includes("<table") && richAi.includes("🏅") && richAi.includes("/100"));
   ok("showcase: the AI post carries the hook and the link", richAi.includes("سریع‌تر") && richAi.includes("https://github.com/oven-sh/bun"));
   const partsManual = { ...parts, userText: "این متن خود <من> است" };
   const richManual = show.renderRichPost(partsManual, 13, true);
   ok("showcase: the maker's post is his words only — no tables", richManual.includes("#13") && richManual.includes("این متن خود &lt;من&gt; است") && !richManual.includes("کارت پروژه"));
   const cap = show.renderCaption({ ...partsManual, photos: ["f1"] }, 14, true);
   ok("showcase: a photo caption holds serial, maker's text and link", cap.includes("#14") && cap.includes("این متن خود") && cap.endsWith("https://github.com/oven-sh/bun"));
+  ok("showcase: the maker's caption carries no score — his words are the post", !cap.includes("🏅"));
+  const capAi = show.renderCaption(parts, 16, true);
+  ok("showcase: the AI caption packs hook, lines, score and link",
+     capAi.includes("سریع‌تر") && capAi.includes("🏅") && capAi.includes("#16") && capAi.endsWith("https://github.com/oven-sh/bun") && capAi.length < 900);
   const longCap = show.renderCaption({ ...partsManual, userText: "x".repeat(2000) }, 15, true);
   ok("showcase: a long caption is cut well under Telegram's 1024", longCap.length < 1024 && longCap.includes("#15"));
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
