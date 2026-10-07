@@ -293,12 +293,12 @@ export class Showcase {
         [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
         [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
         [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
-      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score", compact: true, header: false }) +
+      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score", header: false }) +
       (parts.owner ? table([
         ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
         [fa ? "فالوورها" : "Followers", parts.owner.followers],
         [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
-      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker", compact: true, header: false }) : "") +
+      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker", header: false }) : "") +
       hr() +
       footer(`🔗 ${parts.url}`);
   }
@@ -375,12 +375,14 @@ export class Showcase {
       if (mid) {
         return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
       }
-      return h.reply(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
+      /* tables ride through replyRich: reply() runs the plaintext converter,
+       * which wraps a table in <p> — Telegram rejects that document */
+      return h.replyRich(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
     }
     /* the AI post: the white GitHub banner with the pitch on it, the tables
      * right under it carrying the keys */
     const mid1 = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML" });
-    return h.reply(this.renderTablesDoc(parts, serial, fa, !mid1), rows, !!h.cbId);
+    return h.replyRich(this.renderTablesDoc(parts, serial, fa, !mid1), rows, !!h.cbId);
   }
 
   async previewAuto(h: H, ref: string) {

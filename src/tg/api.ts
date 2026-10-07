@@ -193,10 +193,9 @@ export class Telegram {
   }
 
   async sendDocument(chat_id: number, filename: string, data: Blob | ArrayBuffer | Uint8Array | ReadableStream, caption?: string, opts: SendMessageOpts = {}) {
-    if (caption && opts.parse_mode === "HTML") {
-      const m = await getPremiumMap(this.env).catch(() => null);
-      if (m) caption = premiumizeHtml(caption, m);
-    }
+    /* no premium coat here: tg-emoji is rich-message HTML, and a formData
+       call cannot fall back to the plain text the way call() does — a
+       premiumized caption would kill the whole upload */
     const fd = new FormData();
     fd.append("chat_id", String(chat_id));
     if (caption) fd.append("caption", caption.slice(0, 1024));
