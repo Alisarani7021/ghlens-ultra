@@ -388,10 +388,11 @@ export class Showcase {
        * which wraps a table in <p> — Telegram rejects that document */
       return h.replyRich(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
     }
-    /* the AI post: the white GitHub banner with the pitch on it, the tables
-     * right under it carrying the keys */
-    const mid1 = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML" });
-    return h.replyRich(this.renderTablesDoc(parts, serial, fa, !mid1), rows, !!h.cbId);
+    /* the AI post: the white GitHub banner with the pitch and the decision
+     * keys on it, the tables right under it — the keys ride on the photo,
+     * the one path that has never lost them */
+    const mid1 = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: rows });
+    return h.replyRich(this.renderTablesDoc(parts, serial, fa, !mid1), mid1 ? undefined : rows, !!h.cbId);
   }
 
   async previewAuto(h: H, ref: string) {
@@ -492,13 +493,16 @@ export class Showcase {
        * caption, then the data half — score and maker tables — carrying the
        * star key and the glass keys right under it */
       const cap = this.renderCaption(parts, serial, fa);
-      const mid1 = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML" });
+      /* the ⭐ key and the glass keys ride under the banner photo itself —
+       * a photo message has never lost its keyboard; the tables doc stays
+       * clean and only inherits the keys when no photo could be sent */
+      const mid1 = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: markup });
       const rich = this.renderTablesDoc(parts, serial, fa, !mid1);
       try {
-        const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
+        const r: any = await h.tg.sendRichMessage(target.send, rich, (mid1 ? {} : { reply_markup: markup }) as any);
         mid = (mid1 ?? r?.result?.message_id) ?? null;
       } catch {
-        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
+        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", ...(mid1 ? {} : { reply_markup: markup }) } as any).catch(() => null);
         mid = (mid1 ?? r2?.result?.message_id) ?? null;
       }
     }
