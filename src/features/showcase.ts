@@ -96,10 +96,9 @@ export class Showcase {
         ? `🚀 <b>پروژه‌ات را معرفی کن!</b>\n\n` +
           `لینک گیت‌هاب پروژه را بفرست (مثل <code>owner/repo</code>) تا با استایل کامل در چنل منتشرش کنم:\n` +
           `• تحلیل کوتاه یا متن و عکس خودت\n` +
-          `• جدول مشخصات + نمرهٔ پروژه + کارت سازنده\n` +
-          `• آواتار گیت‌هابت بالای پست\n` +
+          `• بنر سفید گیت‌هاب + نمرهٔ ۰ تا ۱۰۰ + کارت سازنده\n` +
           `• و دکمهٔ <b>⭐ ستارهٔ واقعی</b> — خواننده‌ها از همان چنل به پروژه‌ات ستاره می‌دهند!`
-        : `🚀 <b>Feature your project!</b>\n\nSend its GitHub link (e.g. <code>owner/repo</code>) — I'll publish it in the channel with tables, a score and a ⭐ real-star button.`,
+        : `🚀 <b>Feature your project!</b>\n\nSend its GitHub link (e.g. <code>owner/repo</code>) — I'll publish it in the channel with a banner card, a score and a ⭐ real-star button.`,
       kb([[{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }]]),
       !!h.cbId,
     );
@@ -113,7 +112,7 @@ export class Showcase {
       fa
         ? `✅ <b>${tgEscape(ref)}</b> ثبت شد.\n\nچطور معرفی شود؟\n\n` +
           `✍️ <b>خودم توضیح می‌دهم</b> — متن و عکس‌های خودت، دست‌نخورده\n` +
-          `🤖 <b>خودت بساز</b> — تحلیل کوتاهٔ هوشمند + جدول‌ها + نمرهٔ ۰ تا ۱۰۰\n\n` +
+          `🤖 <b>خودت بساز</b> — تحلیل کوتاهٔ هوشمند + نمرهٔ ۰ تا ۱۰۰\n\n` +
           `<i>در هر دو حالت بلافاصله در چنل منتشر می‌شود.</i>`
         : `✅ <b>${tgEscape(ref)}</b> noted. Your words, or mine?`,
       kb(
