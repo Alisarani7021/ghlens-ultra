@@ -106,6 +106,24 @@ export default {
         return new Response("ok");
       }
 
+      // ── admin: drive ONE real update through the live pipeline — the
+      //    owner's own audit, same power as the webhook but no secret
+      //    juggling. Returns after the update settles, so a live test sees
+      //    errors the fire-and-forget webhook never shows. ────────────────
+      if (url.pathname === "/admin/live" && request.method === "POST") {
+        if (!env.ADMIN_KEY || request.headers.get("authorization") !== `Bearer ${env.ADMIN_KEY}`) {
+          return new Response("forbidden", { status: 403 });
+        }
+        const update = (await request.json().catch(() => null)) as Update | null;
+        if (!update || typeof update !== "object") return Response.json({ ok: false, error: "bad update" }, { status: 400 });
+        try {
+          await handleUpdate(update, env, ctx);
+          return Response.json({ ok: true });
+        } catch (e: any) {
+          return Response.json({ ok: false, error: String(e?.stack ?? e) }, { status: 200 });
+        }
+      }
+
       // ── admin: the bot's own bio, released to its owner ──────────────────
       // The profile script once wrote a bio per locale, and a BotFather edit
       // only replaces the default copy — so for every fa/en/… client the
