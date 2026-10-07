@@ -333,7 +333,9 @@ export class Showcase {
       headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-length": "0" },
     }).catch(() => null);
     if (r?.status === 401 || r?.status === 403) {
-      if (!quiet) await h.toast(fa ? "اتصال گیت‌هابت منقضی شده — با /login تازه کن" : "GitHub link expired — /login");
+      /* 401 the link rotted; 403 the token has no starring scope — the OAuth
+       * flow asks for public_repo, so relinking fixes both the same way. */
+      if (!quiet) await h.toast(fa ? "توکن گیت‌هابت ستاره‌دادن را باز نمی‌کند — یک بار دیگر /login بزن" : "Your GitHub token cannot star — /login once more");
       return { ok: false, err: "token" };
     }
     if (!r || r.status >= 400) {
