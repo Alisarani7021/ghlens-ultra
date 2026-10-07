@@ -383,7 +383,7 @@ export default {
       // ── health & metrics ───────────────────────────────────────────────
       if (url.pathname === "/health" && url.searchParams.get("ai") === "reset") {
         const secret = url.searchParams.get("deep");
-        if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        if (secret !== env.TELEGRAM_WEBHOOK_SECRET && secret !== env.ADMIN_KEY) return new Response("forbidden", { status: 403 });
         await env.CACHE.delete("ai:halt").catch(() => null);
         await env.CACHE.delete("ai:last-failure").catch(() => null);
         return Response.json({ ok: true, cleared: ["ai:halt", "ai:last-failure"] }, { headers: { "cache-control": "no-store" } });
@@ -437,7 +437,7 @@ export default {
         const deep = url.searchParams.get("deep");
         if (deep) {
           // deep probes cost AI neurons, so they require the operator secret
-          if (deep !== env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "forbidden" }, 403);
+          if (deep !== env.TELEGRAM_WEBHOOK_SECRET && deep !== env.ADMIN_KEY) return json({ error: "forbidden" }, 403);
           return json(await deepHealth(env));
         }
         return json({ ok: true, ms: Date.now() - started, version: "1.0.0", bindings: bindingsReport(env) });
