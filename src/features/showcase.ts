@@ -330,18 +330,31 @@ export class Showcase {
     return null;
   }
 
-  /** Send the post photo the sure way: our own upload first, the URL form
-   *  second, the avatar as the next candidate. Returns the message id. */
+  /** Send the post photo the sure way. The upload carries nothing but the
+   *  image — a bare multipart form has the fewest ways to fail — and the
+   *  caption and keys ride after it through editMessageCaption, the plain
+   *  JSON path the channel arm has used since day one. URL form as the
+   *  fallback, the avatar as the next candidate. Returns the message id. */
   async sendPostPhoto(h: H, chat: string | number, img: string, avatar: string, caption: string, opts: Record<string, unknown> = {}): Promise<number | null> {
     for (const candidate of [img, avatar].filter(Boolean)) {
+      let bareMid: number | null = null;
       const bytes = await this.photoBytes(candidate);
       if (bytes) {
-        const r: any = await h.tg.sendPhoto(chat as any, bytes as any, caption, opts as any).catch(() => null);
-        const mid = r?.result?.message_id ?? null;
-        if (mid) return mid;
+        const bare: any = await h.tg.sendPhoto(chat as any, bytes as any).catch(() => null);
+        bareMid = bare?.result?.message_id ?? null;
+        if (bareMid) {
+          const dressed = await h.tg.call("editMessageCaption", {
+            chat_id: chat, message_id: bareMid,
+            caption: caption.slice(0, 1024), ...(opts as any),
+          }).catch(() => null);
+          if (dressed?.ok) return bareMid;
+        }
       }
       const r2: any = await h.tg.sendPhoto(chat as any, candidate, caption, opts as any).catch(() => null);
       if (r2?.result?.message_id) return r2.result.message_id;
+      /* the photo is up there even if its dress refused — a keyless post
+       * still beats no post */
+      if (bareMid) return bareMid;
     }
     return null;
   }
