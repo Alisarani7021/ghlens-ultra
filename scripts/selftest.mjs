@@ -1180,32 +1180,28 @@ const enc = (s) => new TextEncoder().encode(s);
   eq("showcase: garbage is not a star key", show.refFromStarCb("not-a-ref!"), null);
   ok("showcase: the label carries the live count and no leading emoji", show.starLabel(7, true).includes("7") && show.starLabel(0, true).startsWith("ستاره بده") && show.starLabel(0, true).includes("⭐"));
 
-  // the preview/publish renderers must agree with the approved shape
+  // the post is ONE message: everything lives in the caption
   const parts = {
-    ref: "oven-sh/bun", url: "https://github.com/oven-sh/bun", full: "oven-sh/bun",
-    userText: undefined, photos: [], banner: "https://opengraph.githubassets.com/1/oven-sh/bun", avatar: "https://avatars.githubusercontent.com/u/24765872?v=4&s=512",
-    summary: "runtime فوق سریع", hook: "مثل Node.js — ولی سریع‌تر",
-    stack: "Zig", stars: "۹۶٬۱۴۱", forks: "۵٬۰۹۵", license: "MIT",
-    score: hot, owner: { login: "oven-sh", url: "https://github.com/oven-sh", followers: "۳٬۸۱۸", repos: "36" },
+    ref: "oven-sh/bun", full: "oven-sh/bun", url: "https://github.com/oven-sh/bun",
+    banner: "https://opengraph.githubassets.com/1/oven-sh/bun", avatar: "https://github.com/oven-sh.png",
+    photos: [], userText: undefined,
+    summary: "بانی <b>سریع‌تر</b> از Node است",   // already-HTML AI prose
+    score: { total: 87, grade: "🥇 A", parts: { activity: 26, popularity: 30, community: 16, maturity: 15 } },
+    owner: { login: "oven-sh", followers: 12800, repos: 42 },
   };
-  const docFull = show.renderTablesDoc(parts, 12, true, true);
-  ok("showcase: the full AI doc shows its serial and both tables",
-     docFull.includes("#12") && docFull.includes("نمرهٔ پروژه") && docFull.includes("سازندهٔ پروژه"));
-  ok("showcase: the full AI doc carries the hook and the link", docFull.includes("سریع‌تر") && docFull.includes("https://github.com/oven-sh/bun"));
-  const docLean = show.renderTablesDoc(parts, 12, true, false);
-  ok("showcase: the under-banner doc is tables only — the pitch lives on the banner",
-     docLean.includes("نمرهٔ پروژه") && !docLean.includes("Showcase") && !docLean.includes("#12"));
-  const partsManual = { ...parts, userText: "این متن خود <من> است" };
-  const richManual = show.renderTablesDoc(partsManual, 13, true);
-  ok("showcase: the maker's post is his words only — no tables", richManual.includes("#13") && richManual.includes("این متن خود &lt;من&gt; است") && !richManual.includes("نمرهٔ پروژه"));
-  const cap = show.renderCaption({ ...partsManual, photos: ["f1"] }, 14, true);
-  ok("showcase: a photo caption holds serial, maker's text and link", cap.includes("#14") && cap.includes("این متن خود") && cap.endsWith("https://github.com/oven-sh/bun"));
-  ok("showcase: the maker's caption carries no score — his words are the post", !cap.includes("🏅"));
+  const partsManual = { ...parts, ref: "oven-sh/bun", full: "oven-sh/bun", photos: [], userText: "این متن خود <من> است", score: { ...parts.score }, owner: { ...parts.owner } };
   const capAi = show.renderCaption(parts, 16, true);
-  ok("showcase: the AI caption packs hook, lines and link — the score stays in the table",
-     capAi.includes("سریع‌تر") && capAi.includes("#16") && capAi.endsWith("https://github.com/oven-sh/bun") && !capAi.includes("🏅") && capAi.length < 900);
+  ok("showcase: one caption packs hook, lines, score and maker",
+     capAi.includes("#16") && capAi.includes("سریع‌تر") && capAi.includes("نمرهٔ") && capAi.includes("/100") && capAi.includes("oven-sh") && capAi.includes("فالوور") && capAi.endsWith("https://github.com/oven-sh/bun"));
+  ok("showcase: the caption fits Telegram's 1024", capAi.length <= 1024);
+  const docManual = show.renderManualDoc(partsManual, 13, true);
+  ok("showcase: the maker's long words ride as his own text post",
+     docManual.includes("#13") && docManual.includes("این متن خود &lt;من&gt; است") && !docManual.includes("نمرهٔ"));
+  ok("showcase: a clip never cuts an entity in half",
+     !show.safeClip("abc &amp; def <b>bold</b> و این هم متن", 8).match(/&[a-zA-Z#0-9]*$/) && show.safeClip("سلام دنیا", 100).length === 9);
   const longCap = show.renderCaption({ ...partsManual, userText: "x".repeat(2000) }, 15, true);
-  ok("showcase: a long caption is cut well under Telegram's 1024", longCap.length < 1024 && longCap.includes("#15"));
+  ok("showcase: a very long maker text still fits the caption", longCap.length <= 1024 && longCap.includes("#15"));
+
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
   // Bot API 9.4 colours: every key is painted, the scheme is left-accent
   ok("channel: every glass key is coloured",

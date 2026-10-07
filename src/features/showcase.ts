@@ -276,42 +276,40 @@ export class Showcase {
     };
   }
 
-  /** Pure: the data half of the post — the score and the maker, as tables.
-   *  With an intro it also carries the header and the lines (the shape used
-   *  when no photo could be sent, or the maker's own text is the post). */
-  renderTablesDoc(parts: PostParts, serial: number, fa: boolean, withIntro: boolean): string {
-    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
-    if (parts.userText) {
-      /* the maker's own words, nothing else — no tables, no score */
-      return h1(header) + aside(`<b>${parts.full}</b>`) + p(tgEscape(parts.userText)) + hr() + footer(`🔗 ${parts.url}`);
-    }
-    const intro = withIntro
-      ? h1(header) + aside(`<b>${parts.full}</b>${parts.hook ? ` — ${parts.hook}` : ""}`) + p(parts.summary)
-      : "";
-    return intro +
-      table([
-        [fa ? "فعالیت" : "Activity", `${parts.score.parts.activity}/30`],
-        [fa ? "محبوبیت" : "Popularity", `${parts.score.parts.popularity}/30`],
-        [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
-        [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
-        [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
-      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score", header: false }) +
-      (parts.owner ? table([
-        ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
-        [fa ? "فالوورها" : "Followers", parts.owner.followers],
-        [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
-      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker", header: false }) : "") +
-      hr() +
-      footer(`🔗 ${parts.url}`);
+  /** Pure: clip an HTML string without cutting an entity in half. */
+  safeClip(html: string, max: number): string {
+    if (html.length <= max) return html;
+    let out = html.slice(0, Math.max(1, max - 1));        // room for the ellipsis
+    out = out.replace(/&[a-zA-Z#0-9]*$/, "");           // a half-cut entity
+    out = out.replace(/<[^>]*$/, "");                    // a half-cut tag
+    const sp = out.lastIndexOf(" ");
+    if (sp > max * 0.6) out = out.slice(0, sp);
+    return out.trim() + "…";
   }
 
-  /** Pure: the caption the photo carries — header, hook, a few lines, the
-   *  link. The score stays in the table below, not here. */
+  /** Pure: ONE message — the banner photo carries the whole post in its
+   *  caption: header, hook, the few lines, a one-line score, a one-line
+   *  maker, the link. Tables only live in rich documents, and a rich
+   *  document cannot carry the photo — one post means the caption. */
   renderCaption(parts: PostParts, serial: number, fa: boolean): string {
     const head = fa ? `🚀 معرفی پروژهٔ #${serial} — <b>${parts.full}</b>` : `🚀 Showcase #${serial} — <b>${parts.full}</b>`;
     const hook = parts.hook && !parts.userText ? `\n<i>${parts.hook}</i>` : "";
-    const body = parts.userText ? tgEscape(parts.userText).slice(0, 900) : parts.summary;
-    return `${head}${hook}\n\n${body}\n\n🔗 ${parts.url}`;
+    const score = parts.userText ? "" :
+      `\n\n🏅 ${fa ? "نمرهٔ" : "Score"} ${parts.score.total}/100 — ${fa ? "فعالیت" : "activity"} ${parts.score.parts.activity} · ${fa ? "محبوبیت" : "popularity"} ${parts.score.parts.popularity} · ${fa ? "جامعه" : "community"} ${parts.score.parts.community} · ${fa ? "بلوغ" : "maturity"} ${parts.score.parts.maturity}`;
+    const maker = !parts.userText && parts.owner ?
+      `\n👤 ${parts.owner.login} · ${parts.owner.followers} ${fa ? "فالوور" : "followers"} · ${parts.owner.repos} ${fa ? "ریپو" : "repos"}` : "";
+    const link = `\n\n🔗 ${parts.url}`;
+    const fixed = head.length + hook.length + score.length + maker.length + link.length + 2;
+    const body = parts.userText ? tgEscape(parts.userText) : parts.summary;
+    const bodyFits = 1024 - fixed > 60 ? this.safeClip(body, 1024 - fixed) : "";
+    return head + hook + (bodyFits ? `\n\n${bodyFits}` : "") + score + maker + link;
+  }
+
+  /** Pure: the maker's too-long words ride as a text post instead of being
+   *  cut — his words, nothing else. */
+  renderManualDoc(parts: PostParts, serial: number, fa: boolean): string {
+    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
+    return h1(header) + aside(`<b>${parts.full}</b>`) + p(tgEscape(parts.userText ?? "")) + hr() + footer(`🔗 ${parts.url}`);
   }
 
   /** GitHub's image bytes, fetched by us — an upload never depends on
@@ -378,39 +376,33 @@ export class Showcase {
     await setMode(h.session, "sc_preview", { parts });
     const serial = await this.peekSerial(h);
     const rows = this.previewKb(fa, !!parts.userText);
+    const cap = this.renderCaption(parts, serial, fa);
     if (parts.photos.length > 1) {
+      /* a media group carries no buttons (Telegram's rule), so the keys ride
+       * on a compact card right before the photos */
       await h.tg.call("sendMediaGroup", {
         chat_id: h.chatId,
-        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: this.renderCaption(parts, serial, fa), parse_mode: "HTML" } : {}) })),
+        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: cap, parse_mode: "HTML" } : {}) })),
       }).catch(() => null);
       return h.reply(
         fa ? "👁 <b>پیش‌نمایش</b> — در چنل، بالای همین عکس‌ها یک کارت کوچک با دکمهٔ ⭐ ستارهٔ واقعی و کلیدها می‌نشیند. شکلش را پسندیدی؟" : "👁 Preview — a card with the ⭐ key rides above these photos in the channel.",
         rows, !!h.cbId,
       );
     }
-    const cap = this.renderCaption(parts, serial, fa);
-    if (parts.userText) {
-      /* the maker's post is one message: his photo — or the banner — with
-       * his words on it, keys under it */
-      let mid: number | null = null;
-      if (parts.photos[0]) {
-        const r: any = await h.tg.sendPhoto(h.chatId, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
-        mid = r?.result?.message_id ?? null;
-      } else if (parts.userText.length <= 900) {
-        mid = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: rows });
-      }
-      if (mid) {
-        return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
-      }
-      /* tables ride through replyRich: reply() runs the plaintext converter,
-       * which wraps a table in <p> — Telegram rejects that document */
-      return h.replyRich(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
+    /* ONE message: the maker's photo — or the banner — with the whole post
+     * in its caption and the keys under it */
+    let mid: number | null = null;
+    if (parts.photos[0]) {
+      const r: any = await h.tg.sendPhoto(h.chatId, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
+      mid = r?.result?.message_id ?? null;
+    } else {
+      mid = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: rows });
     }
-    /* the AI post: the white GitHub banner with the pitch and the decision
-     * keys on it, the tables right under it — the keys ride on the photo,
-     * the one path that has never lost them */
-    const mid1 = await this.sendPostPhoto(h, h.chatId, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: rows });
-    return h.replyRich(this.renderTablesDoc(parts, serial, fa, !mid1), mid1 ? undefined : rows, !!h.cbId);
+    if (mid) {
+      return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
+    }
+    /* no photo made it — the words ride alone */
+    return h.replyRich(this.renderManualDoc({ ...parts, userText: parts.userText ?? parts.summary }, serial, fa), rows, !!h.cbId);
   }
 
   async previewAuto(h: H, ref: string) {
@@ -444,7 +436,7 @@ export class Showcase {
       await setMode(h.session, "sc_text", { ref: parts.ref });
       return h.reply(
         fa ? "✍️ متن معرفی‌ات را از نو بنویس — بعدش دوباره پیش‌نمایش می‌گیری." : "✍️ Write your pitch again — a fresh preview follows.",
-        kb([{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }]),
+        kb([{ text: (fa ? "بی‌خیال" : "Never mind") + " ❌", cb: "sc:cancel" }]),
         !!h.cbId,
       );
     }
@@ -452,7 +444,9 @@ export class Showcase {
     if (fresh) await this.showPreview(h, fresh);
   }
 
-  /** ✅ — the maker liked what he saw; it goes out this very second. */
+  /** ✅ — the maker liked what he saw; it goes out this very second.
+   *  ONE message in the channel: the photo with the whole post in its
+   *  caption, the ⭐ key and the glass keys under it. */
   async publishPrepared(h: H) {
     const fa = h.loc === "fa";
     const m: any = await readMode(h.session).catch(() => null);
@@ -470,58 +464,36 @@ export class Showcase {
       ? [[{ text: this.starLabel(0, fa), callback_data: this.starCb(parts.ref), style: "primary" }]]
       : [];
     const markup = { inline_keyboard: [...starRow, ...channelRepoKb(parts.ref, botUser).inline_keyboard] };
-    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
+    const cap = this.renderCaption(parts, serial, fa);
     let mid: number | null = null;
 
     if (parts.photos.length > 1) {
       /* a media group carries no buttons (Telegram's rule), so the keys ride
-         on a compact card right before the photos */
+       * on a compact card right before the photos */
       const card = await h.tg.sendRichMessage(target.send,
-        h1(header) + aside(`<b>${parts.full}</b>`) + footer(`🔗 ${parts.url}`),
+        h1(fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`) + aside(`<b>${parts.full}</b>`) + footer(`🔗 ${parts.url}`),
         { reply_markup: markup } as any,
       ).catch(() => null);
       mid = (card as any)?.result?.message_id ?? null;
       await h.tg.call("sendMediaGroup", {
         chat_id: target.send,
-        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: this.renderCaption(parts, serial, fa), parse_mode: "HTML" } : {}) })),
+        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: cap, parse_mode: "HTML" } : {}) })),
       }).catch(() => null);
-    } else if (parts.userText) {
-      /* the maker's post is one message: his photo — or the banner — with
-       * his words on it, keys under it; words too long for a caption ride
-       * as a text post instead */
-      const cap = this.renderCaption(parts, serial, fa);
-      if (parts.photos[0]) {
-        const r: any = await h.tg.sendPhoto(target.send as any, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
-        mid = r?.result?.message_id ?? null;
-      } else if (parts.userText.length <= 900) {
-        mid = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: markup });
-      }
-      if (!mid) {
-        const rich = this.renderTablesDoc(parts, serial, fa, true);
-        try {
-          const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
-          mid = r?.result?.message_id ?? null;
-        } catch {
-          const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
-          mid = r2?.result?.message_id ?? null;
-        }
-      }
+    } else if (parts.photos[0]) {
+      const r: any = await h.tg.sendPhoto(target.send as any, parts.photos[0], cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
+      mid = r?.result?.message_id ?? null;
     } else {
-      /* the AI post: GitHub's white banner card with the pitch as its
-       * caption, then the data half — score and maker tables — carrying the
-       * star key and the glass keys right under it */
-      const cap = this.renderCaption(parts, serial, fa);
-      /* the ⭐ key and the glass keys ride under the banner photo itself —
-       * a photo message has never lost its keyboard; the tables doc stays
-       * clean and only inherits the keys when no photo could be sent */
-      const mid1 = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: markup });
-      const rich = this.renderTablesDoc(parts, serial, fa, !mid1);
+      mid = await this.sendPostPhoto(h, target.send, parts.banner, parts.avatar, cap, { parse_mode: "HTML", reply_markup: markup });
+    }
+    if (!mid) {
+      /* nothing visual made it — the words ride alone */
+      const rich = this.renderManualDoc({ ...parts, userText: parts.userText ?? parts.summary }, serial, fa);
       try {
-        const r: any = await h.tg.sendRichMessage(target.send, rich, (mid1 ? {} : { reply_markup: markup }) as any);
-        mid = (mid1 ?? r?.result?.message_id) ?? null;
+        const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
+        mid = r?.result?.message_id ?? null;
       } catch {
-        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", ...(mid1 ? {} : { reply_markup: markup }) } as any).catch(() => null);
-        mid = (mid1 ?? r2?.result?.message_id) ?? null;
+        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
+        mid = r2?.result?.message_id ?? null;
       }
     }
 
@@ -535,8 +507,8 @@ export class Showcase {
           `همین حالا فورواردش کن تا بیشتر دیده شوی 😉 و هر ستاره‌ای که از چنل بخورد، خبرت می‌کنم ⭐`
         : `✅ <b>Published!</b> — post #${serial}, score ${parts.score.total}/100 ${parts.score.grade}${link}`,
       kb(
-        [{ text: "🚀 " + (fa ? "پروژهٔ بعدی" : "Next project"), cb: "sc:home" }],
-        [{ text: "🏠 " + (fa ? "منوی اصلی" : "Menu"), cb: "m:home" }],
+        [{ text: (fa ? "پروژهٔ بعدی" : "Next project") + " 🚀", cb: "sc:home" }],
+        [{ text: (fa ? "منوی اصلی" : "Menu") + " 🏠", cb: "m:home" }],
       ),
       !!h.cbId,
     );
