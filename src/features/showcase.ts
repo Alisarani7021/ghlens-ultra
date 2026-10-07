@@ -531,10 +531,36 @@ export class Showcase {
       headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-length": "0" },
     }).catch(() => null);
     if (r?.status === 401 || r?.status === 403) {
-      /* 401 the link rotted; 403 the token has no starring scope — the OAuth
-       * flow asks for public_repo, so relinking fixes both the same way. */
-      if (!quiet) await h.toast(fa ? "توکن گیت‌هابت ستاره‌دادن را باز نمی‌کند — یک بار دیگر /login بزن" : "Your GitHub token cannot star — /login once more");
-      return { ok: false, err: "token" };
+      /* 401 the link rotted; 403 the token has no starring scope. The old
+       * toast said "login again" — but a relink with the same kind of token
+       * fails the same way, and the maker was sent around in that circle.
+       * GitHub's own message tells the two apart, so surface it, park the
+       * star, and hand him the exact token to build (the pending star lands
+       * by itself the moment a capable token is linked). */
+      const gh: any = await r!.json().catch(() => null);
+      const ghMsg = String(gh?.message ?? "").slice(0, 160);
+      const rot = /bad credentials/i.test(ghMsg) || r?.status === 401;
+      await h.session.set("sc:pending", ref).catch(() => null);
+      await h.tg.sendMessage(
+        h.u.id,
+        fa
+          ? rot
+            ? `⭐ <b>اتصال گیت‌هابت افتاده است</b> — یک بار دیگر <code>/login</code> بزن تا ستارهٔ همان پست خودکار ثبت شود.`
+            : `⭐ <b>ستاره‌ات فعلاً ثبت نشد</b>\n\nگیت‌هاب گفت: <code>${tgEscape(ghMsg || `HTTP ${r?.status}`)}</code>\n\n` +
+              `یعنی توکنت <b>Fine-grained</b> است یا موقع ساختش دسترسی‌ها تیک نخورده‌اند. یک توکن <b>کلاسیک</b> با دسترسی‌های از-قبل-آماده بساز (دکمهٔ پایین)، تولیدش کن و همین‌جا بفرست — ستارهٔ همان پست خودکار ثبت می‌شود ⭐`
+          : `⭐ GitHub said: <code>${tgEscape(ghMsg || `HTTP ${r?.status}`)}</code> — the token cannot star. Build a classic token with the scopes pre-ticked (button below) and paste it; the star lands by itself.`,
+        {
+          parse_mode: "HTML",
+          ...(rot ? {} : {
+            reply_markup: kb([{
+              text: "🔑 " + (fa ? "ساخت توکن با دسترسی‌های درست" : "Create a proper token"),
+              url: "https://github.com/settings/tokens/new?scopes=repo,read:user,user:email,read:org&description=GitHub%20Lens%20Ultra",
+            }]) as any,
+          }),
+        },
+      ).catch(() => null);
+      if (!quiet) await h.toast(fa ? "⭐ راهنما در پیوی فرستاده شد" : "⭐ guide sent to your bot chat");
+      return { ok: false, err: ghMsg || "token" };
     }
     if (!r || r.status >= 400) {
       if (!quiet) await h.toast(fa ? "❌ ستاره ثبت نشد — یک بار دیگر بزن" : "❌ Could not star — try again");

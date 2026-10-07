@@ -2822,18 +2822,33 @@ export async function completeLink(h: H, token: string): Promise<void> {
   ).bind(me.login, enc, Date.now(), h.u.id).run();
   // forget the wizard state and the user's message is theirs to delete
   await h.session?.set("me:token", false);
+  /* Starring needs the classic repo/public_repo scope, or — on a
+   * fine-grained token — the "Starring" permission, which nothing ticks by
+   * default. The link itself succeeds either way, and "everything is
+   * unlocked" was a promise the ⭐ button could not keep; say it here,
+   * while the token page is still open in his other tab. */
+  const scopes = me.scopes ?? "";
+  let canStar = /(?:^|,)\s*(?:repo|public_repo)\s*(?:,|$)/.test(scopes);
+  if (!canStar) {
+    const probe = await fetch("https://api.github.com/user/starred?per_page=1", {
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "GitHubLensUltra/1.0" },
+    }).catch(() => null);
+    canStar = !!probe?.ok;
+  }
   await h.reply(
     `✅ <b>${fa ? "حساب گیت‌هاب وصل شد" : "GitHub linked"}</b> — <a href="https://github.com/${tgEscape(me.login)}">@${tgEscape(me.login)}</a>\n\n` +
       (fa
         ? `سقف درخواست تو الان <b>${me.remaining ?? 5000}</b> در ساعت است و همهٔ قابلیت‌ها باز شد.\n\n` +
+          (canStar ? "" : `⚠️ <b>ولی این توکن ستاره‌دادن (⭐) را باز نمی‌کند</b> — Fine-grained است یا دسترسی‌هایش تیک نخورده‌اند. با دکمهٔ پایین یک توکن <b>کلاسیک</b> با دسترسی‌های آماده بساز و بفرستش.\n\n`) +
           `👉 <b>حالا یک بار دیگر /start را بزن</b> تا همه‌چیز کامل بالا بیاید.\n` +
           `<i>برای امنیت، پیام حاوی توکن را پاک کن (نگه‌دار → Delete). خروج: /logout</i>`
         : `Your limit is now ${me.remaining ?? 5000}/hour and everything is unlocked.\n\n` +
+          (canStar ? "" : `⚠️ <b>This token cannot star (⭐)</b> — it is fine-grained or was saved without scopes. Build a classic one with the scopes pre-ticked (button below) and paste it.\n\n`) +
           `👉 <b>Press /start once more</b> so the whole thing comes up.\n` +
           `<i>Delete the message with your token. /logout to disconnect.</i>`),
     kb(
       [{ text: "🚀 " + (fa ? "دوباره /start" : "Press /start again"), cb: "m:start" }],
-      
+      ...(canStar ? [] : [[{ text: "🔑 " + (fa ? "ساخت توکن با دسترسی‌های درست" : "Create a proper token"), url: "https://github.com/settings/tokens/new?scopes=repo,read:user,user:email,read:org&description=GitHub%20Lens%20Ultra" }]]),
     ),
     true,
   );
