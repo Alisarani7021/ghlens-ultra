@@ -33,7 +33,7 @@ menus() {
   {"command":"security","description":"اسکن امنیت و کلید لو‌رفته"},
   {"command":"tools","description":"جعبه‌ابزار: پکیج، IP، DNS، TLS"},
   {"command":"hub","description":"هاب جهانی: رویداد، ورک‌فلو، انتشار"},
-  {"command":"profile","description":"پروفایل، سطح و نشان‌ها"},
+  {"command":"project","description":"پروژه‌ات را در چنل معرفی کن ⭐"},{"command":"project","description":"Feature your project in the channel ⭐"},{"command":"profile","description":"پروفایل، سطح و نشان‌ها"},
   {"command":"language","description":"تغییر زبان"}]},
  {"language_code":"en","commands":[
   {"command":"start","description":"Home and main menu"},
@@ -61,7 +61,7 @@ menus() {
   {"command":"security","description":"فحص الأمان والمفاتيح المسربة"},
   {"command":"tools","description":"أدوات: الحزم، IP، DNS، TLS"},
   {"command":"hub","description":"المركز العالمي: أحداث، سير عمل، نشر"},
-  {"command":"profile","description":"الملف والمستوى والشارات"},
+  {"command":"project","description":"قدّم مشروعك للقناة ⭐"},{"command":"profile","description":"الملف والمستوى والشارات"},
   {"command":"language","description":"تغيير اللغة"}]},
  {"language_code":"ru","commands":[
   {"command":"start","description":"Главное меню"},
@@ -75,7 +75,7 @@ menus() {
   {"command":"security","description":"Проверка безопасности"},
   {"command":"tools","description":"Пакеты, IP/DNS/TLS, утилиты"},
   {"command":"hub","description":"Хаб: события, сценарии, публикация"},
-  {"command":"profile","description":"Профиль, уровень, значки"},
+  {"command":"project","description":"Показать свой проект в канале ⭐"},{"command":"profile","description":"Профиль, уровень, значки"},
   {"command":"language","description":"Язык"}]},
  {"language_code":"zh","commands":[
   {"command":"start","description":"主页与主菜单"},
@@ -89,7 +89,7 @@ menus() {
   {"command":"security","description":"安全与密钥泄露扫描"},
   {"command":"tools","description":"包转换、IP/DNS/TLS 工具"},
   {"command":"hub","description":"全球中枢：事件·流程·发布"},
-  {"command":"profile","description":"资料、等级与徽章"},
+  {"command":"project","description":"在频道展示你的项目 ⭐"},{"command":"profile","description":"资料、等级与徽章"},
   {"command":"language","description":"切换语言"}]}
 ]
 JSON
