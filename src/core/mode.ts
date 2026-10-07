@@ -94,4 +94,5 @@ export const MODE_LABELS: Record<string, string> = {
   sc_choose: "معرفی پروژه — سبک",
   sc_text: "معرفی پروژه — متن",
   sc_photo: "معرفی پروژه — عکس",
+  sc_preview: "معرفی پروژه — پیش‌نمایش",
 };

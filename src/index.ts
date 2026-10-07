@@ -1198,6 +1198,7 @@ async function inputContext(h: H): Promise<((text: string) => Promise<void>) | n
       case "sc_repo": return (t) => showcase.receiveRepo(h, t);
       case "sc_text": return (t) => showcase.receiveText(h, t);
       case "sc_photo": return (t) => showcase.receiveMedia(h, t);
+      case "sc_preview": return async () => showcase.previewNudge(h);
       case "tr": return (t) => assistant.translateReadme(h, t.trim());
       case "wf": return async (t: string) => {
         if (await deferFeature(h, "workflow", t, "🧩 ورک‌فلو در صف ساخته می‌شود…")) return;
@@ -1844,15 +1845,17 @@ async function routeCallback(q: CallbackQuery, env: Env, ctx: Ctx, tg: Telegram,
           const mode = await readMode(h.session);
           const ref = String((mode as any)?.data?.ref ?? "");
           if (!ref) return showcase.intro(h);
-          return showcase.buildAndPublish(h, ref);
+          return showcase.previewAuto(h, ref);
         }
         if (action === "done") {
           const mode = await readMode(h.session);
           const ref = String((mode as any)?.data?.ref ?? "");
           const text = String((mode as any)?.data?.text ?? "");
           const photos: string[] = Array.isArray((mode as any)?.data?.photos) ? (mode as any).data.photos : [];
-          return showcase.buildAndPublish(h, ref, text, photos);
+          return showcase.previewManual(h, ref, text, photos);
         }
+        if (action === "go") return showcase.publishPrepared(h);
+        if (action === "redo") return showcase.redoPreview(h);
         if (action === "cancel") {
           await clearMode(h.session);
           return h.reply(

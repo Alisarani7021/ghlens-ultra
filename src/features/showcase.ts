@@ -20,6 +20,17 @@ import { botUsername } from "../env";
  * every star after that is one tap in the channel, with a live counter.
  */
 
+/** The frozen shape of one showcase post — built once at preview, reused
+ *  verbatim at publish so the channel copy is the one the maker approved. */
+export interface PostParts {
+  ref: string; url: string; full: string;
+  userText?: string; photos: string[];
+  summary: string; hook: string;
+  stack: string; stars: string; forks: string; license: string;
+  score: { total: number; grade: string; parts: { activity: number; popularity: number; community: number; maturity: number } };
+  owner: { login: string; url: string; followers: string; repos: string } | null;
+}
+
 export class Showcase {
   // ── pure, tested ────────────────────────────────────────────────────────
 
@@ -153,14 +164,14 @@ export class Showcase {
     const fileId = (h.msg as any)?.photo?.[(h.msg as any).photo.length - 1]?.file_id as string | undefined;
     if (fileId) {
       photos.push(fileId);
-      if (photos.length >= 10) return this.buildAndPublish(h, ref, text, photos);
+      if (photos.length >= 10) return this.previewManual(h, ref, text, photos);
       await touchMode(h.session, { ...m, data: { ...m.data, photos } });
       return h.reply(
         fa ? `📸 عکس ${photos.length} ثبت شد — بیشتر داری بفرست، یا «تمام» را بزن.` : `📸 Photo ${photos.length} saved — send more, or press Done.`,
         kb([{ text: "✅ " + (fa ? "تمام — منتشرش کن" : "Done — publish"), cb: "sc:done" }]),
       );
     }
-    if (/^(تمام|پایان|انتها|done|end|ok)$/i.test(t.trim())) return this.buildAndPublish(h, ref, text, photos);
+    if (/^(تمام|پایان|انتها|done|end|ok)$/i.test(t.trim())) return this.previewManual(h, ref, text, photos);
     return h.reply(
       fa ? "📷 عکس بفرست، یا دکمهٔ «تمام» را بزن." : "📷 Send a photo, or press Done.",
       kb([{ text: "✅ " + (fa ? "تمام — منتشرش کن" : "Done — publish"), cb: "sc:done" }]),
@@ -169,14 +180,16 @@ export class Showcase {
 
   // ── the build & publish ─────────────────────────────────────────────────
 
-  async buildAndPublish(h: H, ref: string, userText?: string, photos: string[] = []) {
+  /** Everything a post needs, frozen at preview time so the channel copy
+   *  matches what the maker approved — character for character. */
+  async preparePost(h: H, ref: string, userText?: string, photos: string[] = []): Promise<PostParts | null> {
     const fa = h.loc === "fa";
-    await clearMode(h.session).catch(() => null);
-    if (!ref) return this.intro(h);
-    if ((await this.rateLimitLeftMs(h)) > 0) return this.intro(h);
+    if (!ref) { await this.intro(h); return null; }
+    if ((await this.rateLimitLeftMs(h)) > 0) { await this.intro(h); return null; }
     const target = await this.channelTarget(h);
     if (!target) {
-      return h.reply(fa ? "⚠️ کانالِ معرفی تنظیم نشده — بعداً تلاش کن." : "⚠️ Showcase channel is not configured.");
+      await h.reply(fa ? "⚠️ کانالِ معرفی تنظیم نشده — بعداً تلاش کن." : "⚠️ Showcase channel is not configured.");
+      return null;
     }
     await h.loading(fa ? "🚀 در حال ساخت پست معرفی…" : "Building the showcase post…");
 
@@ -184,13 +197,13 @@ export class Showcase {
     const gh = new GithubRest(h.env);
     const repo: any = await gh.get(`/repos/${ref}`, 600).catch(() => null);
     if (!repo?.full_name) {
-      return h.reply(
+      await h.reply(
         fa ? `❌ این ریپو پیدا نشد: <code>${tgEscape(ref)}</code>` : `❌ Repo not found: <code>${tgEscape(ref)}</code>`,
         kb([[{ text: "🔁 " + (fa ? "دوباره" : "Retry"), cb: "sc:home" }]]),
       );
+      return null;
     }
     const owner: any = await gh.get(`/users/${repo.owner?.login}`, 3600).catch(() => null);
-    const serial = await this.nextSerial(h);
     const score = this.repoScore({
       stars: Number(repo.stargazers_count ?? 0),
       forks: Number(repo.forks_count ?? 0),
@@ -224,87 +237,187 @@ export class Showcase {
         const j: any = m ? JSON.parse(m[0]) : null;
         if (j) { summary = String(j.summary ?? "").trim(); hook = String(j.hook ?? "").trim(); }
       } catch { /* the fallback below is already a decent post */ }
-      const clean = (x: string) => tgEscape(x.trim().replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")).replace(/&lt;(\/?b)&gt;/g, "<$1>");
+      const clean = (x: string) => tgEscape(x.trim().replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")).replace(/&lt;(\/\/?b)&gt;/g, "<$1>");
       if (summary) summary = clean(summary);
       if (hook) hook = clean(hook);
       if (!summary) summary = tgEscape(String(repo.description ?? repo.full_name));
       if (!hook) hook = tgEscape(String(repo.full_name));
     }
 
-    /* the post: rich when it is words, photo(s) when the maker sent them */
-    const url = `https://github.com/${ref}`;
+    return {
+      ref,
+      url: `https://github.com/${ref}`,
+      full: tgEscape(String(repo.full_name)),
+      userText: userText || undefined,
+      photos,
+      summary, hook,
+      stack: tgEscape(String(repo.language ?? "—")),
+      stars: Number(repo.stargazers_count ?? 0).toLocaleString("fa-IR"),
+      forks: Number(repo.forks_count ?? 0).toLocaleString("fa-IR"),
+      license: tgEscape(String(repo.license?.spdx_id ?? "—")),
+      score,
+      owner: owner ? {
+        login: tgEscape(String(owner.login)),
+        url: `https://github.com/${tgEscape(String(owner.login))}`,
+        followers: Number(owner.followers ?? 0).toLocaleString("fa-IR"),
+        repos: String(Number(owner.public_repos ?? 0)),
+      } : null,
+    };
+  }
+
+  /** Pure: the words-and-tables post, exactly as the channel will see it. */
+  renderRichPost(parts: PostParts, serial: number, fa: boolean): string {
+    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
+    if (parts.userText) {
+      /* the maker's own words, nothing else — no tables, no score: the AI
+       * path owns those; this post is his. */
+      return h1(header) + aside(`<b>${parts.full}</b>`) + p(tgEscape(parts.userText)) + hr() + footer(`🔗 ${parts.url}`);
+    }
+    return h1(header) +
+      aside(`<b>${parts.full}</b>${parts.hook ? ` — ${parts.hook}` : ""}`) +
+      p(parts.summary) +
+      table([
+        [fa ? "ویژگی" : "Field", fa ? "مقدار" : "Value"],
+        [fa ? "زبان / استک" : "Stack", parts.stack],
+        [fa ? "ستاره‌های گیت‌هاب" : "GitHub stars", parts.stars],
+        [fa ? "فورک" : "Forks", parts.forks],
+        [fa ? "مجوز" : "License", parts.license],
+      ], { caption: fa ? "🧪 کارت پروژه" : "🧪 Project card" }) +
+      table([
+        [fa ? "بخش" : "Part", fa ? "امتیاز" : "Score"],
+        [fa ? "فعالیت" : "Activity", `${parts.score.parts.activity}/30`],
+        [fa ? "محبوبیت" : "Popularity", `${parts.score.parts.popularity}/30`],
+        [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
+        [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
+        [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
+      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
+      (parts.owner ? table([
+        [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
+        ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
+        [fa ? "فالوورها" : "Followers", parts.owner.followers],
+        [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
+      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker" }) : "") +
+      hr() +
+      footer(`🔗 ${parts.url}`);
+  }
+
+  /** Pure: the caption a photo post carries. */
+  renderCaption(parts: PostParts, serial: number, fa: boolean): string {
+    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
+    return `${header} — <b>${parts.full}</b>\n\n` + tgEscape(String(parts.userText ?? "")).slice(0, 900) + `\n\n🔗 ${parts.url}`;
+  }
+
+  previewKb(fa: boolean, manual: boolean) {
+    return kb(
+      [{ text: "✅ " + (fa ? "منتشر کن — همین شکل عالیه" : "Publish — it looks great"), cb: "sc:go" }],
+      [{ text: manual ? "✍️ " + (fa ? "ویرایش متن" : "Rewrite my text") : "🔁 " + (fa ? "از نو بساز" : "Build it again"), cb: "sc:redo" }],
+      [{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }],
+    );
+  }
+
+  /** The maker sees the exact post in his own chat, and decides there. */
+  async showPreview(h: H, parts: PostParts) {
+    const fa = h.loc === "fa";
+    await setMode(h.session, "sc_preview", { parts });
+    const serial = await this.peekSerial(h);
+    const rows = this.previewKb(fa, !!parts.userText);
+    if (parts.photos.length > 1) {
+      await h.tg.call("sendMediaGroup", {
+        chat_id: h.chatId,
+        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: this.renderCaption(parts, serial, fa), parse_mode: "HTML" } : {}) })),
+      }).catch(() => null);
+      return h.reply(
+        fa ? "👁 <b>پیش‌نمایش</b> — در چنل، بالای همین عکس‌ها یک کارت کوچک با دکمهٔ ⭐ ستارهٔ واقعی و کلیدها می‌نشیند. شکلش را پسندیدی؟" : "👁 Preview — a card with the ⭐ key rides above these photos in the channel.",
+        rows, !!h.cbId,
+      );
+    }
+    if (parts.photos.length === 1) {
+      const r: any = await h.tg.sendPhoto(h.chatId, parts.photos[0], this.renderCaption(parts, serial, fa), { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
+      if (r?.result?.message_id) {
+        /* the keys ride on the photo itself; turn the loader into the hint */
+        return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
+      }
+    }
+    return h.reply(this.renderRichPost(parts, serial, fa), rows, !!h.cbId);
+  }
+
+  async previewAuto(h: H, ref: string) {
+    const parts = await this.preparePost(h, ref);
+    if (parts) await this.showPreview(h, parts);
+  }
+
+  async previewManual(h: H, ref: string, text: string, photos: string[]) {
+    const parts = await this.preparePost(h, ref, text, photos);
+    if (parts) await this.showPreview(h, parts);
+  }
+
+  /** A typed message while the preview waits — point back at the buttons. */
+  async previewNudge(h: H) {
+    const fa = h.loc === "fa";
+    const m: any = await readMode(h.session).catch(() => null);
+    return h.reply(
+      fa ? "👁 پیش‌نمایش آماده است — ✅ منتشرش کن یا از دکمه‌های زیر انتخاب کن." : "👁 The preview is ready — publish it, or pick below.",
+      this.previewKb(fa, !!m?.data?.parts?.userText),
+      !!h.cbId,
+    );
+  }
+
+  /** «از نو بساز» — the AI writes again; the maker rewrites his words. */
+  async redoPreview(h: H) {
+    const fa = h.loc === "fa";
+    const m: any = await readMode(h.session).catch(() => null);
+    const parts: PostParts | undefined = m?.data?.parts;
+    if (!parts) return this.intro(h);
+    if (parts.userText) {
+      await setMode(h.session, "sc_text", { ref: parts.ref });
+      return h.reply(
+        fa ? "✍️ متن معرفی‌ات را از نو بنویس — بعدش دوباره پیش‌نمایش می‌گیری." : "✍️ Write your pitch again — a fresh preview follows.",
+        kb([{ text: "❌ " + (fa ? "بی‌خیال" : "Never mind"), cb: "sc:cancel" }]),
+        !!h.cbId,
+      );
+    }
+    const fresh = await this.preparePost(h, parts.ref);
+    if (fresh) await this.showPreview(h, fresh);
+  }
+
+  /** ✅ — the maker liked what he saw; it goes out this very second. */
+  async publishPrepared(h: H) {
+    const fa = h.loc === "fa";
+    const m: any = await readMode(h.session).catch(() => null);
+    const parts: PostParts | undefined = m?.data?.parts;
+    if (!parts) return this.intro(h);
+    await clearMode(h.session).catch(() => null);
+    if ((await this.rateLimitLeftMs(h)) > 0) return this.intro(h);
+    const target = await this.channelTarget(h);
+    if (!target) return h.reply(fa ? "⚠️ کانالِ معرفی تنظیم نشده." : "⚠️ Showcase channel is not configured.");
+    await h.loading(fa ? "📣 در حال انتشار…" : "Publishing…");
+
+    const serial = await this.nextSerial(h);
     const botUser = botUsername(h.env);
-    const starRow = this.starCb(ref).length <= 64
-      ? [[{ text: this.starLabel(0, fa), callback_data: this.starCb(ref), style: "primary" }]]
+    const starRow = this.starCb(parts.ref).length <= 64
+      ? [[{ text: this.starLabel(0, fa), callback_data: this.starCb(parts.ref), style: "primary" }]]
       : [];
-    const glass = channelRepoKb(ref, botUser).inline_keyboard;
-    const markup = { inline_keyboard: [...starRow, ...glass] };
+    const markup = { inline_keyboard: [...starRow, ...channelRepoKb(parts.ref, botUser).inline_keyboard] };
+    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
     let mid: number | null = null;
 
-    const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
-    if (photos.length > 1) {
+    if (parts.photos.length > 1) {
       /* a media group carries no buttons (Telegram's rule), so the keys ride
          on a compact card right before the photos */
       const card = await h.tg.sendRichMessage(target.send,
-        h1(header) + aside(`<b>${tgEscape(String(repo.full_name))}</b>`) + footer(`🔗 ${url}`),
+        h1(header) + aside(`<b>${parts.full}</b>`) + footer(`🔗 ${parts.url}`),
         { reply_markup: markup } as any,
       ).catch(() => null);
       mid = (card as any)?.result?.message_id ?? null;
-      const cap = `${header} — <b>${tgEscape(String(repo.full_name))}</b>\n\n` +
-        tgEscape(String(userText ?? "")).slice(0, 900) + `\n\n🔗 ${url}`;
       await h.tg.call("sendMediaGroup", {
         chat_id: target.send,
-        media: photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: cap, parse_mode: "HTML" } : {}) })),
+        media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: this.renderCaption(parts, serial, fa), parse_mode: "HTML" } : {}) })),
       }).catch(() => null);
-    } else if (photos.length === 1) {
-      const cap = `${header} — <b>${tgEscape(String(repo.full_name))}</b>\n\n` +
-        tgEscape(String(userText ?? "")).slice(0, 900) + `\n\n🔗 ${url}`;
-      const r: any = await h.tg.sendPhoto(target.send as any, photos[0], cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
+    } else if (parts.photos.length === 1) {
+      const r: any = await h.tg.sendPhoto(target.send as any, parts.photos[0], this.renderCaption(parts, serial, fa), { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
       mid = r?.result?.message_id ?? null;
-    } else if (userText) {
-      /* the maker's own words, nothing else — no tables, no score: the AI
-       * path owns those; this post is his. */
-      const rich =
-        h1(header) +
-        aside(`<b>${tgEscape(String(repo.full_name))}</b>`) +
-        p(tgEscape(userText)) +
-        hr() +
-        footer(`🔗 ${url}`);
-      try {
-        const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
-        mid = r?.result?.message_id ?? null;
-      } catch {
-        const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
-        mid = r2?.result?.message_id ?? null;
-      }
     } else {
-      const rich =
-        h1(header) +
-        aside(`<b>${tgEscape(String(repo.full_name))}</b>${hook ? ` — ${hook}` : ""}`) +
-        p(userText ? tgEscape(userText) : summary) +
-        table([
-          [fa ? "ویژگی" : "Field", fa ? "مقدار" : "Value"],
-          [fa ? "زبان / استک" : "Stack", `${tgEscape(String(repo.language ?? "—"))}`],
-          [fa ? "ستاره‌های گیت‌هاب" : "GitHub stars", `${Number(repo.stargazers_count ?? 0).toLocaleString("fa-IR")}`],
-          [fa ? "فورک" : "Forks", `${Number(repo.forks_count ?? 0).toLocaleString("fa-IR")}`],
-          [fa ? "مجوز" : "License", tgEscape(String(repo.license?.spdx_id ?? "—"))],
-        ], { caption: fa ? "🧪 کارت پروژه" : "🧪 Project card" }) +
-        table([
-          [fa ? "بخش" : "Part", fa ? "امتیاز" : "Score"],
-          [fa ? "فعالیت" : "Activity", `${score.parts.activity}/30`],
-          [fa ? "محبوبیت" : "Popularity", `${score.parts.popularity}/30`],
-          [fa ? "جامعه" : "Community", `${score.parts.community}/20`],
-          [fa ? "بلوغ" : "Maturity", `${score.parts.maturity}/20`],
-          [fa ? "کل" : "Total", `<b>${score.total}/100 — ${score.grade}</b>`],
-        ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
-        (owner ? table([
-          [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
-          ["👤", `<a href="https://github.com/${tgEscape(String(owner.login))}">${tgEscape(String(owner.login))}</a>`],
-          [fa ? "فالوورها" : "Followers", `${Number(owner.followers ?? 0).toLocaleString("fa-IR")}`],
-          [fa ? "ریپوهای عمومی" : "Public repos", `${Number(owner.public_repos ?? 0)}`],
-        ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker" }) : "") +
-        hr() +
-        footer(`🔗 ${url}`);
+      const rich = this.renderRichPost(parts, serial, fa);
       try {
         const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
         mid = r?.result?.message_id ?? null;
@@ -314,15 +427,15 @@ export class Showcase {
       }
     }
 
-    await h.store.event(h.u.id, "showcase", ref, { serial, msgId: mid, channel: target.send, mode: userText ? "custom" : "auto" }).catch(() => null);
+    await h.store.event(h.u.id, "showcase", parts.ref, { serial, msgId: mid, channel: target.send, mode: parts.userText ? "custom" : "auto" }).catch(() => null);
     await (h.store as any).addXp?.(h.u.id, 30, "showcase").catch?.(() => null);
 
     const link = target.display.startsWith("@") && mid ? `\nhttps://t.me/${target.display.replace("@", "")}/${mid}` : "";
     return h.reply(
       fa
-        ? `✅ <b>پروژهٔ تو معرفی شد!</b>\n\n🏅 پست شمارهٔ #${serial} — نمرهٔ ${score.total}/100 ${score.grade}\n${link}\n\n` +
+        ? `✅ <b>پروژهٔ تو معرفی شد!</b>\n\n🏅 پست شمارهٔ #${serial} — نمرهٔ ${parts.score.total}/100 ${parts.score.grade}\n${link}\n\n` +
           `همین حالا فورواردش کن تا بیشتر دیده شوی 😉 و هر ستاره‌ای که از چنل بخورد، خبرت می‌کنم ⭐`
-        : `✅ <b>Published!</b> — post #${serial}, score ${score.total}/100 ${score.grade}${link}`,
+        : `✅ <b>Published!</b> — post #${serial}, score ${parts.score.total}/100 ${parts.score.grade}${link}`,
       kb(
         [{ text: "🚀 " + (fa ? "پروژهٔ بعدی" : "Next project"), cb: "sc:home" }],
         [{ text: "🏠 " + (fa ? "منوی اصلی" : "Menu"), cb: "m:home" }],
@@ -440,6 +553,12 @@ export class Showcase {
     ).bind(h.u.id, Date.now() - 12 * 3_600_000).first().catch(() => null);
     const last = Number((r as any)?.last ?? 0);
     return last ? Math.max(0, last + 12 * 3_600_000 - Date.now()) : 0;
+  }
+
+  /** The serial a preview *would* carry — read without spending it. */
+  async peekSerial(h: H): Promise<number> {
+    const row: any = await h.env.DB.prepare(`SELECT value FROM flags WHERE key='showcase:serial'`).first().catch(() => null);
+    return Number(row?.value ?? 0) + 1;
   }
 
   async nextSerial(h: H): Promise<number> {
