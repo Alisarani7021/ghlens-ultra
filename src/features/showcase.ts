@@ -1,7 +1,7 @@
 import type { H } from "../core/handler";
 import { kb } from "../tg/keyboards";
 import { tgEscape } from "../tg/types";
-import { h1, aside, p, footer, sendRich, richToLegacy } from "../tg/rich";
+import { h1, aside, p, table, footer, hr, sendRich, richToLegacy } from "../tg/rich";
 import { parseRepoRef } from "../core/repo-ref";
 import { setMode, clearMode, readMode, touchMode } from "../core/mode";
 import { GithubRest } from "../github/rest";
@@ -24,7 +24,7 @@ import { botUsername } from "../env";
  *  verbatim at publish so the channel copy is the one the maker approved. */
 export interface PostParts {
   ref: string; url: string; full: string;
-  userText?: string; photos: string[]; avatar: string;
+  userText?: string; photos: string[]; banner: string; avatar: string;
   summary: string; hook: string;
   stack: string; stars: string; forks: string; license: string;
   score: { total: number; grade: string; parts: { activity: number; popularity: number; community: number; maturity: number } };
@@ -244,20 +244,20 @@ export class Showcase {
       if (!hook) hook = tgEscape(String(repo.full_name));
     }
 
-    /* the post image: the maker's own photos when he has them, otherwise
-     * his GitHub avatar — the one image that is always his. A rich message
-     * renders no link preview, so the avatar travels as the photo itself. */
+    /* the post image is GitHub's own white banner — the OpenGraph card the
+     * owner pointed at: repo name, description, stars, language, the maker's
+     * avatar, all drawn by GitHub itself. The maker's own photos outrank it;
+     * the avatar stays as the last-resort image. */
     const avatarRaw = String(repo.owner?.avatar_url ?? owner?.avatar_url ?? "");
     const avatar = avatarRaw ? (avatarRaw.includes("?") ? `${avatarRaw}&s=512` : `${avatarRaw}?s=512`) : "";
-    let postPhotos = photos;
-    if (!postPhotos.length && avatar && (!userText || userText.length <= 900)) postPhotos = [avatar];
 
     return {
       ref,
       url: `https://github.com/${ref}`,
       full: tgEscape(String(repo.full_name)),
       userText: userText || undefined,
-      photos: postPhotos,
+      photos,
+      banner: `https://opengraph.githubassets.com/1/${ref}`,
       avatar,
       summary, hook,
       stack: tgEscape(String(repo.language ?? "—")),
@@ -274,28 +274,44 @@ export class Showcase {
     };
   }
 
-  /** Pure: the words post — a few lines, one score line, the link. The
-   *  tables are gone on purpose: the owner wants a channel that breathes.
-   *  Only reached as a fallback (avatar missing, or a very long own text). */
-  renderRichPost(parts: PostParts, serial: number, fa: boolean): string {
+  /** Pure: the data half of the post — the score and the maker, as tables.
+   *  With an intro it also carries the header and the lines (the shape used
+   *  when no photo could be sent, or the maker's own text is the post). */
+  renderTablesDoc(parts: PostParts, serial: number, fa: boolean, withIntro: boolean): string {
     const header = fa ? `🚀 معرفی پروژهٔ #${serial}` : `🚀 Showcase #${serial}`;
-    const hook = parts.hook && !parts.userText ? ` — ${parts.hook}` : "";
-    const score = parts.userText ? "" : p(`🏅 ${parts.score.total}/100 ${parts.score.grade}`);
-    return h1(header) +
-      aside(`<b>${parts.full}</b>${hook}`) +
-      p(parts.userText ? tgEscape(parts.userText) : parts.summary) +
-      score +
+    if (parts.userText) {
+      /* the maker's own words, nothing else — no tables, no score */
+      return h1(header) + aside(`<b>${parts.full}</b>`) + p(tgEscape(parts.userText)) + hr() + footer(`🔗 ${parts.url}`);
+    }
+    const intro = withIntro
+      ? h1(header) + aside(`<b>${parts.full}</b>${parts.hook ? ` — ${parts.hook}` : ""}`) + p(parts.summary)
+      : "";
+    return intro +
+      table([
+        [fa ? "بخش" : "Part", fa ? "امتیاز" : "Score"],
+        [fa ? "فعالیت" : "Activity", `${parts.score.parts.activity}/30`],
+        [fa ? "محبوبیت" : "Popularity", `${parts.score.parts.popularity}/30`],
+        [fa ? "جامعه" : "Community", `${parts.score.parts.community}/20`],
+        [fa ? "بلوغ" : "Maturity", `${parts.score.parts.maturity}/20`],
+        [fa ? "کل" : "Total", `<b>${parts.score.total}/100 — ${parts.score.grade}</b>`],
+      ], { caption: fa ? "🏅 نمرهٔ پروژه" : "🏅 Project score" }) +
+      (parts.owner ? table([
+        [fa ? "سازنده" : "Maker", fa ? "مشخصات" : "Details"],
+        ["👤", `<a href="${parts.owner.url}">${parts.owner.login}</a>`],
+        [fa ? "فالوورها" : "Followers", parts.owner.followers],
+        [fa ? "ریپوهای عمومی" : "Public repos", parts.owner.repos],
+      ], { caption: fa ? "👤 سازندهٔ پروژه" : "👤 The maker" }) : "") +
+      hr() +
       footer(`🔗 ${parts.url}`);
   }
 
-  /** Pure: the caption every photo post carries — header, hook, a few
-   *  lines, one score line, the link. Nothing else. */
+  /** Pure: the caption the photo carries — header, hook, a few lines, the
+   *  link. The score stays in the table below, not here. */
   renderCaption(parts: PostParts, serial: number, fa: boolean): string {
     const head = fa ? `🚀 معرفی پروژهٔ #${serial} — <b>${parts.full}</b>` : `🚀 Showcase #${serial} — <b>${parts.full}</b>`;
     const hook = parts.hook && !parts.userText ? `\n<i>${parts.hook}</i>` : "";
     const body = parts.userText ? tgEscape(parts.userText).slice(0, 900) : parts.summary;
-    const score = parts.userText ? "" : `\n\n🏅 ${parts.score.total}/100 ${parts.score.grade}`;
-    return `${head}${hook}\n\n${body}${score}\n\n🔗 ${parts.url}`;
+    return `${head}${hook}\n\n${body}\n\n🔗 ${parts.url}`;
   }
 
   previewKb(fa: boolean, manual: boolean) {
@@ -322,14 +338,29 @@ export class Showcase {
         rows, !!h.cbId,
       );
     }
-    if (parts.photos.length === 1) {
-      const r: any = await h.tg.sendPhoto(h.chatId, parts.photos[0], this.renderCaption(parts, serial, fa), { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
+    const cap = this.renderCaption(parts, serial, fa);
+    if (parts.userText) {
+      /* the maker's post is one message: his photo — or the banner — with
+       * his words on it, keys under it */
+      const img = parts.photos[0] || (parts.userText.length <= 900 ? (parts.banner || parts.avatar) : "");
+      if (img) {
+        const r: any = await h.tg.sendPhoto(h.chatId, img, cap, { parse_mode: "HTML", reply_markup: rows } as any).catch(() => null);
+        if (r?.result?.message_id) {
+          return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
+        }
+      }
+      return h.reply(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
+    }
+    /* the AI post: the white GitHub banner with the pitch on it, the tables
+     * right under it carrying the keys */
+    const img = parts.banner || parts.avatar;
+    if (img) {
+      const r: any = await h.tg.sendPhoto(h.chatId, img, cap, { parse_mode: "HTML" } as any).catch(() => null);
       if (r?.result?.message_id) {
-        /* the keys ride on the photo itself; turn the loader into the hint */
-        return h.reply(fa ? "👁 <b>پیش‌نمایش</b> — زیر همین عکس، در چنل، دکمهٔ ⭐ ستارهٔ واقعی و کلیدها هم می‌نشیند." : "👁 Preview — the ⭐ key and the glass keys ride under this photo in the channel.", undefined, !!h.cbId);
+        return h.reply(this.renderTablesDoc(parts, serial, fa, false), rows, !!h.cbId);
       }
     }
-    return h.reply(this.renderRichPost(parts, serial, fa), rows, !!h.cbId);
+    return h.reply(this.renderTablesDoc(parts, serial, fa, true), rows, !!h.cbId);
   }
 
   async previewAuto(h: H, ref: string) {
@@ -404,17 +435,48 @@ export class Showcase {
         chat_id: target.send,
         media: parts.photos.map((id, i) => ({ type: "photo", media: id, ...(i === 0 ? { caption: this.renderCaption(parts, serial, fa), parse_mode: "HTML" } : {}) })),
       }).catch(() => null);
-    } else if (parts.photos.length === 1) {
-      const r: any = await h.tg.sendPhoto(target.send as any, parts.photos[0], this.renderCaption(parts, serial, fa), { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
-      mid = r?.result?.message_id ?? null;
+    } else if (parts.userText) {
+      /* the maker's post is one message: his photo — or the banner — with
+       * his words on it, keys under it; words too long for a caption ride
+       * as a text post instead */
+      const cap = this.renderCaption(parts, serial, fa);
+      const img = parts.photos[0] || (parts.userText.length <= 900 ? (parts.banner || parts.avatar) : "");
+      if (img) {
+        const r: any = await h.tg.sendPhoto(target.send as any, img, cap, { parse_mode: "HTML", reply_markup: markup } as any).catch(() => null);
+        mid = r?.result?.message_id ?? null;
+      }
+      if (!mid) {
+        const rich = this.renderTablesDoc(parts, serial, fa, true);
+        try {
+          const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
+          mid = r?.result?.message_id ?? null;
+        } catch {
+          const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
+          mid = r2?.result?.message_id ?? null;
+        }
+      }
     } else {
-      const rich = this.renderRichPost(parts, serial, fa);
+      /* the AI post: GitHub's white banner card with the pitch as its
+       * caption, then the data half — score and maker tables — carrying the
+       * star key and the glass keys right under it */
+      const cap = this.renderCaption(parts, serial, fa);
+      let mid1: number | null = null;
+      const img = parts.banner || parts.avatar;
+      if (img) {
+        const r: any = await h.tg.sendPhoto(target.send as any, img, cap, { parse_mode: "HTML" } as any).catch(() => null);
+        mid1 = r?.result?.message_id ?? null;
+        if (!mid1 && parts.avatar && parts.avatar !== img) {
+          const r2: any = await h.tg.sendPhoto(target.send as any, parts.avatar, cap, { parse_mode: "HTML" } as any).catch(() => null);
+          mid1 = r2?.result?.message_id ?? null;
+        }
+      }
+      const rich = this.renderTablesDoc(parts, serial, fa, !mid1);
       try {
         const r: any = await h.tg.sendRichMessage(target.send, rich, { reply_markup: markup } as any);
-        mid = r?.result?.message_id ?? null;
+        mid = (mid1 ?? r?.result?.message_id) ?? null;
       } catch {
         const r2: any = await h.tg.sendLong(target.send, richToLegacy(rich), { parse_mode: "HTML", reply_markup: markup as any }).catch(() => null);
-        mid = r2?.result?.message_id ?? null;
+        mid = (mid1 ?? r2?.result?.message_id) ?? null;
       }
     }
 
