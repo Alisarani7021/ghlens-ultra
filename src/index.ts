@@ -203,10 +203,10 @@ export default {
             cb_text: s.body?.text && s.method === "answerCallbackQuery" ? s.body.text : undefined,
             // every keyboard this reply carries, so the audit can assert things
             // like "every screen has a way back"
-            buttons: (s.body?.reply_markup?.inline_keyboard ?? []).flat()
+            buttons: ((typeof s.body?.reply_markup === "string" ? JSON.parse(s.body.reply_markup) : s.body?.reply_markup)?.inline_keyboard ?? []).flat()
               .map((b: any) => b.text ?? b.web_app?.url ?? b.url ?? "").slice(0, 80),
             home: !!(s.body?.reply_markup?.keyboard),
-            kb: s.body?.reply_markup?.inline_keyboard?.length ?? 0,
+            kb: (typeof s.body?.reply_markup === "string" ? JSON.parse(s.body.reply_markup) : s.body?.reply_markup)?.inline_keyboard?.length ?? 0,
             doc: s.body?.document ?? s.body?.photo ?? undefined,
             // rich messages: keep the payload so an audit can check the shape
             // (blocks, rtl flag) instead of trusting that a new API worked
