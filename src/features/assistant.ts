@@ -321,35 +321,64 @@ export class Assistant {
         });
     /* A stub can be *cached* (valid JSON, no substance) — and a retry that
        hits the same cache answers with the same stub forever. Drop the entry
-       and ask once more; whatever comes back after that is the final answer. */
-    const substance = (x: any) => !!(x && (x.what || x.best || x.ready));
+       the chat layer wrote under this repo's stars-key and ask once more;
+       whatever comes back after that is the final answer. */
+    const substance = (x: any) => !!(x && (x.what || (x.pros ?? []).length || (x.cons ?? []).length));
     let raw = await ask();
     if (!substance(raw)) {
-      await h.env.CACHE.delete(`ai:smart:ana3:${meta.full_name}:${meta.stars}`).catch(() => null);
+      await h.env.CACHE.delete(`ai:smart:ana:${meta.full_name}:${meta.stars}`).catch(() => null);
       raw = await ask();
     }
+
+    /* A JSON that parses but carries no substance — a weak model's stub, a
+       one-liner and nothing else — is not an analysis. Refuse it rather than
+       render two lines and call it a brief; the honest screen says what
+       happened and carries a retry. */
     const a = substance(raw) ? raw : null;
 
-    if (a?.one_liner) {
-      await h.env.DB.prepare(`UPDATE repos SET ai_summary_fa=? WHERE full_name=?`).bind(a.one_liner, full).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
-    }
-    /* Four lines, not a scroll: title, one honest sentence, strengths and
-     * weaknesses on one line, the verdict on the last. The doors under it
-     * carry the rest — scout, chat, translation, download. */
-    const stat = `⭐ <b>${fmt(meta.stars ?? 0)}</b> · 🍴 <b>${fmt(meta.forks ?? 0)}</b> · 🧩 <code>${tgEscape(meta.language ?? "—")}</code>`;
-    const head = `🎯 <b>${tgEscape(full)}</b> · ${stat}`;
-    let text: string;
     if (a) {
-      const line1 = [a.best ? `✅ ${tgEscape(String(a.best))}` : "", a.worst ? `⚠️ ${tgEscape(String(a.worst))}` : ""].filter(Boolean).join(" · ");
-      const line2 = [a.ready ? `🏭 ${tgEscape(String(a.ready))}` : "", a.curve ? `📚 ${tgEscape(String(a.curve))}` : ""].filter(Boolean).join(" · ");
-      text = head + "\n\n" + tgEscape(String(a.what ?? "")) + (line1 ? `\n\n${line1}` : "") + (line2 ? `\n${line2}` : "");
-    } else {
-      text = head + "\n\n" +
-        (meta.description ? `<i>${tgEscape(meta.description)}</i>\n\n` : "") +
-        (fa ? "🤖 تحلیل همین حالا از مدل جواب نگرفت — «تلاش دوباره» یک بار دیگر می‌پرسد." : "🤖 The model did not answer just now — retry asks again.");
+      await h.env.DB.prepare(`UPDATE repos SET ai_summary_fa=? WHERE full_name=?`).bind(a.one_liner ?? "", full).run().catch((e: any) => console.error("lens-swallowed", String(e?.message ?? e)));
     }
-    await h.reply(
-      text,
+    /* The analysis is structured data, so the rich screen is built from the
+       structure itself — a document with sections and lists, like the README
+       reader and the architecture screen. The previous version passed a
+       ready-made HTML string through the *markdown* converter, which escaped
+       every tag: the screen rendered literal `<b>` characters and none of the
+       document shapes. */
+    const { richDoc, inlineMd: inline } = await import("../hub/richdoc");
+    const { p, h3, ul, aside, table, footer } = await import("../tg/rich");
+    const li = (x: string) => tgEscape(String(x ?? ""));
+    const body = a
+      ? [
+          a.one_liner ? aside(tgEscape(a.one_liner), fa ? "در یک خط" : "in one line") : "",
+          a.what ? h3(`📖 ${fa ? "چیست" : "What it is"}`) + p(tgEscape(a.what)) : "",
+          a.who_for ? h3(`👤 ${fa ? "برای کیست" : "Who it is for"}`) + p(tgEscape(a.who_for)) : "",
+          (a.pros ?? []).length ? h3(`✅ ${fa ? "نقاط قوت" : "Pros"}`) + ul((a.pros ?? []).map(li)) : "",
+          (a.cons ?? []).length ? h3(`⚠️ ${fa ? "نقاط ضعف (صادقانه)" : "Cons (honest)"}`) + ul((a.cons ?? []).map(li)) : "",
+          (a.alternatives ?? []).length ? h3(`🔀 ${fa ? "جایگزین‌ها" : "Alternatives"}`) + ul((a.alternatives ?? []).map(li)) : "",
+          table([
+            [fa ? "ارزیابی" : "assessment", fa ? "نتیجه" : "verdict"],
+            [`📚 ${fa ? "شیب یادگیری" : "Learning curve"}`, tgEscape(a.learning_curve ?? "—")],
+            [`🏭 ${fa ? "آمادهٔ تولید" : "Production ready"}`, `<b>${tgEscape(a.production_ready ?? "—")}</b>`],
+            [`🛡 ${fa ? "نکتهٔ امنیتی" : "Security note"}`, tgEscape(a.security_note ?? "—")],
+          ]),
+          (a.tags_fa ?? []).length ? p(`🏷 ${(a.tags_fa ?? []).map((t: string) => code("#" + t)).join(" ")}`) : "",
+        ].filter(Boolean).join("\n")
+      : [
+          p(meta.description ? tgEscape(meta.description) : (fa ? "بدون توضیح." : "No description.")),
+          p(`⭐ <b>${fmt(meta.stars)}</b> · 🍴 <b>${fmt(meta.forks)}</b> · 🐞 ${fmt(meta.open_issues)} · 🧩 <code>${tgEscape(meta.language ?? "—")}</code>`),
+          aside(fa
+            ? "تحلیل کامل همین حالا از مدل جواب نگرفت — دادهٔ مخزن سالم است و «تلاش دوباره» یک بار دیگر می‌پرسد. کاوش عمیق و چت با مخزن همین حالا کار می‌کنند."
+            : "The model did not return a complete brief just now — retry asks again."),
+          p(`🔗 <a href="https://github.com/${tgEscape(full)}">github.com/${tgEscape(full)}</a>`),
+        ].join("\n");
+    await h.replyRich(
+      richDoc({
+        title: `🎯 ${full}`,
+        meta: `⭐ <b>${fmt(meta.stars ?? 0)}</b> · 🍴 <b>${fmt(meta.forks ?? 0)}</b> · 🧩 <code>${inline(meta.language ?? "—")}</code> · <i>${fa ? "از دادهٔ زندهٔ گیت‌هاب" : "live GitHub data"}</i>`,
+        body,
+        footer: footer(fa ? "تولیدشده با Workers AI بر اساس دادهٔ زندهٔ گیت‌هاب" : "Generated by Workers AI from live GitHub data"),
+      }),
       kb(
         ...((!a) ? [[{ text: "🔁 " + (fa ? "تلاش دوباره برای تحلیل" : "Retry the analysis"), cb: `ai:repo:${full}` }]] : []),
         [
