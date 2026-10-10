@@ -2417,7 +2417,14 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
   // ── idle panel: the day's hottest four, live — not a dead end ──────────
   if (query.length < 2) {
     const board = await new TrendingEngine(env).rank("daily", "all", 4).catch(() => []);
-    const results: any[] = board.map((r: any) => repoArticle(r, fa, r.gained));
+    /* the board rows speak their own shape (stars, owner_avatar, url) —
+     * repoArticle speaks the GitHub search shape. Translate, don't trust. */
+    const results: any[] = board.map((r: any) => repoArticle({
+      full_name: r.full_name, html_url: r.url, description: r.description, language: r.language,
+      stargazers_count: r.stars, forks_count: r.forks, pushed_at: r.pushed_at, created_at: r.created_at,
+      topics: r.topics, license: r.license ? { spdx_id: r.license } : null,
+      owner: { avatar_url: r.owner_avatar },
+    }, fa, r.gained));
     results.push(helpArticle(fa));
     return tg.answerInlineQuery(q.id, results, 300, "", results.length > 1 ? hotButton : undefined);
   }
