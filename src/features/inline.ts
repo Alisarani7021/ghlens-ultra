@@ -109,9 +109,14 @@ export function repoArticle(r: InlineRepo, fa: boolean, gained?: number): any {
 }
 
 /** The photo card: the repo's white OpenGraph banner served by our own
- *  /og/ proxy (Telegram refuses the CDN directly), with a brief
- *  description in the caption. This is what a tap sends into the chat. */
-export function repoPhotoArticle(r: InlineRepo, fa: boolean, ogBase: string): any {
+ *  /og/ proxy (Telegram refuses the CDN directly). The caption is four lines
+ *  when the AI brief exists — title, what it is, best and worst, the stats —
+ *  and the repo's own description until the first share warms the brief.
+ *  This is what a tap sends into the chat. */
+export function repoPhotoArticle(
+  r: InlineRepo, fa: boolean, ogBase: string,
+  brief?: { one_liner?: string; what?: string; best?: string; worst?: string } | null,
+): any {
   const sc = scorer.repoScore({
     stars: r.stargazers_count, forks: r.forks_count,
     pushedAt: Date.parse(r.pushed_at ?? "") || Date.now(),
@@ -121,9 +126,23 @@ export function repoPhotoArticle(r: InlineRepo, fa: boolean, ogBase: string): an
   const url = r.html_url ?? `https://github.com/${r.full_name}`;
   const desc = (r.description ?? "").trim();
   const base = ogBase.replace(/\/+$/, "");
+  /* the smart caption is the Persian brief — the plain description stands in
+   * until the brief has been generated, so the card never waits on the model */
+  const smart = !!(fa && brief && (brief.what || brief.one_liner));
+  const middle: string[] = [];
+  if (smart) {
+    middle.push(tgEscape(String((brief as any).what || (brief as any).one_liner)));
+    const bw = [
+      (brief as any).best ? `✅ ${tgEscape(String((brief as any).best))}` : "",
+      (brief as any).worst ? `⚠️ ${tgEscape(String((brief as any).worst))}` : "",
+    ].filter(Boolean).join(" · ");
+    if (bw) middle.push(bw);
+  } else if (desc) {
+    middle.push(`<i>${tgEscape(desc)}</i>`);
+  }
   const caption =
     `📦 <b><a href="${url}">${tgEscape(r.full_name)}</a></b> · ${sc.grade}\n\n` +
-    (desc ? `<i>${tgEscape(desc)}</i>\n\n` : "") +
+    (middle.length ? middle.join("\n\n") + "\n\n" : "") +
     `⭐ <b>${faDigits(r.stargazers_count.toLocaleString("en-US"))}</b> ${fa ? "ستاره" : "stars"}` +
     ` · 🍴 <b>${faDigits(r.forks_count.toLocaleString("en-US"))}</b> ${fa ? "فورک" : "forks"}` +
     ` · 🧩 <b>${tgEscape(r.language ?? (fa ? "چندزبانه" : "polyglot"))}</b>` +
@@ -134,7 +153,7 @@ export function repoPhotoArticle(r: InlineRepo, fa: boolean, ogBase: string): an
     thumbnail_url: `${base}/og/${r.full_name}.png`,
     photo_width: 1200, photo_height: 600,
     title: `📦 ${r.full_name} · ${sc.grade}`,
-    description: (desc || (fa ? "بدون توضیح" : "No description")).slice(0, 95),
+    description: (smart ? String((brief as any).one_liner ?? desc) : (desc || (fa ? "بدون توضیح" : "No description"))).slice(0, 95),
     caption,
     parse_mode: "HTML",
     reply_markup: {

@@ -2442,6 +2442,28 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     return r;
   };
 
+  /* the shared card speaks four lines now — the AI brief when it has been
+   * generated, the repo's own description until then. KV reads are cheap and
+   * run in parallel; the brief itself is warmed once per ten minutes per repo,
+   * in the background, so the panel never waits on the model. */
+  const briefsOf = async (list: any[]) => {
+    const out = new Map<string, any>();
+    await Promise.all(list.map(async (m: any) => {
+      const v = await env.CACHE.get(`ai:smart:ana3:${m.full_name}:${m.stargazers_count}`).catch(() => null);
+      if (v) { try { out.set(m.full_name, JSON.parse(v)); } catch { /* a stub is not a brief */ } }
+    }));
+    return out;
+  };
+  const warmTop = (m: any) => {
+    if (!m?.full_name) return;
+    const k = `ai:smart:warm:${m.full_name}`;
+    env.CACHE.get(k).then((hit: string | null) => {
+      if (hit) return;
+      env.CACHE.put(k, "1", { expirationTtl: 600 }).catch(() => null);
+      ctx.waitUntil(warmBrief(env, ai, m).catch(() => null));
+    }).catch(() => null);
+  };
+
   // ── idle panel: the day's hottest four, live — not a dead end ──────────
   if (query.length < 2) {
     const board = await new TrendingEngine(env).rank("daily", "all", 4).catch(() => []);
@@ -2458,7 +2480,9 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     /* the same photo-first bargain as a search: banners if Telegram will
      * fetch them, the graded text cards if it will not */
     const ogBase = env.WORKER_URL ?? "";
-    const r = await answer([...hot.map((m: any) => repoPhotoArticle(m, fa, ogBase)), ...tail], 300, hotButton);
+    const briefs = await briefsOf(hot);
+    warmTop(hot[0]);
+    const r = await answer([...hot.map((m: any) => repoPhotoArticle(m, fa, ogBase, briefs.get(m.full_name))), ...tail], 300, hotButton);
     if (!r?.ok) {
       return answer([...hot.map((m: any, i: number) => repoArticle(m, fa, hot[i].gained)), ...tail], 300, hotButton);
     }
@@ -2500,8 +2524,10 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
    * its caption; if Telegram refuses to fetch the banners, the same
    * cards go out as articles, so the panel never spins on a photo. */
   const ogBase = env.WORKER_URL ?? "";
+  const briefs = await briefsOf(repos.slice(0, 19));
+  warmTop(repos[0]);
   const r = await answer(
-    [...repos.slice(0, 19).map((m: any) => repoPhotoArticle(m, fa, ogBase)), ...tail], 60, hotButton);
+    [...repos.slice(0, 19).map((m: any) => repoPhotoArticle(m, fa, ogBase, briefs.get(m.full_name))), ...tail], 60, hotButton);
   if (!r?.ok) {
     return answer([...repos.slice(0, 19).map((m: any) => repoArticle(m, fa)), ...tail], 60, hotButton);
   }
@@ -2890,3 +2916,37 @@ export async function completeLink(h: H, token: string): Promise<void> {
 /** Kept as named aliases so existing call sites keep working. */
 export const encryptToken = (env: Env, plain: string) => encryptSecret(env, plain, "github-token");
 export const decryptToken = (env: Env, packedB64: string) => decryptSecret(env, packedB64, "github-token");
+
+/** Generate and cache the four-line brief for a repo the inline panel just
+ *  showed — readme, contributors, releases and recent commits, the same real
+ *  data the dossier judges by. Runs in waitUntil; the next share reads it. */
+async function warmBrief(env: Env, ai: AiBrain, m: any): Promise<void> {
+  const full = m.full_name;
+  const gh = new GithubRest(env);
+  const [readmeRaw, contribs, rels, commits] = await Promise.all([
+    gh.readme(full, 1800).catch(() => null),
+    gh.contributors(full, 10).catch(() => [] as any[]),
+    gh.releases(full, 5).catch(() => [] as any[]),
+    gh.commits(full, 10).catch(() => [] as any[]),
+  ]);
+  let readmeExcerpt = "";
+  try {
+    const txt = readmeRaw?.content
+      ? (readmeRaw.encoding === "base64"
+          ? atob(String(readmeRaw.content).replace(/\n/g, ""))
+          : String(readmeRaw.content))
+      : "";
+    readmeExcerpt = txt.slice(0, 1500);
+  } catch { /* a readme that will not decode is no readme */ }
+  await ai.analyzeRepoBrief({
+    full_name: full, description: m.description ?? null,
+    stars: m.stargazers_count, forks: m.forks_count, issues: m.open_issues_count ?? 0, prs: 0,
+    language: m.language ?? null, languages: [], topics: m.topics ?? [],
+    license: m.license?.spdx_id ?? null, archived: !!m.archived,
+    pushed_at: m.pushed_at, created_at: m.created_at,
+    contributors: Array.isArray(contribs) ? contribs.length : 0,
+    releases: Array.isArray(rels) ? rels.length : 0,
+    community_health: 0, redFlags: [], readme_excerpt: readmeExcerpt,
+    raw: { commitHistory: { target: { history: { nodes: (Array.isArray(commits) ? commits : []).map((c: any) => ({ messageHeadline: c.commit?.message?.split("\n")[0] })) } } } },
+  });
+}

@@ -682,6 +682,35 @@ export class AiBrain {
     );
   }
 
+  /** The inline card's four-line brief — the dossier's terse sister, cut for
+   *  a caption: one sentence of what it is, the best and the worst of it,
+   *  a verdict. Same honesty rules, same real data, a tenth of the words. */
+  analyzeRepoBrief(meta: any) {
+    return this.json<{
+      one_liner: string; what: string; best: string; worst: string; ready: string; curve: string;
+    }>(
+      `Analyse this GitHub repository and answer in Persian (فارسی).\n` +
+        `Data: ${JSON.stringify({
+          full_name: meta.full_name, description: meta.description, stars: meta.stars, forks: meta.forks,
+          issues: meta.issues, open_prs: meta.prs, language: meta.language,
+          languages: (meta.languages ?? []).slice(0, 6).map((l: any) => l.name),
+          topics: (meta.topics ?? []).slice(0, 12), license: meta.license, archived: meta.archived,
+          pushed_at: meta.pushed_at, created_at: meta.created_at, contributors: meta.contributors,
+          releases_last_year: meta.releases, community_health: meta.community_health, red_flags: meta.redFlags,
+          readme_excerpt: String(meta.readme_excerpt ?? "").slice(0, 1500),
+          recent_commits: (meta.raw?.commitHistory?.target?.history?.nodes ?? []).slice(0, 10).map((c: any) => c.messageHeadline),
+        })}\n` +
+        `Rules — honesty beats completeness, brevity beats both:\n` +
+        `- Every claim must rest on the data above; never guess about tests, docs, security or anything the data does not show.\n` +
+        `- best and worst must be data-grounded (readme facts, stars, contributors, releases, push dates).\n` +
+        `- Terse. No filler, no generalities.\n` +
+        `Return JSON: one_liner (max 80 chars), what (one sentence, max 20 words — what this project IS), ` +
+        `best (one short phrase — the strongest real point), worst (one short phrase — the weakest real point), ` +
+        `ready (بله/خیر/با احتیاط + at most 6 words why), curve (کم/متوسط/زیاد).`,
+      { tier: "smart", max_tokens: 500, cacheKey: `ana3:${meta.full_name}:${meta.stars}`, cacheTtl: 604800 },
+    );
+  }
+
   /** Semantic query understanding for search: Persian/English NL → GitHub search query. */
   /**
    * Search planner, with an output sanity gate.
