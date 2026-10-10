@@ -277,6 +277,27 @@ export class Assistant {
        is a cache read, not a new model call. */
     const gql = h.gh();
     const commits = await gql.commits(full, 10).catch(() => []);
+    /* The model used to judge blind — stats and ten commit lines — and
+     * invented whatever it could not see: «نبود آزمون‌های خودکار» for a repo
+     * with 500 tests, «Git.io» as a rival. Now it also sees the readme's own
+     * first words, the real contributor count and the real release cadence,
+     * and the prompt forbids claims the data does not carry. */
+    const [readmeRaw, contribs, rels] = await Promise.all([
+      gql.readme(full, 1800).catch(() => null),
+      gql.contributors(full, 10).catch(() => [] as any[]),
+      gql.releases(full, 5).catch(() => [] as any[]),
+    ]);
+    let readmeExcerpt = "";
+    try {
+      const txt = readmeRaw?.content
+        ? (readmeRaw.encoding === "base64"
+            ? atob(String(readmeRaw.content).replace(/\n/g, ""))
+            : String(readmeRaw.content))
+        : "";
+      readmeExcerpt = txt.slice(0, 1500);
+    } catch { /* a readme that will not decode is no readme */ }
+    const nContribs = Array.isArray(contribs) ? contribs.length : 0;
+    const nReleases = Array.isArray(rels) ? rels.length : 0;
     const ask = () => h.ai.analyzeRepo({
           full_name: meta.full_name,
           description: meta.description,
@@ -291,9 +312,11 @@ export class Assistant {
           archived: !!meta.archived,
           pushed_at: meta.pushed_at,
           created_at: meta.created_at,
-          contributors: 0,
+          contributors: nContribs,
+          releases: nReleases,
           community_health: 0,
           redFlags: [],
+          readme_excerpt: readmeExcerpt,
           raw: { commitHistory: { target: { history: { nodes: commits.map((c: any) => ({ messageHeadline: c.commit?.message?.split("\n")[0] })) } } } },
         });
     /* A stub can be *cached* (valid JSON, no substance) — and a retry that
