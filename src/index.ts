@@ -2481,7 +2481,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
      * fetch them, the graded text cards if it will not */
     const ogBase = env.WORKER_URL ?? "";
     const briefs = await briefsOf(hot);
-    warmTop(hot[0]);
+    if (hot[0] && !briefs.has(hot[0].full_name)) warmTop(hot[0]);
     const r = await answer([...hot.map((m: any) => repoPhotoArticle(m, fa, ogBase, briefs.get(m.full_name))), ...tail], 300, hotButton);
     if (!r?.ok) {
       return answer([...hot.map((m: any, i: number) => repoArticle(m, fa, hot[i].gained)), ...tail], 300, hotButton);
@@ -2525,7 +2525,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
    * cards go out as articles, so the panel never spins on a photo. */
   const ogBase = env.WORKER_URL ?? "";
   const briefs = await briefsOf(repos.slice(0, 19));
-  warmTop(repos[0]);
+  if (repos[0] && !briefs.has(repos[0].full_name)) warmTop(repos[0]);
   const r = await answer(
     [...repos.slice(0, 19).map((m: any) => repoPhotoArticle(m, fa, ogBase, briefs.get(m.full_name))), ...tail], 60, hotButton);
   if (!r?.ok) {
