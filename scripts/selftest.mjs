@@ -406,7 +406,7 @@ const RD_ = more.richdoc;
 /* the wiring engine and the card helpers are pure logic too, and both now carry
    decisions that must not drift: which repositories a mission names, and what a
    licence looks like after GitHub has sent it in three different shapes. */
-for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"], ["tg_api", "src/tg/api.ts"], ["feat_showcase", "src/features/showcase.ts"]]) {
+for (const [name, src] of [["hub3_wiring", "src/hub/wiring.ts"], ["feat_cards", "src/features/cards.ts"], ["tg_rich", "src/tg/rich.ts"], ["tg_premium", "src/tg/premium.ts"], ["tg_nav", "src/tg/nav.ts"], ["feat_channelarm", "src/features/channelarm.ts"], ["feat_deeplink", "src/features/deeplink.ts"], ["feat_multihub", "src/features/multihub.ts"], ["tg_api", "src/tg/api.ts"], ["feat_showcase", "src/features/showcase.ts"], ["feat_inline", "src/features/inline.ts"]]) {
   const outFile = join(scratch, `${name}.mjs`);
   execSync(`npx esbuild ${src} --bundle --format=esm --platform=neutral --outfile=${outFile} --log-level=error`, { stdio: "inherit" });
 }
@@ -1242,6 +1242,56 @@ const enc = (s) => new TextEncoder().encode(s);
   }
 
   ok("channel: nothing needs the router", kb.inline_keyboard.flat().every((b) => !b.callback_data));
+
+  // ── the inline panel: every card earns its tap ─────────────────────────
+  {
+    const IN = await import(join(scratch, "feat_inline.mjs"));
+    const hotRepo = {
+      full_name: "oven-sh/bun", html_url: "https://github.com/oven-sh/bun",
+      description: "Incredibly fast JavaScript runtime", language: "Zig",
+      stargazers_count: 82500, forks_count: 3100,
+      pushed_at: new Date().toISOString(), created_at: "2001-01-01T00:00:00Z",
+      topics: ["javascript", "runtime"], license: { spdx_id: "MIT" },
+      owner: { avatar_url: "https://github.com/oven-sh.png" },
+    };
+    const card = IN.repoArticle(hotRepo, true, 120);
+    const keys = card.reply_markup.inline_keyboard.flat();
+    ok("inline: a repo card carries the grade and the heat",
+       card.title.includes("oven-sh/bun") && card.title.includes("🥇") &&
+       card.description.includes("🔥 +۱۲۰ امروز") && card.description.includes("82.5k"));
+    ok("inline: the card's message packs stars, forks, language and freshness",
+       card.input_message_content.message_text.includes("۸۲,۵۰۰") &&
+       card.input_message_content.message_text.includes("Zig") &&
+       card.input_message_content.message_text.includes("امروز") &&
+       card.input_message_content.message_text.includes("#javascript"));
+    ok("inline: every key is a link — four doors, no router needed",
+       keys.length === 4 && keys.every((k) => !!k.url));
+    ok("inline: the doors are the deep links the bot already serves",
+       keys.some((k) => k.url.endsWith("start=s_oven-sh_bun")) &&
+       keys.some((k) => k.url.endsWith("start=c_oven-sh_bun")) &&
+       keys.some((k) => k.url.endsWith("start=t_oven-sh_bun")) &&
+       keys.some((k) => k.url === "https://github.com/oven-sh/bun"));
+    const stale = IN.repoArticle({ ...hotRepo, pushed_at: "2020-01-01T00:00:00Z" }, true);
+    ok("inline: a dead repo says how long it has been quiet",
+       stale.input_message_content.message_text.includes("روز پیش"));
+    eq("inline: numbers ride compact", IN.fmtK(950), "950");
+    eq("inline: 9999 reads as 10k", IN.fmtK(9999), "10k");
+    const user = IN.userArticle({ login: "alisarani7021", followers: 3818, public_repos: 36, bio: "می‌سازم" },
+      [{ full_name: "alisarani7021/ghlens-ultra", stargazers_count: 1234 }], true);
+    ok("inline: a user card shows the maker and his best repo",
+       user.title === "👤 alisarani7021" && user.input_message_content.message_text.includes("۳,۸۱۸ فالوور") &&
+       user.input_message_content.message_text.includes("ghlens-ultra"));
+    const help = IN.helpArticle(true);
+    ok("inline: the empty panel teaches the three shapes of a query",
+       help.input_message_content.message_text.includes("owner/repo") &&
+       help.input_message_content.message_text.includes("@username"));
+    const miss = IN.notFoundArticle(true, "چیزی‌که‌نیست");
+    ok("inline: a miss still hands back a next step", miss.title.includes("چیزی‌که‌نیست"));
+    const trend = IN.trendingArticle(true);
+    ok("inline: the trending card opens the board in the bot",
+       trend.reply_markup.inline_keyboard[0][0].url.endsWith("start=trending"));
+  }
+
   // Bot API 9.4 colours: every key is painted, the scheme is left-accent
   ok("channel: every glass key is coloured",
      kb.inline_keyboard.flat().every((b) => ["primary", "success", "danger"].includes(b.style)));

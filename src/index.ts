@@ -16,6 +16,7 @@ import { Store } from "./core/db";
 import { BlobStore } from "./core/blobstore";
 import { AiBrain } from "./ai/brain";
 import { RepoCard } from "./features/cards";
+import { repoArticle, userArticle, helpArticle, notFoundArticle, trendingArticle } from "./features/inline";
 import type { H } from "./core/handler";
 import { loadingText } from "./core/handler";
 import { GithubRest } from "./github/rest";
@@ -1325,6 +1326,9 @@ async function routeCommand(cmd: string, arg: string, h: H, env: Env, ctx: Ctx) 
       if (arg === "k_keys") return keysFeature.home(h);
       if (arg === "hub" || arg === "cloud") return hubOS.home(h);
       if (arg === "project") return showcase.intro(h);
+      /* the inline panel's big button lands here — the board, not the
+       * settings screen, is what that tap promised */
+      if (arg === "trending") return trendingMenuOrBoard(h, "");
       // referral?
       if (arg.startsWith("ref_")) {
         await h.env.DB.prepare(`UPDATE users SET referral_by=(SELECT id FROM users WHERE referral_code=?) WHERE id=? AND referral_by IS NULL`)
@@ -2401,93 +2405,56 @@ async function exportMyData(h: H) {
 
 // ── inline mode ────────────────────────────────────────────────────────────
 async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, store: Store, ai: AiBrain) {
+  /* the panel is the shop window — a dry list taught nobody anything.
+   * Every state owes the reader something worth a tap: the empty panel
+   * shows today's hottest, a miss shows the way back, and every card
+   * carries the grade, the stars and four doors into the bot. */
+  const fa = (q.from?.language_code ?? "fa").startsWith("fa");
   const query = q.query.trim();
-  if (query.length < 2) {
-    return tg.answerInlineQuery(q.id, [{
-      type: "article", id: "help",
-      title: "GitHub Lens Ultra — type a repo or topic",
-      description: "e.g. cloudflare/workers-sdk · react state management · python http client",
-      input_message_content: { message_text: "🔍 GitHub Lens Ultra — کشف هوشمند اوپن‌سورس", parse_mode: "HTML" },
-    } as any]);
-  }
   const gh = new GithubRest(env);
-  const results: any[] = [];
+  const hotButton = { text: fa ? "🔥 داغ‌ترین‌های امروز" : "🔥 Today's trending", start: "trending" };
 
-  // direct repo hit
-  if (/^[\w.-]+\/[\w.-]+$/.test(query)) {
-    const m = await gh.repo(query, 600).catch(() => null);
-    if (m) {
-      results.push({
-        type: "article", id: `repo:${m.full_name}`,
-        title: `📦 ${m.full_name} — ⭐ ${m.stargazers_count}`,
-        description: `${m.language ?? "—"} · ${(m.description ?? "No description").slice(0, 80)}`,
-        thumbnail_url: m.owner?.avatar_url,
-        input_message_content: {
-          message_text:
-            `📦 <b><a href="https://github.com/${m.full_name}">${m.full_name}</a></b>\n\n` +
-            `${m.description ? `<i>${m.description}</i>\n\n` : ""}` +
-            `⭐ <b>${m.stargazers_count.toLocaleString()}</b> ستاره · 🍴 <b>${m.forks_count.toLocaleString()}</b> فورک · 🧩 <b>${m.language ?? "نامشخص"}</b>\n\n` +
-            `🔍 کاوش عمیق، دانلود مستقیم سورس و ترجمه با @Gitguts_bot`,
-          parse_mode: "HTML",
-          disable_web_page_preview: false,
-        },
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🛰 باز کردن در ربات", url: `https://t.me/Gitguts_bot?start=repo_${m.full_name.replace("/", "_")}` },
-              { text: "🌐 مشاهده گیت‌هاب", url: m.html_url },
-            ]
-          ]
-        },
-      } as any);
+  // ── idle panel: the day's hottest four, live — not a dead end ──────────
+  if (query.length < 2) {
+    const board = await new TrendingEngine(env).rank("daily", "all", 4).catch(() => []);
+    const results: any[] = board.map((r: any) => repoArticle(r, fa, r.gained));
+    results.push(helpArticle(fa));
+    return tg.answerInlineQuery(q.id, results, 300, "", results.length > 1 ? hotButton : undefined);
+  }
+
+  // ── @username → the maker himself ───────────────────────────────────────
+  if (/^[a-zA-Z0-9-]{2,39}$/.test(query) && query.startsWith("@")) {
+    const login = query.slice(1);
+    const u: any = await gh.get(`/users/${encodeURIComponent(login)}`, 900).catch(() => null);
+    if (u?.login) {
+      const top = await gh.get(`/users/${encodeURIComponent(login)}/repos?sort=stars&per_page=3`, 900).catch(() => []);
+      return tg.answerInlineQuery(q.id,
+        [userArticle(u, Array.isArray(top) ? top : [], fa), trendingArticle(fa)], 120, "", hotButton);
     }
   }
 
-  // search results
-  const res = await gh.searchRepos(query, "stars", "desc", 10).catch(() => null);
-  for (const r of res?.items ?? []) {
-    const updated = (r.pushed_at ?? "").slice(0, 10);
-    const topics = (r.topics ?? []).slice(0, 4).map((t: string) => `#${t}`).join(" ");
-    results.push({
-      type: "article", id: `r:${r.full_name}`,
-      title: `⭐ ${r.stargazers_count.toLocaleString()} | ${r.full_name}`,
-      description: `${r.language ? `[${r.language}] ` : ""}${(r.description ?? "بدون توضیح").slice(0, 80)}`,
-      thumbnail_url: r.owner?.avatar_url,
-      input_message_content: {
-        message_text:
-          `📦 <b><a href="https://github.com/${r.full_name}">${r.full_name}</a></b>\n\n` +
-          `📝 <b>توضیحات:</b>\n<i>${tgEscape(r.description || "بدون توضیحات ثبت‌شده")}</i>\n\n` +
-          `📊 <b>آمار و وضعیت:</b>\n` +
-          `• ⭐ <b>ستاره‌ها:</b> ${r.stargazers_count.toLocaleString()}\n` +
-          `• 🍴 <b>فورک‌ها:</b> ${r.forks_count.toLocaleString()}\n` +
-          `• 🧩 <b>زبان اصلی:</b> <code>${r.language ?? "چندزبانه"}</code>\n` +
-          `• 🕒 <b>آخرین بروزرسانی:</b> <code>${updated}</code>\n` +
-          (topics ? `\n🏷 <b>برچسب‌ها:</b>\n<code>${topics}</code>\n` : "") +
-          `\n────────────\n` +
-          `🤖 <i>تحلیل هوشمند، ترجمه README و دانلود سورس با @Gitguts_bot</i>`,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      },
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🛰 کاوش و دانلود در ربات", url: `https://t.me/Gitguts_bot?start=repo_${r.full_name.replace("/", "_")}` },
-            { text: "🌐 صفحه گیت‌هاب", url: r.html_url },
-          ]
-        ]
-      },
-    } as any);
+  const results: any[] = [];
+
+  // direct repo hit — the exact thing, first
+  if (/^[\w.-]+\/[\w.-]+$/.test(query)) {
+    const m = await gh.repo(query, 600).catch(() => null);
+    if (m) results.push(repoArticle(m, fa));
   }
 
-  // trending shortcut
-  results.push({
-    type: "article", id: "trending",
-    title: "🔥 داغ‌ترین‌های امروز گیت‌هاب",
-    description: "GitHub Lens Ultra trending board",
-    input_message_content: { message_text: `🔥 داغ‌ترین‌های امروز — GitHub Lens Ultra\n${env.WORKER_URL}`, parse_mode: "HTML" },
-  } as any);
+  // topic search — the best of the month, graded
+  if (results.length < 8) {
+    const res = await gh.searchRepos(query, "stars", "desc", 10).catch(() => null);
+    for (const r of res?.items ?? []) {
+      if (results.some((x) => x.id === `repo:${r.full_name}`)) continue;
+      results.push(repoArticle(r, fa));
+    }
+  }
 
-  return tg.answerInlineQuery(q.id, results.slice(0, 20), 20);
+  // a miss still owes a next step
+  if (!results.length) results.push(notFoundArticle(fa, query.slice(0, 40)));
+  results.push(trendingArticle(fa));
+
+  return tg.answerInlineQuery(q.id, results.slice(0, 20), 60, "", hotButton);
 }
 
 // ── misc ───────────────────────────────────────────────────────────────────
