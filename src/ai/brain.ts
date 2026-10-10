@@ -651,12 +651,10 @@ export class AiBrain {
     return translatedEnough(second, clipped) ? second : first;
   }
 
-  /** Repo dossier → structured Persian intelligence brief. */
+  /** Repo dossier → four honest lines, not a scroll. */
   analyzeRepo(meta: any) {
     return this.json<{
-      what: string; who_for: string; pros: string[]; cons: string[];
-      alternatives: string[]; learning_curve: string; production_ready: string;
-      security_note: string; one_liner: string; tags_fa: string[];
+      one_liner: string; what: string; best: string; worst: string; ready: string; curve: string;
     }>(
       `Analyse this GitHub repository and answer in Persian (فارسی).\n` +
         `Data: ${JSON.stringify({
@@ -669,16 +667,14 @@ export class AiBrain {
           readme_excerpt: String(meta.readme_excerpt ?? "").slice(0, 1500),
           recent_commits: (meta.raw?.commitHistory?.target?.history?.nodes ?? []).slice(0, 10).map((c: any) => c.messageHeadline),
         })}\n` +
-        `Rules — honesty beats completeness:\n` +
-        `- Every claim must rest on the data above. What the data does not show, you do not say: never guess about tests, docs, security or anything else.\n` +
-        `- cons: weaknesses VISIBLE in the data (few stars, one contributor, stale pushes, thin readme…). No inventions.\n` +
-        `- alternatives: only real, well-known projects you are CERTAIN compete with this repo. Unsure? Return an empty array.\n` +
-        `- security_note: from the data only; nothing to see → "داده‌ای برای قضاوت در دسترس نیست".\n` +
-        `Return JSON with keys: one_liner (max 90 chars), what (3 sentences), who_for, pros (3-5 bullets), ` +
-        `cons (2-4 bullets, honest, data-grounded), alternatives (0-3 real rivals or []), ` +
-        `learning_curve (کم/متوسط/زیاد + یک جمله), production_ready (بله/خیر/با احتیاط + دلیل), ` +
-        `security_note, tags_fa (5 Persian tags).`,
-      { tier: "smart", max_tokens: 1600, cacheKey: `ana2:${meta.full_name}:${meta.stars}`, cacheTtl: 604800 },
+        `Rules — honesty beats completeness, brevity beats both:\n` +
+        `- Every claim must rest on the data above; never guess about tests, docs, security or anything the data does not show.\n` +
+        `- best and worst must be data-grounded (readme facts, stars, contributors, releases, push dates).\n` +
+        `- Terse. No filler, no generalities.\n` +
+        `Return JSON: one_liner (max 80 chars), what (one sentence, max 20 words — what this project IS), ` +
+        `best (one short phrase — the strongest real point), worst (one short phrase — the weakest real point), ` +
+        `ready (بله/خیر/با احتیاط + at most 6 words why), curve (کم/متوسط/زیاد).`,
+      { tier: "smart", max_tokens: 500, cacheKey: `ana3:${meta.full_name}:${meta.stars}`, cacheTtl: 604800 },
     );
   }
 
