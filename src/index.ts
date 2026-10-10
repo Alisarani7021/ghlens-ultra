@@ -2412,7 +2412,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
   const fa = (q.from?.language_code ?? "fa").startsWith("fa");
   const query = q.query.trim();
   const gh = new GithubRest(env);
-  const hotButton = { text: fa ? "🔥 داغ‌ترین‌های امروز" : "🔥 Today's trending", start: "trending" };
+  const hotButton = { text: fa ? "🔥 داغ‌ترین‌های امروز" : "🔥 Today's trending", start_parameter: "trending" };
   /* answerInlineQuery's answer is Telegram's verdict on the whole payload —
    * a 400 here means the panel spins forever, and it used to die in
    * silence. Say it, so the tail can see it. */

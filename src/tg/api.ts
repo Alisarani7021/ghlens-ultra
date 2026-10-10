@@ -135,7 +135,7 @@ export class Telegram {
     return this.call("answerCallbackQuery", { callback_query_id: id, text, show_alert, cache_time: 0 });
   }
 
-  answerInlineQuery(id: string, results: InlineQueryResult[], cache_time = 30, next_offset = "", button?: { text: string; start: string }) {
+  answerInlineQuery(id: string, results: InlineQueryResult[], cache_time = 30, next_offset = "", button?: { text: string; start_parameter: string }) {
     return this.call("answerInlineQuery", {
       inline_query_id: id, results, cache_time, is_personal: true, next_offset,
       ...(button ? { button } : {}),
