@@ -108,6 +108,61 @@ export function repoArticle(r: InlineRepo, fa: boolean, gained?: number): any {
   };
 }
 
+/** The photo card: the repo's white OpenGraph banner served by our own
+ *  /og/ proxy (Telegram refuses the CDN directly), with a brief
+ *  description in the caption. This is what a tap sends into the chat. */
+export function repoPhotoArticle(r: InlineRepo, fa: boolean, ogBase: string): any {
+  const sc = scorer.repoScore({
+    stars: r.stargazers_count, forks: r.forks_count,
+    pushedAt: Date.parse(r.pushed_at ?? "") || Date.now(),
+    createdAt: Date.parse(r.created_at ?? "") || Date.now(),
+    license: r.license?.spdx_id ?? null, archived: r.archived,
+  });
+  const url = r.html_url ?? `https://github.com/${r.full_name}`;
+  const desc = (r.description ?? "").trim();
+  const base = ogBase.replace(/\/+$/, "");
+  const caption =
+    `📦 <b><a href="${url}">${tgEscape(r.full_name)}</a></b> · ${sc.grade}\n\n` +
+    (desc ? `<i>${tgEscape(desc)}</i>\n\n` : "") +
+    `⭐ <b>${faDigits(r.stargazers_count.toLocaleString("en-US"))}</b> ${fa ? "ستاره" : "stars"}` +
+    ` · 🍴 <b>${faDigits(r.forks_count.toLocaleString("en-US"))}</b> ${fa ? "فورک" : "forks"}` +
+    ` · 🧩 <b>${tgEscape(r.language ?? (fa ? "چندزبانه" : "polyglot"))}</b>` +
+    ` · 🕒 <b>${relDays(r.pushed_at, fa)}</b>`;
+  return {
+    type: "photo", id: `photo:${r.full_name}`,
+    photo_url: `${base}/og/${r.full_name}.png`,
+    thumbnail_url: `${base}/og/${r.full_name}.png`,
+    photo_width: 1200, photo_height: 600,
+    title: `📦 ${r.full_name} · ${sc.grade}`,
+    description: (desc || (fa ? "بدون توضیح" : "No description")).slice(0, 95),
+    caption,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: fa
+        ? [
+            [
+              { text: "کاوش عمیق 🛰", url: deepLink("s", r.full_name) },
+              { text: "تحلیل هوشمند 🧠", url: deepLink("c", r.full_name) },
+            ],
+            [
+              { text: "ترجمهٔ فارسی 🌍", url: deepLink("t", r.full_name) },
+              { text: "گیت‌هاب 🌐", url },
+            ],
+          ]
+        : [
+            [
+              { text: "Deep dive 🛰", url: deepLink("s", r.full_name) },
+              { text: "AI analysis 🧠", url: deepLink("c", r.full_name) },
+            ],
+            [
+              { text: "Translate 🌍", url: deepLink("t", r.full_name) },
+              { text: "GitHub 🌐", url },
+            ],
+          ],
+    },
+  };
+}
+
 /** @username → the maker, not just his code. */
 export function userArticle(
   u: { login: string; avatar_url?: string; html_url?: string; bio?: string | null; followers?: number; public_repos?: number },

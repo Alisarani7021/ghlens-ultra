@@ -16,7 +16,7 @@ import { Store } from "./core/db";
 import { BlobStore } from "./core/blobstore";
 import { AiBrain } from "./ai/brain";
 import { RepoCard } from "./features/cards";
-import { repoArticle, userArticle, helpArticle, notFoundArticle, trendingArticle } from "./features/inline";
+import { repoArticle, repoPhotoArticle, userArticle, helpArticle, notFoundArticle, trendingArticle } from "./features/inline";
 import type { H } from "./core/handler";
 import { loadingText } from "./core/handler";
 import { GithubRest } from "./github/rest";
@@ -393,6 +393,26 @@ export default {
           const { gatewayNotFound } = await import("./hub/gateway");
           return gatewayNotFound(url.pathname);
         }
+      }
+
+      // ── the repo banner as a plain, fetchable image ──────────────────────
+      // Telegram's inline photo results need a real image URL, and its
+      // fetcher refuses the OpenGraph CDN itself. Our worker fetches the
+      // white banner fine (the showcase proved it), so it doubles as the
+      // image proxy — and a broken banner falls back to the owner's avatar.
+      if (/^\/og\/[\w.-]+\/[\w.-]+\.png$/.test(url.pathname)) {
+        const key = url.pathname.slice(4, -4);          // owner/repo
+        const [owner] = key.split("/");
+        const img = await fetch(`https://opengraph.githubassets.com/1/${key}`, {
+          headers: { accept: "image/png,image/*", "user-agent": "GitHubLensUltra/1.0" },
+        }).catch(() => null);
+        if (img?.ok) {
+          const buf = await img.arrayBuffer().catch(() => null);
+          if (buf && buf.byteLength > 1000) {
+            return new Response(buf, { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+          }
+        }
+        return Response.redirect(`https://github.com/${owner}.png`, 302);
       }
 
       if (url.pathname.startsWith("/api/")) {
@@ -2427,14 +2447,22 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     const board = await new TrendingEngine(env).rank("daily", "all", 4).catch(() => []);
     /* the board rows speak their own shape (stars, owner_avatar, url) —
      * repoArticle speaks the GitHub search shape. Translate, don't trust. */
-    const results: any[] = board.map((r: any) => repoArticle({
+    const hot: any[] = board.map((r: any) => ({
       full_name: r.full_name, html_url: r.url, description: r.description, language: r.language,
       stargazers_count: r.stars, forks_count: r.forks, pushed_at: r.pushed_at, created_at: r.created_at,
       topics: r.topics, license: r.license ? { spdx_id: r.license } : null,
       owner: { avatar_url: r.owner_avatar },
-    }, fa, r.gained));
-    results.push(helpArticle(fa));
-    return answer(results, 300, results.length > 1 ? hotButton : undefined);
+    }));
+    const tail = [helpArticle(fa)];
+    if (!hot.length) return answer(tail, 300);
+    /* the same photo-first bargain as a search: banners if Telegram will
+     * fetch them, the graded text cards if it will not */
+    const ogBase = env.WORKER_URL ?? "";
+    const r = await answer([...hot.map((m: any) => repoPhotoArticle(m, fa, ogBase)), ...tail], 300, hotButton);
+    if (!r?.ok) {
+      return answer([...hot.map((m: any, i: number) => repoArticle(m, fa, hot[i].gained)), ...tail], 300, hotButton);
+    }
+    return r;
   }
 
   // ── @username → the maker himself ───────────────────────────────────────
@@ -2447,28 +2475,37 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     }
   }
 
-  const results: any[] = [];
+  const repos: any[] = [];
 
   // direct repo hit — the exact thing, first
   if (/^[\w.-]+\/[\w.-]+$/.test(query)) {
     const m = await gh.repo(query, 600).catch(() => null);
-    if (m) results.push(repoArticle(m, fa));
+    if (m) repos.push(m);
   }
 
   // topic search — the best of the month, graded
-  if (results.length < 8) {
+  if (repos.length < 8) {
     const res = await gh.searchRepos(query, "stars", "desc", 10).catch(() => null);
     for (const r of res?.items ?? []) {
-      if (results.some((x) => x.id === `repo:${r.full_name}`)) continue;
-      results.push(repoArticle(r, fa));
+      if (repos.some((x) => x.full_name === r.full_name)) continue;
+      repos.push(r);
     }
   }
 
   // a miss still owes a next step
-  if (!results.length) results.push(notFoundArticle(fa, query.slice(0, 40)));
-  results.push(trendingArticle(fa));
+  const tail: any[] = repos.length ? [] : [notFoundArticle(fa, query.slice(0, 40))];
+  tail.push(trendingArticle(fa));
 
-  return answer(results.slice(0, 20), 60, hotButton);
+  /* the photo card first — the white banner with a brief description in
+   * its caption; if Telegram refuses to fetch the banners, the same
+   * cards go out as articles, so the panel never spins on a photo. */
+  const ogBase = env.WORKER_URL ?? "";
+  const r = await answer(
+    [...repos.slice(0, 19).map((m: any) => repoPhotoArticle(m, fa, ogBase)), ...tail], 60, hotButton);
+  if (!r?.ok) {
+    return answer([...repos.slice(0, 19).map((m: any) => repoArticle(m, fa)), ...tail], 60, hotButton);
+  }
+  return r;
 }
 
 // ── misc ───────────────────────────────────────────────────────────────────

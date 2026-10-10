@@ -1259,6 +1259,18 @@ const enc = (s) => new TextEncoder().encode(s);
     ok("inline: a repo card carries the grade and the heat",
        card.title.includes("oven-sh/bun") && card.title.includes("🥇") &&
        card.description.includes("🔥 +۱۲۰ امروز") && card.description.includes("82.5k"));
+    // the photo card: the banner via our /og/ proxy, a brief description in the caption
+    const photo = IN.repoPhotoArticle(hotRepo, true, "https://ghlens-ultra.gitguts.workers.dev/");
+    const photoKeys = photo.reply_markup.inline_keyboard.flat();
+    ok("inline: the photo card points at our og proxy",
+       photo.type === "photo" && photo.photo_url === "https://ghlens-ultra.gitguts.workers.dev/og/oven-sh/bun.png" &&
+       photo.photo_width === 1200 && photo.photo_height === 600);
+    ok("inline: the photo caption is the brief description with the grade",
+       photo.caption.includes("oven-sh/bun") && photo.caption.includes("🥇") &&
+       photo.caption.includes("Incredibly fast") && photo.caption.includes("۸۲,۵۰۰") && photo.caption.length < 500);
+    ok("inline: the photo card carries the same four doors",
+       photoKeys.length === 4 && photoKeys.every((k) => !!k.url) &&
+       photoKeys.some((k) => k.url.endsWith("start=c_oven-sh_bun")));
     ok("inline: the card's message packs stars, forks, language and freshness",
        card.input_message_content.message_text.includes("۸۲,۵۰۰") &&
        card.input_message_content.message_text.includes("Zig") &&
