@@ -86,22 +86,22 @@ export function repoArticle(r: InlineRepo, fa: boolean, gained?: number): any {
       inline_keyboard: fa
         ? [
             [
-              { text: "🛰 کاوش عمیق", url: deepLink("s", r.full_name) },
-              { text: "🧠 تحلیل هوشمند", url: deepLink("c", r.full_name) },
+              { text: "کاوش عمیق 🛰", url: deepLink("s", r.full_name) },
+              { text: "تحلیل هوشمند 🧠", url: deepLink("c", r.full_name) },
             ],
             [
-              { text: "🌍 ترجمهٔ فارسی", url: deepLink("t", r.full_name) },
-              { text: "🌐 گیت‌هاب", url },
+              { text: "ترجمهٔ فارسی 🌍", url: deepLink("t", r.full_name) },
+              { text: "گیت‌هاب 🌐", url },
             ],
           ]
         : [
             [
-              { text: "🛰 Deep dive", url: deepLink("s", r.full_name) },
-              { text: "🧠 AI analysis", url: deepLink("c", r.full_name) },
+              { text: "Deep dive 🛰", url: deepLink("s", r.full_name) },
+              { text: "AI analysis 🧠", url: deepLink("c", r.full_name) },
             ],
             [
-              { text: "🌍 Translate", url: deepLink("t", r.full_name) },
-              { text: "🌐 GitHub", url },
+              { text: "Translate 🌍", url: deepLink("t", r.full_name) },
+              { text: "GitHub 🌐", url },
             ],
           ],
     },
@@ -135,7 +135,7 @@ export function userArticle(
     },
     reply_markup: {
       inline_keyboard: [[
-        { text: fa ? "🌐 پروفایل گیت‌هاب" : "🌐 GitHub profile", url },
+        { text: fa ? "پروفایل گیت‌هاب 🌐" : "GitHub profile 🌐", url },
       ]],
     },
   };
@@ -199,7 +199,7 @@ export function trendingArticle(fa: boolean): any {
     },
     reply_markup: {
       inline_keyboard: [[
-        { text: fa ? "🔥 بردار کامل در ربات" : "🔥 Full board in the bot", url: "https://t.me/Gitguts_bot?start=trending" },
+        { text: fa ? "بردار کامل در ربات 🔥" : "Full board in the bot 🔥", url: "https://t.me/Gitguts_bot?start=trending" },
       ]],
     },
   };

@@ -2413,6 +2413,14 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
   const query = q.query.trim();
   const gh = new GithubRest(env);
   const hotButton = { text: fa ? "🔥 داغ‌ترین‌های امروز" : "🔥 Today's trending", start: "trending" };
+  /* answerInlineQuery's answer is Telegram's verdict on the whole payload —
+   * a 400 here means the panel spins forever, and it used to die in
+   * silence. Say it, so the tail can see it. */
+  const answer = async (results: any[], cache = 60, button?: any) => {
+    const r: any = await tg.answerInlineQuery(q.id, results, cache, "", button);
+    if (!r?.ok) console.error("inline-answer-rejected", JSON.stringify({ query: query.slice(0, 40), n: results.length, code: r?.error_code, why: r?.description }));
+    return r;
+  };
 
   // ── idle panel: the day's hottest four, live — not a dead end ──────────
   if (query.length < 2) {
@@ -2426,7 +2434,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
       owner: { avatar_url: r.owner_avatar },
     }, fa, r.gained));
     results.push(helpArticle(fa));
-    return tg.answerInlineQuery(q.id, results, 300, "", results.length > 1 ? hotButton : undefined);
+    return answer(results, 300, results.length > 1 ? hotButton : undefined);
   }
 
   // ── @username → the maker himself ───────────────────────────────────────
@@ -2435,8 +2443,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
     const u: any = await gh.get(`/users/${encodeURIComponent(login)}`, 900).catch(() => null);
     if (u?.login) {
       const top = await gh.get(`/users/${encodeURIComponent(login)}/repos?sort=stars&per_page=3`, 900).catch(() => []);
-      return tg.answerInlineQuery(q.id,
-        [userArticle(u, Array.isArray(top) ? top : [], fa), trendingArticle(fa)], 120, "", hotButton);
+      return answer([userArticle(u, Array.isArray(top) ? top : [], fa), trendingArticle(fa)], 120, hotButton);
     }
   }
 
@@ -2461,7 +2468,7 @@ async function routeInline(q: InlineQuery, env: Env, ctx: Ctx, tg: Telegram, sto
   if (!results.length) results.push(notFoundArticle(fa, query.slice(0, 40)));
   results.push(trendingArticle(fa));
 
-  return tg.answerInlineQuery(q.id, results.slice(0, 20), 60, "", hotButton);
+  return answer(results.slice(0, 20), 60, hotButton);
 }
 
 // ── misc ───────────────────────────────────────────────────────────────────
